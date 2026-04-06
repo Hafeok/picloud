@@ -20,3 +20,7 @@ tower-http = { workspace = true }
 hyper      = { workspace = true }
 reqwest    = { workspace = true }
 uuid       = { workspace = true }
+futures    = { workspace = true }
+
+[dev-dependencies]
+http       = "1"

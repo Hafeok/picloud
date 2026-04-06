@@ -22,6 +22,7 @@ picloud-storage  = { workspace = true }
 picloud-workload = { workspace = true }
 picloud-network  = { workspace = true }
 picloud-http     = { workspace = true }
+picloud-sdk-gen  = { workspace = true }
 
 tokio              = { workspace = true }
 tracing            = { workspace = true }

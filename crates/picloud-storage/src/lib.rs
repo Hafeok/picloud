@@ -1,9 +1,12 @@
 //! picloud-storage
 //!
-//! Implements the domain traits from picloud-domain.
+//! Implements the StorageBackend trait from picloud-domain.
 //! Depends only on picloud-domain — never on other slices.
 //! Slices communicate at runtime via the event log.
-
-use picloud_domain::error::Result;
+//!
+//! Phase 1 ships with `LocalStorageBackend`, which uses local filesystem
+//! directories to simulate NVMe block storage.
 
 pub mod implementation;
+
+pub use implementation::LocalStorageBackend;

@@ -20,3 +20,4 @@ webpki-roots = { workspace = true }
 x509-parser  = { workspace = true }
 mdns-sd      = { workspace = true }
 uuid         = { workspace = true }
+chrono       = { workspace = true }
