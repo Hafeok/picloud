@@ -1,0 +1,37 @@
+# deploy/ssh-config.example
+#
+# Copy the relevant entries to ~/.ssh/config and fill in your Pi IP addresses.
+# This enables password-less, short-name SSH to all nodes.
+#
+# One-time setup:
+#   ssh-copy-id ubuntu@<each-pi-ip>
+
+Host pi-01
+  HostName 192.168.1.101
+  User ubuntu
+  IdentityFile ~/.ssh/id_ed25519
+  ServerAliveInterval 30
+
+Host pi-02
+  HostName 192.168.1.102
+  User ubuntu
+  IdentityFile ~/.ssh/id_ed25519
+  ServerAliveInterval 30
+
+Host pi-03
+  HostName 192.168.1.103
+  User ubuntu
+  IdentityFile ~/.ssh/id_ed25519
+  ServerAliveInterval 30
+
+Host pi-04
+  HostName 192.168.1.104
+  User ubuntu
+  IdentityFile ~/.ssh/id_ed25519
+  ServerAliveInterval 30
+
+Host pi-05
+  HostName 192.168.1.105
+  User ubuntu
+  IdentityFile ~/.ssh/id_ed25519
+  ServerAliveInterval 30

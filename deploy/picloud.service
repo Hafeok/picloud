@@ -1,0 +1,45 @@
+[Unit]
+Description=PiCloud Server
+Documentation=https://github.com/picloud/picloud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+
+ExecStart=/home/ubuntu/picloud/picloud-server
+
+# Restart policy — always restart on failure, back off on repeated failures
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=picloud
+
+# Environment
+Environment=RUST_LOG=picloud=info,warn
+Environment=PICLOUD_DOMAIN=picloud.local
+Environment=PICLOUD_DATA_DIR=/home/ubuntu/picloud/data
+Environment=PICLOUD_HTTP_PORT=7000
+Environment=PICLOUD_RAFT_PORT=7001
+Environment=PICLOUD_EVENTS_PORT=7002
+
+# Resource limits — leave headroom for Nomad workloads
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/picloud/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

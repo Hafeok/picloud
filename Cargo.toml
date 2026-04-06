@@ -1,0 +1,100 @@
+[workspace]
+members = [
+    "crates/picloud-domain",
+    "crates/picloud-cluster",
+    "crates/picloud-events",
+    "crates/picloud-rdf",
+    "crates/picloud-iam",
+    "crates/picloud-storage",
+    "crates/picloud-workload",
+    "crates/picloud-network",
+    "crates/picloud-http",
+    "crates/picloud-sdk-gen",
+    "crates/picloud-cli",
+    "src",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["PiCloud Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/picloud/picloud"
+
+# Shared dependencies — all crates pull from here to keep versions aligned
+[workspace.dependencies]
+
+# Domain — no heavy deps, pure types and traits
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+uuid         = { version = "1", features = ["v4", "serde"] }
+thiserror    = "1"
+chrono       = { version = "0.4", features = ["serde"] }
+url          = { version = "2", features = ["serde"] }
+
+# Async runtime
+tokio        = { version = "1", features = ["full"] }
+async-trait  = "0.1"
+futures      = "0.3"
+
+# Raft consensus
+openraft     = { version = "0.9", features = ["serde"] }
+
+# RDF / SPARQL
+oxigraph     = "0.4"
+sophia_api   = "0.8"
+
+# HTTP server + client
+axum         = { version = "0.7", features = ["macros"] }
+tower        = "0.4"
+tower-http   = { version = "0.5", features = ["trace", "cors", "auth"] }
+reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+hyper        = { version = "1", features = ["full"] }
+
+# TLS / PKI
+rustls       = "0.23"
+rcgen        = "0.13"
+webpki-roots = "0.26"
+x509-parser  = "0.16"
+
+# mDNS
+mdns-sd      = "0.11"
+
+# OCI / containers
+oci-spec     = "0.7"
+
+# Cryptography
+ring         = "0.17"
+base64       = "0.22"
+sha2         = "0.10"
+rand         = "0.8"
+
+# Observability
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI
+clap         = { version = "4", features = ["derive", "env"] }
+
+# Storage
+bytes        = "1"
+
+# Internal crates
+picloud-domain   = { path = "crates/picloud-domain" }
+picloud-cluster  = { path = "crates/picloud-cluster" }
+picloud-events   = { path = "crates/picloud-events" }
+picloud-rdf      = { path = "crates/picloud-rdf" }
+picloud-iam      = { path = "crates/picloud-iam" }
+picloud-storage  = { path = "crates/picloud-storage" }
+picloud-workload = { path = "crates/picloud-workload" }
+picloud-network  = { path = "crates/picloud-network" }
+picloud-http     = { path = "crates/picloud-http" }
+picloud-sdk-gen  = { path = "crates/picloud-sdk-gen" }
+picloud-cli      = { path = "crates/picloud-cli" }
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true    # minimise binary size on Pi

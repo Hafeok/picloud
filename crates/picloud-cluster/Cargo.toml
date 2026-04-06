@@ -1,0 +1,19 @@
+[package]
+name        = "picloud-cluster"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+repository.workspace = true
+
+[dependencies]
+picloud-domain = { workspace = true }
+tokio          = { workspace = true }
+async-trait    = { workspace = true }
+tracing        = { workspace = true }
+thiserror      = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+openraft = { workspace = true }
+mdns-sd  = { workspace = true }
+uuid     = { workspace = true }

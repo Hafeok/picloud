@@ -1,0 +1,30 @@
+[package]
+name        = "picloud"
+description = "PiCloud server — runs on every node"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+repository.workspace = true
+
+[[bin]]
+name = "picloud-server"
+path = "main.rs"
+
+[dependencies]
+# The composition root imports all slices
+picloud-domain   = { workspace = true }
+picloud-cluster  = { workspace = true }
+picloud-events   = { workspace = true }
+picloud-rdf      = { workspace = true }
+picloud-iam      = { workspace = true }
+picloud-storage  = { workspace = true }
+picloud-workload = { workspace = true }
+picloud-network  = { workspace = true }
+picloud-http     = { workspace = true }
+
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde              = { workspace = true }
+uuid               = { workspace = true }

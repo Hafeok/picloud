@@ -1,0 +1,219 @@
+# PiCloud — Claude Code Context
+
+> Read this file before touching any code.
+> Read the ADRs before making any architectural decision.
+> Read the PRD before adding any new capability.
+
+---
+
+## What is PiCloud?
+
+PiCloud is a single Rust binary that turns a cluster of Raspberry Pi 5 nodes into a private cloud. One binary runs on every node. Nodes discover each other via mDNS, form a Raft cluster, and present a unified platform for running workloads with distributed storage, IAM, and event sourcing — with no external dependencies.
+
+The platform is built on three foundational ideas:
+1. **The event log is the source of truth.** State is never written directly — it flows through an append-only, Raft-replicated event log.
+2. **The RDF graph is the read model.** Oxigraph is a continuously maintained projection of the event log. All state reads are SPARQL queries.
+3. **Every resource has a dereferenceable IRI.** `https://picloud.local/products/photo-app/containers/api-server` is both the identifier and the HTTP address of that resource.
+
+---
+
+## Repository Layout
+
+```
+picloud/
+├── CLAUDE.md                   ← you are here
+├── Cargo.toml                  ← workspace root
+├── docs/
+│   ├── picloud-prd.md          ← full product requirements
+│   └── picloud-adrs.md         ← all architectural decisions (33 ADRs)
+├── crates/
+│   ├── picloud-domain/         ← STABLE FOUNDATION — read this first
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── error.rs        ← all error types
+│   │       ├── iri.rs          ← IRI model and builder
+│   │       ├── events.rs       ← platform event types and envelope
+│   │       ├── resources.rs    ← all resource types
+│   │       ├── identity.rs     ← IAM types (passkeys, workload identity)
+│   │       ├── storage.rs      ← storage intent types
+│   │       ├── workload.rs     ← container and binary specs
+│   │       ├── product.rs      ← product and upgrade types
+│   │       └── traits.rs       ← abstractions each slice implements
+│   │
+│   ├── picloud-cluster/        ← mDNS discovery, Raft, node membership
+│   ├── picloud-events/         ← event log, product event stores
+│   ├── picloud-rdf/            ← Oxigraph projection engine, SPARQL
+│   ├── picloud-iam/            ← OIDC provider, WebAuthn, workload certs
+│   ├── picloud-storage/        ← block storage pool, volume allocation
+│   ├── picloud-workload/       ← OCI containers (youki), binary scheduler
+│   ├── picloud-network/        ← DNS, ingress, mTLS, certificate issuance
+│   ├── picloud-http/           ← HTTP server, IRI routing, content negotiation
+│   ├── picloud-sdk-gen/        ← SDK generator (Rust, TypeScript, .NET)
+│   └── picloud-cli/            ← CLI binary (`picloud`)
+└── src/
+    └── main.rs                 ← server binary composition root (`picloud-server`)
+```
+
+---
+
+## The Dependency Rule — Never Break This
+
+```
+picloud-domain   ← no dependencies on other picloud crates
+all slices       → picloud-domain ONLY
+picloud-server   → all slices (composition root only)
+picloud-cli      → picloud-domain ONLY (talks to cluster via HTTP)
+```
+
+**Slices never import each other.** They communicate at runtime via the event log.
+If you find yourself importing `picloud-iam` from `picloud-workload`, stop — find the domain trait in `picloud-domain::traits` and use that instead.
+
+---
+
+## Where to Make Changes
+
+| What you're building | Crate to touch |
+|---|---|
+| New resource type | `picloud-domain/src/resources.rs` + new event payloads in `events.rs` |
+| New platform event | `picloud-domain/src/events.rs` |
+| New domain trait | `picloud-domain/src/traits.rs` |
+| Raft / node discovery | `picloud-cluster` |
+| Event log storage | `picloud-events` |
+| RDF projection / SPARQL | `picloud-rdf` |
+| Passkeys / OIDC / tokens | `picloud-iam` |
+| Block storage / volumes | `picloud-storage` |
+| Container / binary scheduling | `picloud-workload` |
+| DNS / TLS / ingress | `picloud-network` |
+| HTTP endpoints / IRI routing | `picloud-http` |
+| SDK generation | `picloud-sdk-gen` |
+| CLI commands | `picloud-cli` |
+| Wiring slices together | `src/main.rs` ONLY |
+
+---
+
+## Key Architectural Patterns
+
+### Every operation is an event
+
+```
+CLI → POST /api/commands (EventEnvelope)
+    → Raft leader appends to log
+    → RDF projector updates Oxigraph
+    → CLI subscribes to SSE stream, filtered by correlation_id
+    → Terminal event (ResourceReady / ResourceFailed) ends the operation
+```
+
+### Every resource has an IRI
+
+Use `IriBuilder` from `picloud-domain::iri` to construct all IRIs:
+```rust
+let iri_builder = IriBuilder::new(ClusterDomain::default());
+let container_iri = iri_builder.resource("photo-app", "containers", "api-server");
+// → https://picloud.local/products/photo-app/containers/api-server
+```
+
+Never construct IRI strings manually.
+
+### Every event carries a schema IRI
+
+```rust
+EventEnvelope::new(
+    iri_builder.event_schema("ResourceReady", 1),
+    "ResourceReady",
+    source_iri,
+    Some("photo-app".to_string()),
+    correlation_id,
+    serde_json::to_value(&payload)?,
+)
+```
+
+### Slices implement domain traits
+
+```rust
+// In picloud-workload:
+use picloud_domain::traits::WorkloadScheduler;
+
+pub struct YoukiScheduler { ... }
+
+#[async_trait]
+impl WorkloadScheduler for YoukiScheduler {
+    async fn schedule(&self, workload_iri: &ResourceIri, spec: &WorkloadSpec) -> Result<WorkloadHandle> {
+        // implementation
+    }
+}
+```
+
+### The composition root wires everything
+
+In `src/main.rs`, all slice implementations are instantiated and injected:
+```rust
+let scheduler: Arc<dyn WorkloadScheduler> = Arc::new(YoukiScheduler::new(...));
+let storage: Arc<dyn StorageBackend> = Arc::new(NvmeStorageBackend::new(...));
+// etc.
+```
+
+---
+
+## Error Handling
+
+All errors use `picloud_domain::error::PiCloudError` and `picloud_domain::error::Result<T>`.
+Add new error variants to `PiCloudError` in `picloud-domain/src/error.rs` — never define crate-local error types.
+
+---
+
+## IAM Rules (Important)
+
+- Human users authenticate via passkeys/FIDO2 only — no passwords anywhere (ADR-025)
+- Admin accounts must have ≥ 2 passkeys registered — enforce this in `picloud-iam`
+- Workload identity credentials are injected by the platform — workloads never handle certificate generation
+- Every HTTP endpoint validates the caller's token before any business logic
+
+---
+
+## Product Isolation Rules (Important)
+
+Products are hermetically sealed (ADR-016, ADR-018, ADR-028):
+- Products never share resources
+- Products never call each other's HTTP endpoints directly
+- Inter-product communication is exclusively via the platform event bus and SPARQL queries
+- When implementing any feature that touches multiple products, route through events
+
+---
+
+## Before Making an Architectural Decision
+
+1. Read `docs/picloud-adrs.md` — the decision may already be made
+2. If not covered, create a new ADR at the end of that file before writing code
+3. ADRs follow the format: Status, Context, Decision, Rationale, Rejected Alternatives, Consequences
+
+---
+
+## Build and Test
+
+```bash
+# Build everything
+cargo build --workspace
+
+# Build for ARM64 (Pi5 target)
+cargo build --workspace --target aarch64-unknown-linux-gnu --release
+
+# Test a specific slice
+cargo test -p picloud-domain
+cargo test -p picloud-events
+
+# Check without building
+cargo check --workspace
+```
+
+---
+
+## Phase Plan Summary
+
+| Phase | Focus | Key deliverables |
+|---|---|---|
+| 1 (MVP) | Cluster + IAM + Storage + Workloads | Nodes form cluster, container runs, volume mounts |
+| 2 | Products + OIDC + Secrets | Full product lifecycle, passkey login works |
+| 3 | RDF + Event Store + SDKs | Per-product SPARQL, event sourcing, SDKs published |
+| 4 | Operational maturity | Storage tiers, log compaction, node drain |
+
+**Start here:** `picloud-cluster` — get two nodes forming a cluster via mDNS and Raft.

@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+Cargo.lock
+.env
+.env.*
+*.pem
+*.key
+*.crt
+.DS_Store
