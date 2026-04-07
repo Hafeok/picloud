@@ -5,5 +5,7 @@
 //! Slices communicate at runtime via the event log.
 
 pub mod implementation;
+pub mod provisioner;
 
 pub use implementation::{ContentType, PiCloudHttpServer, resource_response};
+pub use provisioner::Provisioner;

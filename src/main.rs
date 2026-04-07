@@ -26,7 +26,7 @@ use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
 use picloud_workload::ProcessScheduler;
-use picloud_http::PiCloudHttpServer;
+use picloud_http::{PiCloudHttpServer, Provisioner};
 
 /// Server configuration, loaded from env or defaults
 struct ServerConfig {
@@ -230,7 +230,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("NodeJoined event emitted");
     }
 
-    // 11. Start HTTP server
+    // 11. Start resource provisioner (background task)
+    {
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let provisioner = Provisioner::new(
+            event_log_trait.clone(),
+            storage.clone(),
+            scheduler.clone(),
+            iri_builder,
+        );
+        provisioner
+            .start()
+            .await
+            .expect("failed to start resource provisioner");
+        info!("Resource provisioner started");
+    }
+
+    // 12. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
     let http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
         .with_dependencies(

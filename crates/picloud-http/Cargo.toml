@@ -24,4 +24,7 @@ futures    = { workspace = true }
 async-stream = "0.3"
 
 [dev-dependencies]
-http       = "1"
+http             = "1"
+picloud-events   = { workspace = true }
+picloud-rdf      = { workspace = true }
+async-trait      = { workspace = true }
