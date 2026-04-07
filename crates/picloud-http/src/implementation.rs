@@ -169,9 +169,18 @@ impl PiCloudHttpServer {
             )
             .route("/products/:name/graph", get(handle_graph))
             .route("/products/:name/events", get(handle_events))
+            .route("/products/:name/ontology", get(handle_ontology))
+            .route(
+                "/products/:name/schemas/events/:event_type/v:version",
+                get(handle_product_event_schema),
+            )
             .route("/api/commands", post(handle_command))
             .route("/api/apply", post(handle_apply))
             .route("/api/delete", post(handle_delete))
+            .route(
+                "/schemas/events/:event_type/v:version",
+                get(handle_event_schema),
+            )
             .route("/graph", get(handle_cluster_graph))
             .route(
                 "/.well-known/openid-configuration",
@@ -891,6 +900,163 @@ async fn handle_delete(
     }
 }
 
+/// Return a JSON Schema document describing a platform event payload.
+/// Route: GET /schemas/events/:event_type/v:version
+async fn handle_event_schema(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((event_type, version)): Path<(String, String)>,
+) -> Response {
+    let ct = content_type_from_headers(&headers);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+
+    let ver: u32 = match version.parse() {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "version must be a positive integer" })),
+            )
+                .into_response();
+        }
+    };
+
+    let schema_iri = iri_builder.event_schema(&event_type, ver);
+
+    resource_response(
+        serde_json::json!({
+            "$id": schema_iri.as_str(),
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": event_type,
+            "description": format!("Schema for {} event (version {})", event_type, ver),
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "schema": { "type": "string", "format": "iri" },
+                "event_type": { "type": "string", "const": event_type },
+                "timestamp": { "type": "string", "format": "date-time" },
+                "source": { "type": "string", "format": "iri" },
+                "product": { "type": ["string", "null"] },
+                "correlation_id": { "type": "string", "format": "uuid" },
+                "idempotency_key": { "type": ["string", "null"] },
+                "payload": { "type": "object" }
+            },
+            "required": ["id", "schema", "event_type", "timestamp", "source", "correlation_id", "payload"],
+        }),
+        ct,
+    )
+}
+
+/// Return a JSON Schema document for a product-specific event.
+/// Route: GET /products/:name/schemas/events/:event_type/v:version
+async fn handle_product_event_schema(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((product, event_type, version)): Path<(String, String, String)>,
+) -> Response {
+    let ct = content_type_from_headers(&headers);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+
+    let ver: u32 = match version.parse() {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "version must be a positive integer" })),
+            )
+                .into_response();
+        }
+    };
+
+    let schema_iri = iri_builder.product_event_schema(&product, &event_type, ver);
+    let product_iri = iri_builder.product(&product);
+
+    resource_response(
+        serde_json::json!({
+            "$id": schema_iri.as_str(),
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": format!("{}/{}", product, event_type),
+            "description": format!("Schema for {} event in product {} (version {})", event_type, product, ver),
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "schema": { "type": "string", "format": "iri" },
+                "event_type": { "type": "string", "const": event_type },
+                "timestamp": { "type": "string", "format": "date-time" },
+                "source": { "type": "string", "format": "iri" },
+                "product": { "type": "string", "const": product },
+                "correlation_id": { "type": "string", "format": "uuid" },
+                "idempotency_key": { "type": ["string", "null"] },
+                "payload": { "type": "object" }
+            },
+            "required": ["id", "schema", "event_type", "timestamp", "source", "product", "correlation_id", "payload"],
+            "x-picloud-product": product_iri.as_str(),
+        }),
+        ct,
+    )
+}
+
+/// Serve a product's ontology (Turtle format).
+/// Route: GET /products/:name/ontology
+async fn handle_ontology(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let ontology_iri = iri_builder.product_ontology(&name);
+
+    // Try to look up the ontology resource from the RDF graph
+    if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?format ?content WHERE {{ <{}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://picloud.local/ontology#Resource> . <{}> <https://picloud.local/ontology#resourceType> \"Ontology\" . OPTIONAL {{ <{}> <https://picloud.local/ontology#format> ?format }} . OPTIONAL {{ <{}> <https://picloud.local/ontology#content> ?content }} }}",
+            ontology_iri.as_str(), ontology_iri.as_str(), ontology_iri.as_str(), ontology_iri.as_str()
+        );
+        if let Ok(result) = projector.query(&sparql).await {
+            if let Some(row) = result.bindings.first() {
+                let content = row
+                    .get("content")
+                    .and_then(|v| v.get("value"))
+                    .and_then(|v| v.as_str());
+                if let Some(turtle_content) = content {
+                    // Serve raw Turtle if client accepts it, otherwise wrap in JSON
+                    if ct == ContentType::Turtle {
+                        return (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "text/turtle")],
+                            turtle_content.to_string(),
+                        )
+                            .into_response();
+                    }
+                    return resource_response(
+                        serde_json::json!({
+                            "@id": ontology_iri.as_str(),
+                            "type": "Ontology",
+                            "product": name,
+                            "format": "turtle",
+                            "content": turtle_content,
+                        }),
+                        ct,
+                    );
+                }
+            }
+        }
+    }
+
+    // Ontology not yet loaded or projector unavailable — return metadata stub
+    resource_response(
+        serde_json::json!({
+            "@id": ontology_iri.as_str(),
+            "type": "Ontology",
+            "product": name,
+            "status": "not_loaded",
+            "hint": "Declare an Ontology resource in your .picloud file to serve it here",
+        }),
+        ct,
+    )
+}
+
 /// Handle SPARQL query against the cluster-level graph (not product-scoped).
 async fn handle_cluster_graph(
     headers: HeaderMap,
@@ -1286,5 +1452,140 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "authentication_required");
         assert_eq!(json["method"], "passkey");
+    }
+
+    // -- Phase 3: Schema IRI serving tests --
+
+    #[tokio::test]
+    async fn event_schema_returns_json_schema() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/schemas/events/ResourceReady/v1")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["$id"],
+            "https://picloud.local/schemas/events/ResourceReady/v1"
+        );
+        assert_eq!(json["title"], "ResourceReady");
+        assert_eq!(json["type"], "object");
+        assert!(json["properties"]["event_type"].is_object());
+    }
+
+    #[tokio::test]
+    async fn event_schema_invalid_version_returns_400() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/schemas/events/ResourceReady/vabc")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn product_event_schema_returns_json_schema() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/products/photo-app/schemas/events/OrderPlaced/v2")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["$id"],
+            "https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v2"
+        );
+        assert_eq!(json["title"], "photo-app/OrderPlaced");
+        assert_eq!(
+            json["x-picloud-product"],
+            "https://picloud.local/products/photo-app"
+        );
+    }
+
+    #[tokio::test]
+    async fn product_event_schema_invalid_version_returns_400() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/products/photo-app/schemas/events/OrderPlaced/vxyz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // -- Phase 3: Ontology serving tests --
+
+    #[tokio::test]
+    async fn ontology_returns_stub_without_projector() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/products/photo-app/ontology")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["@id"],
+            "https://picloud.local/products/photo-app/ontology"
+        );
+        assert_eq!(json["type"], "Ontology");
+        assert_eq!(json["product"], "photo-app");
+        assert_eq!(json["status"], "not_loaded");
+    }
+
+    // -- Phase 3: Cluster graph endpoint tests --
+
+    #[tokio::test]
+    async fn cluster_graph_returns_hint_without_query() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/graph")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["type"], "SparqlEndpoint");
+        assert!(json["hint"].as_str().unwrap().contains("SPARQL"));
+    }
+
+    #[tokio::test]
+    async fn cluster_graph_returns_error_without_projector() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["type"], "SparqlEndpoint");
+        assert_eq!(json["error"], "projector not available");
     }
 }

@@ -116,6 +116,18 @@ impl IriBuilder {
         ))
     }
 
+    pub fn product_event_schema(
+        &self,
+        product_name: &str,
+        event_type: &str,
+        version: u32,
+    ) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/schemas/events/{}/v{}",
+            self.domain.0, product_name, event_type, version
+        ))
+    }
+
     pub fn aggregate_stream(
         &self,
         product_name: &str,
@@ -194,6 +206,15 @@ mod tests {
         assert_eq!(
             iri.as_str(),
             "https://picloud.local/schemas/events/ResourceReady/v1"
+        );
+    }
+
+    #[test]
+    fn product_event_schema_iri() {
+        let iri = builder().product_event_schema("photo-app", "OrderPlaced", 2);
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v2"
         );
     }
 
