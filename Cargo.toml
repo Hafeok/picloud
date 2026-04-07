@@ -47,7 +47,7 @@ sophia_api   = "0.8"
 
 # HTTP server + client
 axum         = { version = "0.7", features = ["macros"] }
-tower        = "0.4"
+tower        = { version = "0.4", features = ["util"] }
 tower-http   = { version = "0.5", features = ["trace", "cors", "auth"] }
 reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 hyper        = { version = "1", features = ["full"] }

@@ -1,9 +1,9 @@
 //! picloud-sdk-gen
 //!
-//! Implements the domain traits from picloud-domain.
+//! Template-based SDK generation for Rust, TypeScript, and .NET clients.
 //! Depends only on picloud-domain — never on other slices.
 //! Slices communicate at runtime via the event log.
 
-use picloud_domain::error::Result;
-
 pub mod implementation;
+
+pub use implementation::{SdkGenerator, SdkGenerationResult, SdkLanguage};

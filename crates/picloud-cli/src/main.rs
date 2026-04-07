@@ -5,6 +5,9 @@
 /// The CLI never imports slice internals — it only talks HTTP to the cluster.
 
 use clap::{Parser, Subcommand};
+use serde_json::json;
+use tracing::{error, info};
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(
@@ -166,15 +169,318 @@ enum SdkCommands {
     },
 }
 
+/// HTTP client for communicating with the PiCloud cluster
+struct ClusterClient {
+    base_url: String,
+    token: Option<String>,
+    client: reqwest::Client,
+}
+
+impl ClusterClient {
+    fn new(domain: &str, token: Option<String>) -> Self {
+        Self {
+            base_url: format!("https://{}", domain),
+            token,
+            client: reqwest::Client::builder()
+                .danger_accept_invalid_certs(true) // platform CA not yet in trust store
+                .build()
+                .expect("failed to create HTTP client"),
+        }
+    }
+
+    async fn post_command(
+        &self,
+        command_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let correlation_id = Uuid::new_v4();
+        let body = json!({
+            "command_type": command_type,
+            "correlation_id": correlation_id.to_string(),
+            "payload": payload,
+        });
+
+        info!(
+            command_type = command_type,
+            correlation_id = %correlation_id,
+            "Submitting command"
+        );
+
+        let mut request = self
+            .client
+            .post(format!("{}/api/commands", self.base_url))
+            .json(&body);
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.json::<serde_json::Value>().await?;
+
+        if status.is_success() {
+            println!("-> Command accepted (correlation_id: {})", correlation_id);
+            Ok(body)
+        } else {
+            error!(status = %status, "Command failed");
+            Err(format!("Command failed with status {}: {}", status, body).into())
+        }
+    }
+
+    async fn get(&self, path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let mut request = self
+            .client
+            .get(format!("{}{}", self.base_url, path))
+            .header("Accept", "application/json");
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let body = response.json::<serde_json::Value>().await?;
+        Ok(body)
+    }
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("picloud=info".parse()?),
+        )
+        .init();
+
     let cli = Cli::parse();
+    let client = ClusterClient::new(&cli.domain, cli.token);
 
-    // TODO: wire command handlers
-    // Each command emits an event to https://{domain}/api/commands
-    // and subscribes to the result stream via SSE
+    match cli.command {
+        Commands::Cluster { command } => match command {
+            ClusterCommands::Init { domain, ca_cert } => {
+                println!("Initializing cluster on domain: {}", domain);
+                let payload = json!({
+                    "domain": domain,
+                    "ca_cert": ca_cert,
+                });
+                match client.post_command("ClusterInit", payload).await {
+                    Ok(_) => println!("Cluster initialized successfully"),
+                    Err(e) => {
+                        // In bootstrap mode, the cluster may not be reachable yet
+                        println!("Note: cluster not yet reachable ({})", e);
+                        println!("Bootstrap will be completed when the server starts");
+                    }
+                }
+            }
+            ClusterCommands::Recover => {
+                println!("Initiating physical recovery...");
+                println!("This must be run locally on a cluster node.");
+                match client.post_command("ClusterRecover", json!({})).await {
+                    Ok(resp) => {
+                        if let Some(token) = resp.get("bootstrap_token") {
+                            println!("Bootstrap token: {}", token);
+                            println!("Token expires in 15 minutes. Use it to re-enroll at:");
+                            println!("  https://{}/enroll", cli.domain);
+                        }
+                    }
+                    Err(e) => eprintln!("Recovery failed: {}", e),
+                }
+            }
+            ClusterCommands::Status => match client.get("/nodes").await {
+                Ok(body) => {
+                    println!("Cluster Status");
+                    println!("==============");
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&body).unwrap_or_default()
+                    );
+                }
+                Err(e) => eprintln!("Failed to get cluster status: {}", e),
+            },
+        },
+        Commands::Resource { command } => match command {
+            ResourceCommands::Apply { path } => {
+                println!("Applying resources from: {}", path);
+                let payload = json!({ "path": path });
+                match client.post_command("ResourceApply", payload).await {
+                    Ok(_) => println!("Resources applied"),
+                    Err(e) => eprintln!("Apply failed: {}", e),
+                }
+            }
+            ResourceCommands::Delete { path } => {
+                println!("Deleting resources from: {}", path);
+                let payload = json!({ "path": path });
+                match client.post_command("ResourceDelete", payload).await {
+                    Ok(_) => println!("Resources deleted"),
+                    Err(e) => eprintln!("Delete failed: {}", e),
+                }
+            }
+            ResourceCommands::Status { target } => {
+                let path = if target.starts_with("https://") {
+                    target.clone()
+                } else {
+                    format!("/products/{}", target)
+                };
+                match client.get(&path).await {
+                    Ok(body) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&body).unwrap_or_default()
+                        );
+                    }
+                    Err(e) => eprintln!("Failed to get status: {}", e),
+                }
+            }
+        },
+        Commands::Identity { command } => match command {
+            IdentityCommands::Create { name, email } => {
+                println!("Creating identity: {}", name);
+                let payload = json!({
+                    "name": name,
+                    "email": email,
+                });
+                match client.post_command("IdentityCreate", payload).await {
+                    Ok(_) => println!("Identity created: {}", name),
+                    Err(e) => eprintln!("Failed to create identity: {}", e),
+                }
+            }
+            IdentityCommands::ResetPasskey { identity } => {
+                println!("Initiating passkey reset for: {}", identity);
+                let payload = json!({ "identity": identity });
+                match client.post_command("PasskeyReset", payload).await {
+                    Ok(resp) => {
+                        if let Some(token) = resp.get("enrollment_token") {
+                            println!("Enrollment token: {}", token);
+                            println!("Complete re-enrollment at:");
+                            println!("  https://{}/enroll", cli.domain);
+                        }
+                    }
+                    Err(e) => eprintln!("Passkey reset failed: {}", e),
+                }
+            }
+            IdentityCommands::Token => {
+                println!("Initiating device authentication flow...");
+                println!("Open the following URL in your browser:");
+                println!("  https://{}/auth/device", cli.domain);
+                println!("Waiting for authentication...");
+                // In a real implementation, this would poll for completion
+                eprintln!("Device flow not yet implemented — use browser enrollment");
+            }
+        },
+        Commands::Events { command } => match command {
+            EventCommands::Stream {
+                product,
+                correlation_id,
+            } => {
+                let mut path = "/api/events/stream".to_string();
+                let mut params = vec![];
+                if let Some(ref p) = product {
+                    params.push(format!("product={}", p));
+                }
+                if let Some(ref c) = correlation_id {
+                    params.push(format!("correlation_id={}", c));
+                }
+                if !params.is_empty() {
+                    path = format!("{}?{}", path, params.join("&"));
+                }
 
-    println!("PiCloud CLI — domain: {}", cli.domain);
+                println!("Subscribing to event stream...");
+                if let Some(ref p) = product {
+                    println!("  Product filter: {}", p);
+                }
+                // In production, this would use SSE streaming
+                match client.get(&path).await {
+                    Ok(body) => println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default()),
+                    Err(e) => eprintln!("Failed to subscribe: {}", e),
+                }
+            }
+        },
+        Commands::Graph { command } => match command {
+            GraphCommands::Query { sparql, product } => {
+                let path = if let Some(ref p) = product {
+                    format!(
+                        "/products/{}/graph?query={}",
+                        p,
+                        urlencoding(&sparql)
+                    )
+                } else {
+                    format!("/graph?query={}", urlencoding(&sparql))
+                };
+
+                match client.get(&path).await {
+                    Ok(body) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&body).unwrap_or_default()
+                        );
+                    }
+                    Err(e) => eprintln!("Query failed: {}", e),
+                }
+            }
+        },
+        Commands::Ca { command } => match command {
+            CaCommands::Export { output } => {
+                println!("Exporting CA certificate to: {}", output);
+                match client.get("/ca/certificate").await {
+                    Ok(body) => {
+                        if let Some(pem) = body.get("certificate_pem").and_then(|v| v.as_str()) {
+                            std::fs::write(&output, pem)?;
+                            println!("CA certificate written to {}", output);
+                            println!("Install with:");
+                            println!("  picloud ca install");
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to export CA: {}", e),
+                }
+            }
+            CaCommands::Install => {
+                println!("Installing CA certificate into OS trust store...");
+                // Platform-specific trust store installation
+                #[cfg(target_os = "linux")]
+                {
+                    println!("  cp picloud-ca.pem /usr/local/share/ca-certificates/picloud-ca.crt");
+                    println!("  sudo update-ca-certificates");
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    println!(
+                        "  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain picloud-ca.pem"
+                    );
+                }
+                println!("Run the commands above to complete installation.");
+            }
+        },
+        Commands::Sdk { command } => match command {
+            SdkCommands::Publish {
+                languages,
+                registry,
+            } => {
+                println!("Generating SDKs for: {}", languages.join(", "));
+                if let Some(ref r) = registry {
+                    println!("  Registry: {}", r);
+                }
+                let payload = json!({
+                    "languages": languages,
+                    "registry": registry,
+                });
+                match client.post_command("SdkPublish", payload).await {
+                    Ok(_) => println!("SDKs published successfully"),
+                    Err(e) => eprintln!("SDK publish failed: {}", e),
+                }
+            }
+        },
+    }
+
     Ok(())
+}
+
+/// Simple URL encoding for query parameters
+fn urlencoding(s: &str) -> String {
+    s.replace(' ', "%20")
+        .replace('#', "%23")
+        .replace('&', "%26")
+        .replace('?', "%3F")
+        .replace('{', "%7B")
+        .replace('}', "%7D")
 }
