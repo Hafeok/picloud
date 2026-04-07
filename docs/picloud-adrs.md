@@ -895,3 +895,47 @@ The dependency rule is enforced by `Cargo.toml` — slices literally cannot impo
 - Slices communicate via injected trait implementations, not direct calls
 - The composition root in `src/main.rs` grows as slices are added — this is expected and correct
 - LLMs can be given a single slice plus `picloud-domain` as context and make meaningful progress without understanding the full platform
+
+---
+
+## ADR-035: Delta Tables as Optional Product Analytical Storage Resource
+
+**Status:** Proposed (Phase 3+)
+
+**Context:** Products may need to store and query large analytical datasets — telemetry, time-series data, audit logs, or event-derived aggregations — where the append-only event store (ADR-032) and SPARQL projection (ADR-005) are not the right fit. These workloads benefit from columnar storage with ACID transactions, time travel, and predicate pushdown. Delta Lake (via `delta-rs`) provides these capabilities on top of Parquet files.
+
+**Decision:** Offer Delta Tables as a declarable product-level storage resource for analytical workloads. Delta Tables are **not** used for the platform event log or product event stores — those remain append-only JSON Lines replicated via Raft (ADR-004, ADR-032). Delta Tables are a separate, opt-in storage primitive.
+
+Products declare delta table resources in their manifest:
+```bicep
+delta-table 'telemetry' = {
+  product: 'photo-app'
+  schema: 'schemas/telemetry.parquet-schema'
+  partition_columns: ['date', 'source']
+  retention_days: 90
+}
+```
+
+Addressable via IRI:
+```
+https://picloud.local/products/photo-app/delta-tables/telemetry
+```
+
+**Rationale:**
+- The platform event log is optimized for sequential append, Raft replication, and real-time broadcast — not analytical queries. Delta Tables fill a complementary niche for batch/analytical access patterns.
+- `delta-rs` is a pure Rust implementation with no JVM dependency, consistent with ADR-001.
+- Delta's time travel and ACID transactions map well to the platform's auditability requirements.
+- Parquet's columnar format enables efficient range scans and aggregations that SPARQL is not optimized for on large numerical datasets.
+- Product isolation (ADR-016, ADR-018) is maintained — each product's delta tables are scoped to that product's storage allocation.
+
+**Rejected alternatives:**
+- **Using Delta Tables for the platform event log** — granularity mismatch. The event log appends single events in real-time; Delta Tables operate at file/batch granularity. Buffering events into batches would break the real-time SSE subscription model. The Arrow/Parquet dependency weight is also unjustified for sequential replay workloads.
+- **DuckDB as embedded analytical engine** — viable alternative, but Delta Tables integrate better as a storage format that can be read by external tools. DuckDB could be offered as a query engine on top of Delta Tables in a future ADR.
+- **Raw Parquet files without Delta** — loses ACID transactions, time travel, and schema evolution. Delta's transaction log adds minimal overhead while providing significant correctness guarantees.
+
+**Consequences:**
+- `delta-rs`, `arrow`, and `parquet` become optional dependencies — only compiled when the delta-table storage resource is enabled. Feature-gated to avoid binary size impact on minimal deployments.
+- The `picloud-storage` crate gains a Delta Table backend implementing a new `DeltaTableStore` trait defined in `picloud-domain::traits`.
+- Products can project event store data into Delta Tables via platform-provided projectors, enabling analytical queries over event-sourced data without querying the event log directly.
+- Storage allocation (ADR-024) must account for Parquet file sizes and Delta transaction log overhead.
+- Phase 4 compaction and retention policies apply to delta tables via Delta's built-in `VACUUM` semantics.
