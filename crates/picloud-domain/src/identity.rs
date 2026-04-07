@@ -124,3 +124,101 @@ pub enum PermissionAction {
     Query,  // SPARQL query
     Append, // event log append
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::iri::ResourceIri;
+    use chrono::Utc;
+
+    fn make_passkey() -> RegisteredPasskey {
+        RegisteredPasskey {
+            credential_id: "cred-1".to_string(),
+            public_key: vec![1, 2, 3],
+            aaguid: None,
+            registered_at: Utc::now(),
+            last_used_at: None,
+            display_name: None,
+        }
+    }
+
+    fn make_identity(num_passkeys: usize) -> HumanIdentity {
+        let now = Utc::now();
+        HumanIdentity {
+            id: Uuid::new_v4(),
+            iri: ResourceIri("https://picloud.local/identities/test".to_string()),
+            name: "Test User".to_string(),
+            email: None,
+            passkeys: (0..num_passkeys).map(|_| make_passkey()).collect(),
+            platform_roles: vec![],
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn admin_with_3_passkeys_can_remove() {
+        let identity = make_identity(3);
+        assert!(identity.can_remove_passkey(true));
+    }
+
+    #[test]
+    fn admin_with_2_passkeys_cannot_remove() {
+        let identity = make_identity(2);
+        assert!(!identity.can_remove_passkey(true));
+    }
+
+    #[test]
+    fn admin_with_1_passkey_cannot_remove() {
+        let identity = make_identity(1);
+        assert!(!identity.can_remove_passkey(true));
+    }
+
+    #[test]
+    fn non_admin_with_2_passkeys_can_remove() {
+        let identity = make_identity(2);
+        assert!(identity.can_remove_passkey(false));
+    }
+
+    #[test]
+    fn non_admin_with_1_passkey_cannot_remove() {
+        let identity = make_identity(1);
+        assert!(!identity.can_remove_passkey(false));
+    }
+
+    #[test]
+    fn enrollment_token_valid_when_not_used_and_not_expired() {
+        let token = EnrollmentToken {
+            token: "tok-123".to_string(),
+            purpose: EnrollmentPurpose::Bootstrap,
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            used: false,
+            target_identity: None,
+        };
+        assert!(token.is_valid());
+    }
+
+    #[test]
+    fn enrollment_token_invalid_when_used() {
+        let token = EnrollmentToken {
+            token: "tok-123".to_string(),
+            purpose: EnrollmentPurpose::Bootstrap,
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            used: true,
+            target_identity: None,
+        };
+        assert!(!token.is_valid());
+    }
+
+    #[test]
+    fn enrollment_token_invalid_when_expired() {
+        let token = EnrollmentToken {
+            token: "tok-123".to_string(),
+            purpose: EnrollmentPurpose::PasskeyReset,
+            expires_at: Utc::now() - chrono::Duration::hours(1),
+            used: false,
+            target_identity: None,
+        };
+        assert!(!token.is_valid());
+    }
+}

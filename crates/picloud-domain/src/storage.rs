@@ -53,3 +53,43 @@ pub enum PerformanceTier {
     /// Optimised for sequential write, infrequent read
     Archive,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_intent_default_is_full_replication_standard() {
+        let intent = StorageIntent::default();
+        assert!(matches!(intent.durability, DurabilityTier::FullReplication));
+        assert!(matches!(intent.performance, PerformanceTier::Standard));
+    }
+
+    #[test]
+    fn durability_tier_serde_round_trip() {
+        let tier = DurabilityTier::FullReplication;
+        let json = serde_json::to_string(&tier).unwrap();
+        let back: DurabilityTier = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, DurabilityTier::FullReplication));
+    }
+
+    #[test]
+    fn performance_tier_serde_round_trip() {
+        let tier = PerformanceTier::Standard;
+        let json = serde_json::to_string(&tier).unwrap();
+        let back: PerformanceTier = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, PerformanceTier::Standard));
+    }
+
+    #[test]
+    fn storage_intent_serde_round_trip() {
+        let intent = StorageIntent {
+            durability: DurabilityTier::Quorum,
+            performance: PerformanceTier::Fast,
+        };
+        let json = serde_json::to_string(&intent).unwrap();
+        let back: StorageIntent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back.durability, DurabilityTier::Quorum));
+        assert!(matches!(back.performance, PerformanceTier::Fast));
+    }
+}

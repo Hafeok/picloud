@@ -152,3 +152,72 @@ pub struct Node {
     pub storage_capacity_gb: u64,
     pub storage_used_gb: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_status_serde_round_trip() {
+        let statuses = vec![
+            ResourceStatus::Declared,
+            ResourceStatus::Provisioning,
+            ResourceStatus::Ready,
+            ResourceStatus::Failed,
+            ResourceStatus::Deleting,
+        ];
+        for status in statuses {
+            let json = serde_json::to_string(&status).unwrap();
+            let back: ResourceStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, status);
+        }
+    }
+
+    #[test]
+    fn resource_status_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ResourceStatus::Declared).unwrap(),
+            "\"declared\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ResourceStatus::Provisioning).unwrap(),
+            "\"provisioning\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ResourceStatus::Ready).unwrap(),
+            "\"ready\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ResourceStatus::Failed).unwrap(),
+            "\"failed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ResourceStatus::Deleting).unwrap(),
+            "\"deleting\""
+        );
+    }
+
+    #[test]
+    fn resource_status_deserializes_from_snake_case() {
+        let ready: ResourceStatus = serde_json::from_str("\"ready\"").unwrap();
+        assert_eq!(ready, ResourceStatus::Ready);
+    }
+
+    #[test]
+    fn volume_type_serde_round_trip() {
+        let json = serde_json::to_string(&VolumeType::Mounted).unwrap();
+        let back: VolumeType = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, VolumeType::Mounted));
+
+        let json = serde_json::to_string(&VolumeType::RawBlock).unwrap();
+        let back: VolumeType = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, VolumeType::RawBlock));
+    }
+
+    #[test]
+    fn ontology_format_serde_round_trip() {
+        let json = serde_json::to_string(&OntologyFormat::Turtle).unwrap();
+        let back: OntologyFormat = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, OntologyFormat::Turtle));
+    }
+}

@@ -228,6 +228,30 @@ impl ClusterClient {
         }
     }
 
+    async fn post_apply(
+        &self,
+        resource_file: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let mut request = self
+            .client
+            .post(format!("{}/api/apply", self.base_url))
+            .json(&resource_file);
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.json::<serde_json::Value>().await?;
+
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(format!("Apply failed with status {}: {}", status, body).into())
+        }
+    }
+
     async fn get(&self, path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         let mut request = self
             .client
@@ -302,9 +326,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Resource { command } => match command {
             ResourceCommands::Apply { path } => {
                 println!("Applying resources from: {}", path);
-                let payload = json!({ "path": path });
-                match client.post_command("ResourceApply", payload).await {
-                    Ok(_) => println!("Resources applied"),
+
+                // Read all .picloud files from the directory (or single file)
+                let file_path = std::path::Path::new(&path);
+                let files = if file_path.is_dir() {
+                    let mut entries: Vec<_> = std::fs::read_dir(file_path)?
+                        .filter_map(|e| e.ok())
+                        .filter(|e| {
+                            e.path()
+                                .extension()
+                                .map(|ext| ext == "picloud")
+                                .unwrap_or(false)
+                        })
+                        .map(|e| e.path())
+                        .collect();
+                    entries.sort();
+                    entries
+                } else {
+                    vec![file_path.to_path_buf()]
+                };
+
+                if files.is_empty() {
+                    eprintln!("No .picloud files found in {}", path);
+                    std::process::exit(1);
+                }
+
+                // Parse and merge all resource files
+                let mut all_resources = Vec::new();
+                for file in &files {
+                    let content = std::fs::read_to_string(file)?;
+                    let parsed = picloud_domain::parser::ResourceFile::parse(&content)
+                        .map_err(|e| format!("{}: {}", file.display(), e))?;
+                    all_resources.extend(parsed.resources);
+                }
+
+                let resource_file = picloud_domain::parser::ResourceFile {
+                    resources: all_resources,
+                };
+
+                // Validate
+                if let Err(e) = resource_file.validate() {
+                    eprintln!("Validation failed: {}", e);
+                    std::process::exit(1);
+                }
+
+                println!("  Found {} resources in {} file(s)", resource_file.resources.len(), files.len());
+
+                // Submit to cluster
+                let payload = serde_json::to_value(&resource_file)?;
+                match client.post_apply(payload).await {
+                    Ok(resp) => {
+                        if let Some(results) = resp.get("results").and_then(|r| r.as_array()) {
+                            for result in results {
+                                let status = result.get("status").and_then(|s| s.as_str()).unwrap_or("unknown");
+                                let name = result.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+                                let rtype = result.get("type").and_then(|s| s.as_str()).unwrap_or("?");
+                                let symbol = if status == "declared" { "→" } else { "✓" };
+                                println!("  {} {} {} ({})", symbol, rtype, name, status);
+                            }
+                        }
+                        println!("Resources applied");
+                    }
                     Err(e) => eprintln!("Apply failed: {}", e),
                 }
             }

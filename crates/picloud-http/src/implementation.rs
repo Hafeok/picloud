@@ -22,6 +22,7 @@ use axum::{
 use futures::stream;
 use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
+use picloud_domain::parser::{ResourceDeclaration, ResourceFile};
 use picloud_domain::traits::{
     ClusterMembership, EventFilter, EventLog, IdentityProvider, StateProjector,
     StorageBackend, WorkloadScheduler,
@@ -169,6 +170,8 @@ impl PiCloudHttpServer {
             .route("/products/:name/graph", get(handle_graph))
             .route("/products/:name/events", get(handle_events))
             .route("/api/commands", post(handle_command))
+            .route("/api/apply", post(handle_apply))
+            .route("/graph", get(handle_cluster_graph))
             .with_state(AppState {
                 cluster_root_iri,
                 cluster_domain: self.cluster_domain.clone(),
@@ -646,6 +649,201 @@ async fn handle_command(
                 Json(serde_json::json!({ "error": e.to_string() })),
             )
         }
+    }
+}
+
+/// Handle resource apply — parses a ResourceFile, emits events for each resource.
+async fn handle_apply(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(resource_file): Json<ResourceFile>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    // Validate the resource file
+    if let Err(e) = resource_file.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        );
+    }
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let correlation_id = Uuid::new_v4();
+    let mut results = Vec::new();
+
+    for decl in &resource_file.resources {
+        let (resource_iri, event_type, product, payload) = match decl {
+            ResourceDeclaration::Product(p) => {
+                let iri = iri_builder.product(&p.name);
+                let payload = serde_json::json!({
+                    "product_iri": iri.as_str(),
+                    "product_name": p.name,
+                    "version": p.version,
+                    "description": p.description,
+                });
+                (iri, "ProductDeployed", None, payload)
+            }
+            ResourceDeclaration::Volume(v) => {
+                let iri = iri_builder.resource(&v.product, "volumes", &v.name);
+                let intent = v.storage_intent();
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Volume",
+                    "product": v.product,
+                    "name": v.name,
+                    "size_gb": v.size_gb,
+                    "durability": format!("{:?}", intent.durability),
+                    "performance": format!("{:?}", intent.performance),
+                });
+                (iri, "ResourceDeclared", Some(v.product.clone()), payload)
+            }
+            ResourceDeclaration::Container(c) => {
+                let iri = iri_builder.resource(&c.product, "containers", &c.name);
+                let spec = c.to_spec();
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Container",
+                    "product": c.product,
+                    "name": c.name,
+                    "image": spec.image,
+                    "identity": spec.identity,
+                });
+                (iri, "ResourceDeclared", Some(c.product.clone()), payload)
+            }
+            ResourceDeclaration::Binary(b) => {
+                let iri = iri_builder.resource(&b.product, "binaries", &b.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Binary",
+                    "product": b.product,
+                    "name": b.name,
+                    "executable": b.executable,
+                });
+                (iri, "ResourceDeclared", Some(b.product.clone()), payload)
+            }
+            ResourceDeclaration::EventSubscription(e) => {
+                let iri = iri_builder.resource(&e.product, "event-subscriptions", &e.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "EventSubscription",
+                    "product": e.product,
+                    "name": e.name,
+                    "source": e.source,
+                    "event": e.event,
+                    "handler": e.handler,
+                });
+                (iri, "ResourceDeclared", Some(e.product.clone()), payload)
+            }
+            ResourceDeclaration::Ingress(i) => {
+                let iri = iri_builder.resource(&i.product, "ingresses", &i.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Ingress",
+                    "product": i.product,
+                    "name": i.name,
+                    "target": i.target,
+                    "port": i.port,
+                    "path": i.path,
+                    "tls": i.tls,
+                });
+                (iri, "ResourceDeclared", Some(i.product.clone()), payload)
+            }
+        };
+
+        let schema = iri_builder.event_schema(event_type, 1);
+        let idempotency_key = format!(
+            "apply-{}-{}-{}",
+            decl.resource_type(),
+            decl.resource_name(),
+            correlation_id
+        );
+        let envelope = EventEnvelope::new(
+            schema,
+            event_type,
+            resource_iri,
+            product,
+            correlation_id,
+            payload,
+        )
+        .with_idempotency_key(idempotency_key);
+
+        match event_log.append(envelope).await {
+            Ok(()) => {
+                results.push(serde_json::json!({
+                    "name": decl.resource_name(),
+                    "type": decl.resource_type(),
+                    "status": "declared",
+                }));
+            }
+            Err(e) => {
+                results.push(serde_json::json!({
+                    "name": decl.resource_name(),
+                    "type": decl.resource_type(),
+                    "status": "failed",
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "correlationId": correlation_id.to_string(),
+            "results": results,
+        })),
+    )
+}
+
+/// Handle SPARQL query against the cluster-level graph (not product-scoped).
+async fn handle_cluster_graph(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Query(params): Query<GraphQuery>,
+) -> Response {
+    let ct = content_type_from_headers(&headers);
+
+    match params.query {
+        Some(sparql) if !sparql.is_empty() => {
+            if let Some(ref projector) = state.projector {
+                match projector.query(&sparql).await {
+                    Ok(result) => resource_response(
+                        serde_json::json!({
+                            "type": "SparqlResult",
+                            "results": result.bindings,
+                        }),
+                        ct,
+                    ),
+                    Err(e) => resource_response(
+                        serde_json::json!({
+                            "type": "SparqlError",
+                            "error": e.to_string(),
+                        }),
+                        ct,
+                    ),
+                }
+            } else {
+                resource_response(
+                    serde_json::json!({
+                        "type": "SparqlEndpoint",
+                        "error": "projector not available",
+                    }),
+                    ct,
+                )
+            }
+        }
+        _ => resource_response(
+            serde_json::json!({
+                "type": "SparqlEndpoint",
+                "hint": "Provide a ?query= parameter with a SPARQL query",
+            }),
+            ct,
+        ),
     }
 }
 

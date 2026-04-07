@@ -129,3 +129,97 @@ impl IriBuilder {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn builder() -> IriBuilder {
+        IriBuilder::new(ClusterDomain::default())
+    }
+
+    #[test]
+    fn cluster_domain_default() {
+        assert_eq!(ClusterDomain::default().0, "picloud.local");
+    }
+
+    #[test]
+    fn cluster_root() {
+        let iri = builder().cluster_root();
+        assert_eq!(iri.as_str(), "https://picloud.local/");
+    }
+
+    #[test]
+    fn node_iri() {
+        let iri = builder().node("pi-node-01");
+        assert_eq!(iri.as_str(), "https://picloud.local/nodes/pi-node-01");
+    }
+
+    #[test]
+    fn product_iri() {
+        let iri = builder().product("photo-app");
+        assert_eq!(iri.as_str(), "https://picloud.local/products/photo-app");
+    }
+
+    #[test]
+    fn resource_iri() {
+        let iri = builder().resource("photo-app", "containers", "api-server");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/products/photo-app/containers/api-server"
+        );
+    }
+
+    #[test]
+    fn product_graph_iri() {
+        let iri = builder().product_graph("photo-app");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/products/photo-app/graph"
+        );
+    }
+
+    #[test]
+    fn product_events_iri() {
+        let iri = builder().product_events("photo-app");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/products/photo-app/events"
+        );
+    }
+
+    #[test]
+    fn event_schema_iri() {
+        let iri = builder().event_schema("ResourceReady", 1);
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/schemas/events/ResourceReady/v1"
+        );
+    }
+
+    #[test]
+    fn resource_iri_new_valid_url() {
+        let iri = ResourceIri::new("https://picloud.local/products/foo");
+        assert!(iri.is_ok());
+        assert_eq!(iri.unwrap().as_str(), "https://picloud.local/products/foo");
+    }
+
+    #[test]
+    fn resource_iri_new_invalid_url() {
+        let iri = ResourceIri::new("not a url");
+        assert!(iri.is_err());
+    }
+
+    #[test]
+    fn resource_iri_display() {
+        let iri = ResourceIri("https://picloud.local/test".to_string());
+        assert_eq!(format!("{}", iri), "https://picloud.local/test");
+    }
+
+    #[test]
+    fn custom_domain() {
+        let b = IriBuilder::new(ClusterDomain("my.cluster".to_string()));
+        assert_eq!(b.cluster_root().as_str(), "https://my.cluster/");
+        assert_eq!(b.node("n1").as_str(), "https://my.cluster/nodes/n1");
+    }
+}

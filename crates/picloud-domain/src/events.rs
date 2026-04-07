@@ -212,3 +212,80 @@ pub struct ProductUpgradeAbortedPayload {
 pub struct ProductDeletedPayload {
     pub product_iri: ResourceIri,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::iri::ResourceIri;
+
+    fn make_envelope() -> EventEnvelope {
+        let schema = ResourceIri("https://picloud.local/schemas/events/ResourceReady/v1".to_string());
+        let source = ResourceIri("https://picloud.local/products/photo-app/containers/api".to_string());
+        let correlation = Uuid::new_v4();
+        let payload = serde_json::json!({"key": "value"});
+
+        EventEnvelope::new(
+            schema,
+            "ResourceReady",
+            source,
+            Some("photo-app".to_string()),
+            correlation,
+            payload,
+        )
+    }
+
+    #[test]
+    fn new_sets_fields_correctly() {
+        let correlation = Uuid::new_v4();
+        let schema = ResourceIri("https://picloud.local/schemas/events/ResourceReady/v1".to_string());
+        let source = ResourceIri("https://picloud.local/products/photo-app".to_string());
+        let payload = serde_json::json!({"status": "ok"});
+
+        let env = EventEnvelope::new(
+            schema.clone(),
+            "ResourceReady",
+            source.clone(),
+            Some("photo-app".to_string()),
+            correlation,
+            payload.clone(),
+        );
+
+        assert_eq!(env.schema, schema);
+        assert_eq!(env.event_type, "ResourceReady");
+        assert_eq!(env.source, source);
+        assert_eq!(env.product, Some("photo-app".to_string()));
+        assert_eq!(env.correlation_id, correlation);
+        assert_eq!(env.payload, payload);
+        assert!(env.idempotency_key.is_none());
+    }
+
+    #[test]
+    fn with_idempotency_key_sets_key() {
+        let env = make_envelope().with_idempotency_key("my-key-123");
+        assert_eq!(env.idempotency_key, Some("my-key-123".to_string()));
+    }
+
+    #[test]
+    fn new_generates_unique_ids() {
+        let a = make_envelope();
+        let b = make_envelope();
+        assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn platform_level_event_has_no_product() {
+        let schema = ResourceIri("https://picloud.local/schemas/events/NodeJoined/v1".to_string());
+        let source = ResourceIri("https://picloud.local/nodes/pi-01".to_string());
+
+        let env = EventEnvelope::new(
+            schema,
+            "NodeJoined",
+            source,
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({}),
+        );
+
+        assert!(env.product.is_none());
+    }
+}
