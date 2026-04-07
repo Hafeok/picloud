@@ -16,9 +16,11 @@ use std::sync::Arc;
 use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{IriBuilder, ResourceIri};
 use picloud_domain::storage::StorageIntent;
-use picloud_domain::traits::{EventFilter, EventLog, StateProjector, StorageBackend, WorkloadScheduler, WorkloadSpec};
+use picloud_domain::traits::{EventFilter, EventLog, SecretStore, StateProjector, StorageBackend, WorkloadScheduler, WorkloadSpec};
 use picloud_domain::workload::{ContainerSpec, BinarySpec, EnvValue, PortMapping, ResourceLimits, RestartPolicy, VolumeMount};
 use tracing::{error, info, warn};
+
+use crate::implementation::{IngressRoute, IngressTable};
 
 /// Configuration for the resource provisioner.
 pub struct Provisioner {
@@ -26,7 +28,9 @@ pub struct Provisioner {
     projector: Arc<dyn StateProjector>,
     storage: Arc<dyn StorageBackend>,
     scheduler: Arc<dyn WorkloadScheduler>,
+    secret_store: Arc<dyn SecretStore>,
     iri_builder: IriBuilder,
+    ingress_routes: Option<IngressTable>,
 }
 
 impl Provisioner {
@@ -36,6 +40,7 @@ impl Provisioner {
         projector: Arc<dyn StateProjector>,
         storage: Arc<dyn StorageBackend>,
         scheduler: Arc<dyn WorkloadScheduler>,
+        secret_store: Arc<dyn SecretStore>,
         iri_builder: IriBuilder,
     ) -> Self {
         Self {
@@ -43,8 +48,17 @@ impl Provisioner {
             projector,
             storage,
             scheduler,
+            secret_store,
             iri_builder,
+            ingress_routes: None,
         }
+    }
+
+    /// Set the ingress routing table so the provisioner can register routes
+    /// when Ingress resources are declared.
+    pub fn with_ingress_table(mut self, table: IngressTable) -> Self {
+        self.ingress_routes = Some(table);
+        self
     }
 
     /// Start the provisioner as a background task.
@@ -62,6 +76,8 @@ impl Provisioner {
         let projector = self.projector.clone();
         let storage = self.storage.clone();
         let scheduler = self.scheduler.clone();
+        let secret_store = self.secret_store.clone();
+        let ingress_routes = self.ingress_routes.clone();
         let iri_builder = self.iri_builder;
 
         let handle = tokio::spawn(async move {
@@ -75,6 +91,8 @@ impl Provisioner {
                                 &event_log,
                                 &storage,
                                 &scheduler,
+                                &secret_store,
+                                &ingress_routes,
                                 &iri_builder,
                             )
                             .await;
@@ -116,6 +134,8 @@ async fn provision_resource(
     event_log: &Arc<dyn EventLog>,
     storage: &Arc<dyn StorageBackend>,
     scheduler: &Arc<dyn WorkloadScheduler>,
+    secret_store: &Arc<dyn SecretStore>,
+    ingress_routes: &Option<IngressTable>,
     iri_builder: &IriBuilder,
 ) {
     let payload = &event.payload;
@@ -155,8 +175,11 @@ async fn provision_resource(
         "Volume" => provision_volume(storage, &resource_iri, payload).await,
         "Container" => provision_container(scheduler, &resource_iri, payload).await,
         "Binary" => provision_binary(scheduler, &resource_iri, payload).await,
-        "Ingress" | "EventSubscription" => {
-            // These resource types don't need backend provisioning — mark ready immediately
+        "Secret" => provision_secret(secret_store, payload).await,
+        "Ingress" => {
+            provision_ingress(ingress_routes, resource_iri_str, payload).await
+        }
+        "EventSubscription" => {
             info!(
                 resource_type = resource_type,
                 resource_iri = resource_iri_str,
@@ -237,6 +260,86 @@ async fn provision_volume(
     let intent = StorageIntent::default();
 
     storage.allocate_volume(resource_iri, size_gb, &intent).await?;
+    Ok(())
+}
+
+/// Provision a secret by encrypting and storing it via SecretStore.
+async fn provision_secret(
+    secret_store: &Arc<dyn SecretStore>,
+    payload: &serde_json::Value,
+) -> picloud_domain::error::Result<()> {
+    let product = payload
+        .get("product")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+
+    let name = payload
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let value = payload
+        .get("value")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    secret_store.store_secret(product, name, value).await?;
+
+    info!(
+        product = product,
+        name = name,
+        "Secret encrypted and stored"
+    );
+
+    Ok(())
+}
+
+/// Provision an ingress by registering the route in the ingress table.
+async fn provision_ingress(
+    ingress_routes: &Option<IngressTable>,
+    resource_iri_str: &str,
+    payload: &serde_json::Value,
+) -> picloud_domain::error::Result<()> {
+    let path = payload
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("/")
+        .to_string();
+
+    let target_port = payload
+        .get("port")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(8080) as u16;
+
+    let product = payload
+        .get("product")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    if let Some(table) = ingress_routes {
+        let route = IngressRoute {
+            path: path.clone(),
+            target_port,
+            product: product.clone(),
+        };
+        let mut routes = table.write().await;
+        routes.insert(resource_iri_str.to_string(), route);
+
+        info!(
+            resource_iri = resource_iri_str,
+            path = %path,
+            target_port = target_port,
+            product = %product,
+            "Ingress route registered"
+        );
+    } else {
+        info!(
+            resource_iri = resource_iri_str,
+            "Ingress route not registered — no routing table available"
+        );
+    }
+
     Ok(())
 }
 
@@ -528,9 +631,56 @@ mod tests {
     use async_trait::async_trait;
     use picloud_domain::error::Result;
     use picloud_domain::iri::ClusterDomain;
-    use picloud_domain::traits::{QueryResult, VolumeHandle, WorkloadHandle, WorkloadStatus};
+    use picloud_domain::traits::{QueryResult, SecretStore, VolumeHandle, WorkloadHandle, WorkloadStatus};
+    use std::collections::HashMap;
     use std::sync::Mutex;
     use uuid::Uuid;
+
+    // ---- Mock SecretStore ----
+
+    struct MockSecretStore {
+        secrets: Mutex<HashMap<String, String>>,
+    }
+
+    impl MockSecretStore {
+        fn new() -> Self {
+            Self {
+                secrets: Mutex::new(HashMap::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SecretStore for MockSecretStore {
+        async fn store_secret(&self, product: &str, name: &str, value: &str) -> Result<()> {
+            self.secrets
+                .lock()
+                .unwrap()
+                .insert(format!("{}/{}", product, name), value.to_string());
+            Ok(())
+        }
+
+        async fn get_secret(&self, product: &str, name: &str) -> Result<String> {
+            let key = format!("{}/{}", product, name);
+            self.secrets
+                .lock()
+                .unwrap()
+                .get(&key)
+                .cloned()
+                .ok_or_else(|| picloud_domain::error::PiCloudError::SecretNotFound {
+                    product: product.to_string(),
+                    name: name.to_string(),
+                })
+        }
+
+        async fn delete_secret(&self, product: &str, name: &str) -> Result<()> {
+            self.secrets
+                .lock()
+                .unwrap()
+                .remove(&format!("{}/{}", product, name));
+            Ok(())
+        }
+    }
 
     // ---- Mock EventLog ----
 
@@ -757,6 +907,7 @@ mod tests {
         let event_log = Arc::new(MockEventLog::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         let event = make_resource_declared(
@@ -770,6 +921,8 @@ mod tests {
             &(event_log.clone() as Arc<dyn EventLog>),
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &iri_builder,
         )
         .await;
@@ -794,6 +947,7 @@ mod tests {
         let event_log = Arc::new(MockEventLog::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         let event = make_resource_declared(
@@ -807,6 +961,8 @@ mod tests {
             &(event_log.clone() as Arc<dyn EventLog>),
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &iri_builder,
         )
         .await;
@@ -828,6 +984,7 @@ mod tests {
         let event_log = Arc::new(MockEventLog::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         let event = make_resource_declared(
@@ -841,6 +998,8 @@ mod tests {
             &(event_log.clone() as Arc<dyn EventLog>),
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &iri_builder,
         )
         .await;
@@ -854,16 +1013,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingress_emits_ready_immediately() {
+    async fn ingress_emits_ready_and_registers_route() {
         let event_log = Arc::new(MockEventLog::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
+        let ingress_table = crate::new_ingress_table();
 
         let event = make_resource_declared(
             "Ingress",
             "https://picloud.local/products/test-product/ingresses/web",
-            serde_json::json!({}),
+            serde_json::json!({
+                "path": "/products/test-product/api",
+                "port": 8080,
+                "product": "test-product"
+            }),
         );
 
         provision_resource(
@@ -871,6 +1036,8 @@ mod tests {
             &(event_log.clone() as Arc<dyn EventLog>),
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &(secret_store.clone() as Arc<dyn SecretStore>),
+            &Some(ingress_table.clone()),
             &iri_builder,
         )
         .await;
@@ -879,10 +1046,18 @@ mod tests {
         assert!(storage.allocated.lock().unwrap().is_empty());
         assert!(scheduler.scheduled.lock().unwrap().is_empty());
 
-        // But ResourceReady emitted
+        // ResourceReady emitted
         let appended = event_log.appended_events();
         assert_eq!(appended.len(), 1);
         assert_eq!(appended[0].event_type, "ResourceReady");
+
+        // Ingress route should be registered in the table
+        let routes = ingress_table.read().await;
+        assert_eq!(routes.len(), 1);
+        let route = routes.values().next().unwrap();
+        assert_eq!(route.path, "/products/test-product/api");
+        assert_eq!(route.target_port, 8080);
+        assert_eq!(route.product, "test-product");
     }
 
     #[tokio::test]
@@ -890,6 +1065,7 @@ mod tests {
         let event_log = Arc::new(MockEventLog::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         let event = make_resource_declared(
@@ -903,6 +1079,8 @@ mod tests {
             &(event_log.clone() as Arc<dyn EventLog>),
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &iri_builder,
         )
         .await;
@@ -917,6 +1095,7 @@ mod tests {
         let event_log = Arc::new(MockEventLog::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         // Event with no resource_type in payload
@@ -934,6 +1113,8 @@ mod tests {
             &(event_log.clone() as Arc<dyn EventLog>),
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &iri_builder,
         )
         .await;
@@ -948,6 +1129,7 @@ mod tests {
         let projector = Arc::new(MockProjector::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
+        let secret_store = Arc::new(MockSecretStore::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         let provisioner = Provisioner::new(
@@ -955,6 +1137,7 @@ mod tests {
             projector.clone(),
             storage.clone(),
             scheduler.clone(),
+            secret_store.clone(),
             iri_builder,
         );
 

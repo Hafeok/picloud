@@ -47,16 +47,19 @@ sophia_api   = "0.8"
 
 # HTTP server + client
 axum         = { version = "0.7", features = ["macros"] }
+axum-server  = { version = "0.7", features = ["tls-rustls"] }
 tower        = { version = "0.4", features = ["util"] }
 tower-http   = { version = "0.5", features = ["trace", "cors", "auth"] }
 reqwest      = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
 hyper        = { version = "1", features = ["full"] }
 
 # TLS / PKI
-rustls       = "0.23"
-rcgen        = "0.13"
-webpki-roots = "0.26"
-x509-parser  = "0.16"
+rustls         = "0.23"
+rustls-pemfile = "2"
+tokio-rustls   = "0.26"
+rcgen          = "0.13"
+webpki-roots   = "0.26"
+x509-parser    = "0.16"
 
 # mDNS
 mdns-sd      = "0.11"

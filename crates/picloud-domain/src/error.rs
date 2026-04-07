@@ -55,6 +55,10 @@ pub enum PiCloudError {
     #[error("Invalid IRI: {iri}")]
     InvalidIri { iri: String },
 
+    // --- Secret errors ---
+    #[error("Secret not found: {product}/{name}")]
+    SecretNotFound { product: String, name: String },
+
     // --- Workload errors ---
     #[error("Workload {name} failed to start: {reason}")]
     WorkloadStartFailed { name: String, reason: String },

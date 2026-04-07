@@ -14,8 +14,9 @@ tracing        = { workspace = true }
 thiserror      = { workspace = true }
 serde          = { workspace = true }
 serde_json     = { workspace = true }
-rustls       = { workspace = true }
-rcgen        = { workspace = true }
+rustls         = { workspace = true }
+rustls-pemfile = { workspace = true }
+rcgen          = { workspace = true }
 webpki-roots = { workspace = true }
 x509-parser  = { workspace = true }
 mdns-sd      = { workspace = true }

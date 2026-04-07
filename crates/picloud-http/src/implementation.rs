@@ -6,12 +6,13 @@
 ///
 /// This crate depends only on picloud-domain. Trait objects for event log,
 /// state projection, etc. are injected from the composition root.
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, Method, StatusCode, Uri},
     response::{
         sse::{Event, KeepAlive},
         IntoResponse, Response, Sse,
@@ -29,6 +30,7 @@ use picloud_domain::traits::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -103,6 +105,29 @@ pub fn resource_response(
 }
 
 // ---------------------------------------------------------------------------
+// Ingress routing
+// ---------------------------------------------------------------------------
+
+/// An ingress route mapping a URL path prefix to a local workload port.
+#[derive(Debug, Clone)]
+pub struct IngressRoute {
+    /// The URL path prefix that triggers this route (e.g. "/products/photo-app/api").
+    pub path: String,
+    /// The local port to proxy requests to (the workload's port on this node).
+    pub target_port: u16,
+    /// The product that owns this ingress route.
+    pub product: String,
+}
+
+/// Thread-safe ingress routing table, shared between the HTTP handlers and the provisioner.
+pub type IngressTable = Arc<RwLock<HashMap<String, IngressRoute>>>;
+
+/// Create a new, empty ingress routing table.
+pub fn new_ingress_table() -> IngressTable {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -116,6 +141,8 @@ pub struct PiCloudHttpServer {
     pub iam: Option<Arc<dyn IdentityProvider>>,
     pub storage: Option<Arc<dyn StorageBackend>>,
     pub scheduler: Option<Arc<dyn WorkloadScheduler>>,
+    pub ingress_routes: IngressTable,
+    pub tls_config: Option<rustls::ServerConfig>,
 }
 
 impl PiCloudHttpServer {
@@ -129,6 +156,8 @@ impl PiCloudHttpServer {
             iam: None,
             storage: None,
             scheduler: None,
+            ingress_routes: new_ingress_table(),
+            tls_config: None,
         }
     }
 
@@ -148,6 +177,18 @@ impl PiCloudHttpServer {
         self.iam = Some(iam);
         self.storage = Some(storage);
         self.scheduler = Some(scheduler);
+        self
+    }
+
+    /// Set the ingress routing table (shared with the provisioner).
+    pub fn with_ingress_table(mut self, table: IngressTable) -> Self {
+        self.ingress_routes = table;
+        self
+    }
+
+    /// Set a TLS configuration for HTTPS serving.
+    pub fn with_tls_config(mut self, config: rustls::ServerConfig) -> Self {
+        self.tls_config = Some(config);
         self
     }
 
@@ -189,6 +230,7 @@ impl PiCloudHttpServer {
             .route("/.well-known/jwks.json", get(handle_jwks))
             .route("/auth/token", post(handle_token))
             .route("/auth/authorize", get(handle_authorize))
+            .fallback(handle_ingress_proxy)
             .with_state(AppState {
                 cluster_root_iri,
                 cluster_domain: self.cluster_domain.clone(),
@@ -196,23 +238,43 @@ impl PiCloudHttpServer {
                 projector: self.projector.clone(),
                 cluster: self.cluster.clone(),
                 iam: self.iam.clone(),
+                ingress_routes: self.ingress_routes.clone(),
             })
     }
 
     /// Bind to the configured address and start serving.
+    ///
+    /// If `tls_config` is set, serves HTTPS via `axum_server` with rustls.
+    /// Otherwise serves plain HTTP (the default).
     pub async fn start(self) -> picloud_domain::error::Result<()> {
         let router = self.build_router();
-        let listener = TcpListener::bind(self.bind_addr).await.map_err(|e| {
-            picloud_domain::error::PiCloudError::Internal(
-                format!("failed to bind to {}: {e}", self.bind_addr),
-            )
-        })?;
-        info!("PiCloud HTTP server listening on {}", self.bind_addr);
-        axum::serve(listener, router).await.map_err(|e| {
-            picloud_domain::error::PiCloudError::Internal(
-                format!("HTTP server error: {e}"),
-            )
-        })?;
+
+        if let Some(tls_config) = self.tls_config {
+            info!("PiCloud HTTPS server listening on {}", self.bind_addr);
+            let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(
+                Arc::new(tls_config),
+            );
+            axum_server::bind_rustls(self.bind_addr, rustls_config)
+                .serve(router.into_make_service())
+                .await
+                .map_err(|e| {
+                    picloud_domain::error::PiCloudError::Internal(
+                        format!("HTTPS server error: {e}"),
+                    )
+                })?;
+        } else {
+            info!("PiCloud HTTP server listening on {}", self.bind_addr);
+            let listener = TcpListener::bind(self.bind_addr).await.map_err(|e| {
+                picloud_domain::error::PiCloudError::Internal(
+                    format!("failed to bind to {}: {e}", self.bind_addr),
+                )
+            })?;
+            axum::serve(listener, router).await.map_err(|e| {
+                picloud_domain::error::PiCloudError::Internal(
+                    format!("HTTP server error: {e}"),
+                )
+            })?;
+        }
         Ok(())
     }
 }
@@ -229,6 +291,7 @@ struct AppState {
     projector: Option<Arc<dyn StateProjector>>,
     cluster: Option<Arc<dyn ClusterMembership>>,
     iam: Option<Arc<dyn IdentityProvider>>,
+    ingress_routes: IngressTable,
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,6 +1168,128 @@ async fn handle_cluster_graph(
             }),
             ct,
         ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ingress proxy handler
+// ---------------------------------------------------------------------------
+
+/// Catch-all handler that checks the ingress routing table and proxies
+/// matching requests to the workload's local port.
+async fn handle_ingress_proxy(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Body,
+) -> Response {
+    let request_path = uri.path();
+
+    // Find the longest matching path prefix in the ingress table
+    let route = {
+        let routes = state.ingress_routes.read().await;
+        routes
+            .values()
+            .filter(|r| request_path.starts_with(&r.path))
+            .max_by_key(|r| r.path.len())
+            .cloned()
+    };
+
+    let Some(route) = route else {
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "error": "not_found",
+            "message": format!("no route matches path: {request_path}"),
+        })))
+            .into_response();
+    };
+
+    // Strip the ingress path prefix and forward the remainder to the workload
+    let downstream_path = &request_path[route.path.len()..];
+    let downstream_path = if downstream_path.is_empty() || !downstream_path.starts_with('/') {
+        format!("/{downstream_path}")
+    } else {
+        downstream_path.to_string()
+    };
+
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    let target_url = format!(
+        "http://127.0.0.1:{}{downstream_path}{query}",
+        route.target_port
+    );
+
+    // Build the proxied request
+    let client = reqwest::Client::new();
+    let mut proxy_req = client.request(
+        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET),
+        &target_url,
+    );
+
+    // Forward relevant headers (skip host — we're proxying to localhost)
+    for (name, value) in headers.iter() {
+        if name != header::HOST && name != header::TRANSFER_ENCODING {
+            if let Ok(v) = value.to_str() {
+                proxy_req = proxy_req.header(name.as_str(), v);
+            }
+        }
+    }
+
+    // Forward the body
+    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                "error": "bad_request",
+                "message": format!("failed to read request body: {e}"),
+            })))
+                .into_response();
+        }
+    };
+
+    if !body_bytes.is_empty() {
+        proxy_req = proxy_req.body(body_bytes.to_vec());
+    }
+
+    // Execute the proxy request
+    match proxy_req.send().await {
+        Ok(resp) => {
+            let status = StatusCode::from_u16(resp.status().as_u16())
+                .unwrap_or(StatusCode::BAD_GATEWAY);
+
+            let mut builder = axum::http::Response::builder().status(status);
+
+            for (name, value) in resp.headers() {
+                // Skip transfer-encoding as we're re-encoding the body
+                if name != header::TRANSFER_ENCODING {
+                    builder = builder.header(name, value);
+                }
+            }
+
+            match resp.bytes().await {
+                Ok(bytes) => builder
+                    .body(axum::body::Body::from(bytes.to_vec()))
+                    .unwrap_or_else(|_| {
+                        (StatusCode::BAD_GATEWAY, "proxy response error").into_response()
+                    }),
+                Err(e) => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                    "error": "bad_gateway",
+                    "message": format!("failed to read upstream response: {e}"),
+                })))
+                    .into_response(),
+            }
+        }
+        Err(e) => {
+            warn!(
+                target_url = %target_url,
+                error = %e,
+                "Ingress proxy request failed"
+            );
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                "error": "bad_gateway",
+                "message": format!("failed to connect to workload: {e}"),
+            })))
+                .into_response()
+        }
     }
 }
 

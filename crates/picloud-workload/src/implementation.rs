@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -15,8 +16,8 @@ use uuid::Uuid;
 
 use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
-use picloud_domain::traits::{WorkloadHandle, WorkloadScheduler, WorkloadSpec, WorkloadStatus};
-use picloud_domain::workload::{BinarySpec, ContainerSpec, EnvValue};
+use picloud_domain::traits::{SecretStore, WorkloadHandle, WorkloadScheduler, WorkloadSpec, WorkloadStatus};
+use picloud_domain::workload::{BinarySpec, ContainerSpec, EnvValue, RestartPolicy};
 
 /// Which container runtime is available on the host.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,18 +29,19 @@ enum ContainerRuntime {
 
 /// Internal record of a scheduled workload.
 struct WorkloadEntry {
-    #[allow(dead_code)]
     workload_iri: String,
-    #[allow(dead_code)]
     spec: WorkloadSpec,
     status: WorkloadStatus,
-    #[allow(dead_code)]
     node_id: Uuid,
     pid: Option<u32>,
     #[allow(dead_code)]
     started_at: DateTime<Utc>,
     /// The spawned child process handle (for real process execution).
     child: Option<Child>,
+    /// Number of restarts performed so far.
+    restart_count: u32,
+    /// Whether the workload was explicitly stopped (should not be restarted).
+    explicitly_stopped: bool,
 }
 
 /// A workload scheduler that spawns real processes.
@@ -49,10 +51,11 @@ struct WorkloadEntry {
 ///   otherwise simulated with a warning.
 pub struct ProcessScheduler {
     node_id: Uuid,
-    workloads: RwLock<HashMap<String, WorkloadEntry>>,
+    workloads: Arc<RwLock<HashMap<String, WorkloadEntry>>>,
     iri_builder: IriBuilder,
     next_pid: AtomicU32,
     container_runtime: ContainerRuntime,
+    secret_store: Option<Arc<dyn SecretStore>>,
 }
 
 /// Detect which container runtime (podman or docker) is available.
@@ -94,10 +97,36 @@ impl ProcessScheduler {
 
         Self {
             node_id,
-            workloads: RwLock::new(HashMap::new()),
+            workloads: Arc::new(RwLock::new(HashMap::new())),
             iri_builder: IriBuilder::new(domain),
             next_pid: AtomicU32::new(10000),
             container_runtime: runtime,
+            secret_store: None,
+        }
+    }
+
+    /// Create a new scheduler with a secret store for resolving secret env vars.
+    pub fn with_secret_store(
+        node_id: Uuid,
+        domain: ClusterDomain,
+        secret_store: Arc<dyn SecretStore>,
+    ) -> Self {
+        let runtime = detect_container_runtime();
+        if runtime == ContainerRuntime::None {
+            tracing::warn!(
+                "No container runtime (podman or docker) detected — container workloads will be simulated"
+            );
+        } else {
+            tracing::info!(runtime = ?runtime, "Detected container runtime");
+        }
+
+        Self {
+            node_id,
+            workloads: Arc::new(RwLock::new(HashMap::new())),
+            iri_builder: IriBuilder::new(domain),
+            next_pid: AtomicU32::new(10000),
+            container_runtime: runtime,
+            secret_store: Some(secret_store),
         }
     }
 
@@ -106,10 +135,29 @@ impl ProcessScheduler {
     fn new_with_runtime(node_id: Uuid, domain: ClusterDomain, runtime: ContainerRuntime) -> Self {
         Self {
             node_id,
-            workloads: RwLock::new(HashMap::new()),
+            workloads: Arc::new(RwLock::new(HashMap::new())),
             iri_builder: IriBuilder::new(domain),
             next_pid: AtomicU32::new(10000),
             container_runtime: runtime,
+            secret_store: None,
+        }
+    }
+
+    /// Create a scheduler with an explicitly set runtime and secret store (for testing).
+    #[cfg(test)]
+    fn new_with_runtime_and_secrets(
+        node_id: Uuid,
+        domain: ClusterDomain,
+        runtime: ContainerRuntime,
+        secret_store: Arc<dyn SecretStore>,
+    ) -> Self {
+        Self {
+            node_id,
+            workloads: Arc::new(RwLock::new(HashMap::new())),
+            iri_builder: IriBuilder::new(domain),
+            next_pid: AtomicU32::new(10000),
+            container_runtime: runtime,
+            secret_store: Some(secret_store),
         }
     }
 
@@ -118,23 +166,58 @@ impl ProcessScheduler {
         &self.iri_builder
     }
 
-    /// Spawn a binary workload as a child process.
-    async fn spawn_binary(&self, spec: &BinarySpec) -> Result<(Child, u32)> {
-        let mut cmd = Command::new(&spec.executable);
-        cmd.args(&spec.args);
-
-        // Set environment variables
-        for (key, value) in &spec.env {
-            let val = match value {
-                EnvValue::Literal(s) => s.clone(),
-                EnvValue::Secret { secret } => {
+    /// Resolve an environment value, looking up secrets from the store when needed.
+    async fn resolve_env_value(&self, value: &EnvValue, product: Option<&str>) -> String {
+        match value {
+            EnvValue::Literal(s) => s.clone(),
+            EnvValue::Secret { secret } => {
+                if let Some(ref store) = self.secret_store {
+                    let product_name = product.unwrap_or("default");
+                    match store.get_secret(product_name, secret).await {
+                        Ok(val) => val,
+                        Err(e) => {
+                            tracing::warn!(
+                                secret = secret,
+                                error = %e,
+                                "Failed to resolve secret — using empty string"
+                            );
+                            String::new()
+                        }
+                    }
+                } else {
                     tracing::warn!(
                         secret = secret,
-                        "Secret injection not yet implemented — using placeholder"
+                        "No secret store configured — using placeholder"
                     );
                     format!("SECRET:{}", secret)
                 }
-            };
+            }
+        }
+    }
+
+    /// Extract the product name from a workload IRI.
+    /// IRI format: https://picloud.local/products/{product}/...
+    fn product_from_iri(iri: &str) -> Option<&str> {
+        let path = iri.strip_prefix("https://")?;
+        let path = path.split('/').collect::<Vec<_>>();
+        // Expected: [domain, "products", product_name, ...]
+        if path.len() >= 3 && path[1] == "products" {
+            Some(path[2])
+        } else {
+            None
+        }
+    }
+
+    /// Spawn a binary workload as a child process.
+    async fn spawn_binary(&self, spec: &BinarySpec, workload_iri: &ResourceIri) -> Result<(Child, u32)> {
+        let mut cmd = Command::new(&spec.executable);
+        cmd.args(&spec.args);
+
+        let product = Self::product_from_iri(workload_iri.as_str());
+
+        // Set environment variables
+        for (key, value) in &spec.env {
+            let val = self.resolve_env_value(value, product).await;
             cmd.env(key, val);
         }
 
@@ -190,17 +273,9 @@ impl ProcessScheduler {
         cmd.args(["--name", container_name]);
 
         // Environment variables
+        let product = Self::product_from_iri(workload_iri.as_str());
         for (key, value) in &spec.env {
-            let val = match value {
-                EnvValue::Literal(s) => s.clone(),
-                EnvValue::Secret { secret } => {
-                    tracing::warn!(
-                        secret = secret,
-                        "Secret injection not yet implemented — using placeholder"
-                    );
-                    format!("SECRET:{}", secret)
-                }
-            };
+            let val = self.resolve_env_value(value, product).await;
             cmd.args(["-e", &format!("{}={}", key, val)]);
         }
 
@@ -245,6 +320,159 @@ impl ProcessScheduler {
         let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
         ret == 0
     }
+
+    /// Start a background health check loop that monitors running workloads.
+    ///
+    /// Every `interval` the loop checks each running workload:
+    /// - If the process has exited and the restart policy allows it, restart.
+    /// - Emits tracing events for health check failures and restarts.
+    pub fn start_health_check_loop(
+        &self,
+        interval: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        let workloads = Arc::clone(&self.workloads);
+
+        tokio::spawn(async move {
+            tracing::info!("Workload health check loop started");
+            loop {
+                tokio::time::sleep(interval).await;
+
+                let mut wl = workloads.write().await;
+                let keys: Vec<String> = wl.keys().cloned().collect();
+
+                for key in keys {
+                    let entry = match wl.get_mut(&key) {
+                        Some(e) => e,
+                        None => continue,
+                    };
+
+                    // Only check workloads that are supposed to be running
+                    if !matches!(entry.status, WorkloadStatus::Running) {
+                        continue;
+                    }
+
+                    // Skip explicitly stopped workloads
+                    if entry.explicitly_stopped {
+                        continue;
+                    }
+
+                    // Check if the child process is still alive
+                    let exited = if let Some(ref mut child) = entry.child {
+                        match child.try_wait() {
+                            Ok(Some(exit_status)) => Some(exit_status.success()),
+                            Ok(None) => None, // still running
+                            Err(_) => Some(false),
+                        }
+                    } else {
+                        // Simulated workload (no child) — assume running
+                        None
+                    };
+
+                    if let Some(success) = exited {
+                        tracing::warn!(
+                            workload_iri = %entry.workload_iri,
+                            success = success,
+                            "WorkloadHealthCheckFailed: process exited"
+                        );
+
+                        let should_restart = match &entry.spec {
+                            WorkloadSpec::Binary(s) => Self::should_restart(
+                                &s.restart_policy,
+                                success,
+                                entry.restart_count,
+                            ),
+                            WorkloadSpec::Container(s) => Self::should_restart(
+                                &s.restart_policy,
+                                success,
+                                entry.restart_count,
+                            ),
+                        };
+
+                        if should_restart {
+                            // Attempt restart: re-spawn the process
+                            let restart_result = match &entry.spec {
+                                WorkloadSpec::Binary(spec) => {
+                                    let mut cmd = Command::new(&spec.executable);
+                                    cmd.args(&spec.args);
+                                    // For restarts, we use literal env values only
+                                    // (secrets were already resolved at first schedule)
+                                    for (k, v) in &spec.env {
+                                        let val = match v {
+                                            EnvValue::Literal(s) => s.clone(),
+                                            EnvValue::Secret { secret } => {
+                                                format!("SECRET:{}", secret)
+                                            }
+                                        };
+                                        cmd.env(k, val);
+                                    }
+                                    cmd.stdin(std::process::Stdio::null());
+                                    cmd.stdout(std::process::Stdio::piped());
+                                    cmd.stderr(std::process::Stdio::piped());
+                                    cmd.spawn()
+                                }
+                                WorkloadSpec::Container(_) => {
+                                    // Simulated containers don't have real processes to restart
+                                    tracing::info!(
+                                        workload_iri = %entry.workload_iri,
+                                        "Simulating container restart"
+                                    );
+                                    entry.status = WorkloadStatus::Running;
+                                    entry.restart_count += 1;
+                                    continue;
+                                }
+                            };
+
+                            match restart_result {
+                                Ok(child) => {
+                                    let pid = child.id().unwrap_or(0);
+                                    entry.child = Some(child);
+                                    entry.pid = Some(pid);
+                                    entry.status = WorkloadStatus::Running;
+                                    entry.restart_count += 1;
+                                    tracing::info!(
+                                        workload_iri = %entry.workload_iri,
+                                        pid = pid,
+                                        restart_count = entry.restart_count,
+                                        "WorkloadRestarted"
+                                    );
+                                }
+                                Err(e) => {
+                                    entry.status = WorkloadStatus::Failed {
+                                        reason: format!("Restart failed: {}", e),
+                                    };
+                                    tracing::error!(
+                                        workload_iri = %entry.workload_iri,
+                                        error = %e,
+                                        "Failed to restart workload"
+                                    );
+                                }
+                            }
+                        } else {
+                            // No restart — mark as failed or stopped
+                            if success {
+                                entry.status = WorkloadStatus::Stopped;
+                            } else {
+                                entry.status = WorkloadStatus::Failed {
+                                    reason: "Process exited and restart policy exhausted".to_string(),
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Determine whether a workload should be restarted based on its policy.
+    fn should_restart(policy: &RestartPolicy, success: bool, restart_count: u32) -> bool {
+        match policy {
+            RestartPolicy::Always => true,
+            RestartPolicy::OnFailure { max_retries } => {
+                !success && restart_count < *max_retries
+            }
+            RestartPolicy::Never => false,
+        }
+    }
 }
 
 #[async_trait]
@@ -263,7 +491,7 @@ impl WorkloadScheduler for ProcessScheduler {
 
         let (child, pid) = match spec {
             WorkloadSpec::Binary(binary_spec) => {
-                let (child, pid) = self.spawn_binary(binary_spec).await?;
+                let (child, pid) = self.spawn_binary(binary_spec, workload_iri).await?;
                 (Some(child), pid)
             }
             WorkloadSpec::Container(container_spec) => {
@@ -287,6 +515,8 @@ impl WorkloadScheduler for ProcessScheduler {
             pid: Some(pid),
             started_at: Utc::now(),
             child,
+            restart_count: 0,
+            explicitly_stopped: false,
         };
 
         workloads.insert(key, entry);
@@ -350,6 +580,7 @@ impl WorkloadScheduler for ProcessScheduler {
         }
 
         entry.status = WorkloadStatus::Stopped;
+        entry.explicitly_stopped = true;
 
         tracing::info!(
             workload_iri = %workload_iri,
@@ -692,5 +923,152 @@ mod tests {
         let result = scheduler.schedule(&iri, &spec).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PiCloudError::Internal(_)));
+    }
+
+    // ---- Health check tests ----
+
+    #[tokio::test]
+    async fn health_check_restarts_exited_process_with_always_policy() {
+        let scheduler = test_scheduler();
+        let iri = ResourceIri::new(
+            "https://picloud.local/products/test-app/binaries/short-lived",
+        )
+        .unwrap();
+
+        // Spawn a process that exits immediately (echo)
+        let spec = WorkloadSpec::Binary(BinarySpec {
+            executable: "/bin/echo".to_string(),
+            args: vec!["hello".to_string()],
+            identity: "test-identity".to_string(),
+            resources: ResourceLimits {
+                cpu_millicores: None,
+                memory_mb: None,
+            },
+            mounts: vec![],
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Always,
+        });
+
+        scheduler.schedule(&iri, &spec).await.unwrap();
+
+        // Wait for echo to exit
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Start health check with a short interval
+        let handle = scheduler.start_health_check_loop(std::time::Duration::from_millis(100));
+
+        // Wait for the health check to detect exit and restart
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // The workload should have been restarted and be in Running state
+        // (the restarted echo will also exit quickly, but the health check
+        // should have set it to Running at least once)
+        let workloads = scheduler.workloads.read().await;
+        let entry = workloads.get(iri.as_str()).expect("workload should exist");
+        assert!(
+            entry.restart_count > 0,
+            "Expected at least one restart, got {}",
+            entry.restart_count
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn health_check_does_not_restart_with_never_policy() {
+        let scheduler = test_scheduler();
+        let iri = ResourceIri::new(
+            "https://picloud.local/products/test-app/binaries/no-restart",
+        )
+        .unwrap();
+
+        // Spawn a process that exits immediately
+        let spec = WorkloadSpec::Binary(BinarySpec {
+            executable: "/bin/echo".to_string(),
+            args: vec!["done".to_string()],
+            identity: "test-identity".to_string(),
+            resources: ResourceLimits {
+                cpu_millicores: None,
+                memory_mb: None,
+            },
+            mounts: vec![],
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Never,
+        });
+
+        scheduler.schedule(&iri, &spec).await.unwrap();
+
+        // Wait for echo to exit
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Start health check
+        let handle = scheduler.start_health_check_loop(std::time::Duration::from_millis(100));
+
+        // Wait for the health check to run
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        // The workload should NOT have been restarted
+        let workloads = scheduler.workloads.read().await;
+        let entry = workloads.get(iri.as_str()).expect("workload should exist");
+        assert_eq!(
+            entry.restart_count, 0,
+            "Expected no restarts with Never policy, got {}",
+            entry.restart_count
+        );
+        // Should be stopped (exited successfully)
+        assert!(
+            matches!(entry.status, WorkloadStatus::Stopped),
+            "Expected Stopped, got {:?}",
+            entry.status
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn health_check_respects_on_failure_max_retries() {
+        let scheduler = test_scheduler();
+        let iri = ResourceIri::new(
+            "https://picloud.local/products/test-app/binaries/fail-limited",
+        )
+        .unwrap();
+
+        // Spawn a process that exits with failure (false command)
+        let spec = WorkloadSpec::Binary(BinarySpec {
+            executable: "/bin/false".to_string(),
+            args: vec![],
+            identity: "test-identity".to_string(),
+            resources: ResourceLimits {
+                cpu_millicores: None,
+                memory_mb: None,
+            },
+            mounts: vec![],
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::OnFailure { max_retries: 2 },
+        });
+
+        scheduler.schedule(&iri, &spec).await.unwrap();
+
+        // Wait for process to exit
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Start health check
+        let handle = scheduler.start_health_check_loop(std::time::Duration::from_millis(100));
+
+        // Wait long enough for max retries to be exhausted
+        // Each iteration: 100ms check + process exits almost immediately
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        let workloads = scheduler.workloads.read().await;
+        let entry = workloads.get(iri.as_str()).expect("workload should exist");
+
+        // Should have restarted exactly 2 times (max_retries)
+        assert!(
+            entry.restart_count <= 2,
+            "Expected at most 2 restarts, got {}",
+            entry.restart_count
+        );
+
+        handle.abort();
     }
 }

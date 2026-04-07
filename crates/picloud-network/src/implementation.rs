@@ -1,10 +1,12 @@
 //! Network implementation: in-memory DNS registry and platform CA.
 
 use std::collections::HashMap;
+use std::io::BufReader;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -206,6 +208,48 @@ impl PlatformCa {
             private_key_pem: ee_key.serialize_pem(),
             expires_at,
         })
+    }
+
+    /// Create a `rustls::ServerConfig` for TLS termination on this node.
+    ///
+    /// Issues a fresh server certificate for `node_name` signed by the
+    /// platform CA, and returns a `ServerConfig` ready for use with
+    /// `tokio-rustls`.
+    pub fn server_tls_config(&self, node_name: &str) -> Result<rustls::ServerConfig> {
+        let node_cert = self.issue_node_certificate(node_name)?;
+
+        // Parse the server certificate chain (leaf only — CA is self-signed)
+        let cert_chain: Vec<CertificateDer<'static>> = {
+            let mut reader = BufReader::new(node_cert.certificate_pem.as_bytes());
+            rustls_pemfile::certs(&mut reader)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse server certificate PEM: {e}"),
+                })?
+        };
+
+        // Parse the private key
+        let private_key: PrivateKeyDer<'static> = {
+            let mut reader = BufReader::new(node_cert.private_key_pem.as_bytes());
+            rustls_pemfile::private_key(&mut reader)
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse private key PEM: {e}"),
+                })?
+                .ok_or_else(|| PiCloudError::TlsCertificateError {
+                    reason: "no private key found in PEM data".to_string(),
+                })?
+        };
+
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, private_key)
+            .map_err(|e| PiCloudError::TlsCertificateError {
+                reason: format!("failed to build TLS server config: {e}"),
+            })?;
+
+        info!(node = %node_name, "TLS server config created");
+
+        Ok(config)
     }
 
     /// Issue a TLS certificate for a service, signed by the platform CA.

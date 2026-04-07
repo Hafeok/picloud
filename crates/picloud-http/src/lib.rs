@@ -7,5 +7,5 @@
 pub mod implementation;
 pub mod provisioner;
 
-pub use implementation::{ContentType, PiCloudHttpServer, resource_response};
+pub use implementation::{ContentType, IngressRoute, IngressTable, PiCloudHttpServer, new_ingress_table, resource_response};
 pub use provisioner::Provisioner;

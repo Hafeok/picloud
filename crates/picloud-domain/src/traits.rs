@@ -204,6 +204,22 @@ pub struct NodeInfo {
     pub is_leader: bool,
 }
 
+// ---- Secrets ----
+
+/// Encrypt, store, retrieve, and delete secrets.
+/// Implemented by: picloud-iam
+#[async_trait]
+pub trait SecretStore: Send + Sync {
+    /// Encrypt and store a secret value for a product.
+    async fn store_secret(&self, product: &str, name: &str, value: &str) -> Result<()>;
+
+    /// Decrypt and return a secret value.
+    async fn get_secret(&self, product: &str, name: &str) -> Result<String>;
+
+    /// Delete a stored secret.
+    async fn delete_secret(&self, product: &str, name: &str) -> Result<()>;
+}
+
 // ---- DNS ----
 
 /// Register and resolve internal DNS names.

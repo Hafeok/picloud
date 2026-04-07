@@ -16,12 +16,12 @@ use uuid::Uuid;
 use picloud_domain::iri::ClusterDomain;
 use picloud_domain::traits::{
     ClusterMembership, DnsRegistry, EventFilter, EventLog, IdentityProvider,
-    StateProjector, StorageBackend, WorkloadScheduler,
+    SecretStore, StateProjector, StorageBackend, WorkloadScheduler,
 };
 
 use picloud_cluster::{ClusterConfig, MdnsCluster};
 use picloud_events::PersistentEventLog;
-use picloud_iam::LocalIdentityProvider;
+use picloud_iam::{InMemorySecretStore, LocalIdentityProvider};
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
@@ -234,6 +234,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let iam: Arc<dyn IdentityProvider> = Arc::new(iam);
     info!("IAM service started");
 
+    // 5b. Start secret store (uses same key material as IAM for key derivation)
+    let secret_store = InMemorySecretStore::new(iam_key);
+    let secret_store: Arc<dyn SecretStore> = Arc::new(secret_store);
+    info!("Secret store started");
+
     // 6. Start storage backend
     let storage = LocalStorageBackend::new(
         config.storage_path.clone(),
@@ -247,15 +252,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Storage backend started"
     );
 
-    // 7. Start workload scheduler
-    let scheduler = ProcessScheduler::new(config.node_id, config.cluster_domain.clone());
+    // 7. Start workload scheduler (with secret store for env var resolution)
+    let scheduler = ProcessScheduler::with_secret_store(
+        config.node_id,
+        config.cluster_domain.clone(),
+        secret_store.clone(),
+    );
     let scheduler: Arc<dyn WorkloadScheduler> = Arc::new(scheduler);
     info!("Workload scheduler started");
 
     // 8. Start network/DNS/TLS
     let dns = InMemoryDnsRegistry::new();
     let dns: Arc<dyn DnsRegistry> = Arc::new(dns);
-    let _ca = PlatformCa::new()?;
+    let ca = PlatformCa::new()?;
+
+    // Optionally create TLS config for HTTPS serving (controlled by PICLOUD_TLS env var)
+    let tls_config = match std::env::var("PICLOUD_TLS")
+        .unwrap_or_else(|_| "false".to_string())
+        .as_str()
+    {
+        "true" | "1" | "yes" => {
+            match ca.server_tls_config(&config.node_name) {
+                Ok(config) => {
+                    info!("TLS enabled — HTTPS serving active");
+                    Some(config)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to create TLS config — falling back to plain HTTP");
+                    None
+                }
+            }
+        }
+        _ => {
+            info!("TLS disabled (set PICLOUD_TLS=true to enable)");
+            None
+        }
+    };
+
     info!("Network services started (DNS + CA)");
 
     // 9. Register this node's DNS entry
@@ -287,7 +320,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("NodeJoined event emitted");
     }
 
-    // 11. Start resource provisioner (background task)
+    // 11. Create shared ingress routing table
+    let ingress_table = picloud_http::new_ingress_table();
+
+    // 12. Start resource provisioner (background task)
     {
         let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
         let provisioner = Provisioner::new(
@@ -295,8 +331,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             projector.clone(),
             storage.clone(),
             scheduler.clone(),
+            secret_store.clone(),
             iri_builder,
-        );
+        )
+        .with_ingress_table(ingress_table.clone());
         provisioner
             .start()
             .await
@@ -304,9 +342,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Resource provisioner started");
     }
 
-    // 12. Start HTTP server
+    // 13. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
-    let http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
+    let mut http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
         .with_dependencies(
             event_log_trait.clone(),
             projector.clone(),
@@ -314,7 +352,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             iam.clone(),
             storage.clone(),
             scheduler.clone(),
-        );
+        )
+        .with_ingress_table(ingress_table);
+    if let Some(tls) = tls_config {
+        http_server = http_server.with_tls_config(tls);
+    }
 
     // Log startup summary
     let members = cluster.members().await?;
