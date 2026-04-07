@@ -252,6 +252,32 @@ impl ClusterClient {
         }
     }
 
+    async fn post_delete(
+        &self,
+        product: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let body = json!({ "product": product });
+
+        let mut request = self
+            .client
+            .post(format!("{}/api/delete", self.base_url))
+            .json(&body);
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.json::<serde_json::Value>().await?;
+
+        if status.is_success() {
+            Ok(body)
+        } else {
+            Err(format!("Delete failed with status {}: {}", status, body).into())
+        }
+    }
+
     async fn get(&self, path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         let mut request = self
             .client
@@ -392,9 +418,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             ResourceCommands::Delete { path } => {
                 println!("Deleting resources from: {}", path);
-                let payload = json!({ "path": path });
-                match client.post_command("ResourceDelete", payload).await {
-                    Ok(_) => println!("Resources deleted"),
+
+                // Read .picloud files to determine the product name
+                let file_path = std::path::Path::new(&path);
+                let files = if file_path.is_dir() {
+                    let mut entries: Vec<_> = std::fs::read_dir(file_path)
+                        .unwrap_or_else(|e| {
+                            eprintln!("Failed to read directory: {}", e);
+                            std::process::exit(1);
+                        })
+                        .filter_map(|e| e.ok())
+                        .filter(|e| {
+                            e.path()
+                                .extension()
+                                .map(|ext| ext == "picloud")
+                                .unwrap_or(false)
+                        })
+                        .map(|e| e.path())
+                        .collect();
+                    entries.sort();
+                    entries
+                } else {
+                    vec![file_path.to_path_buf()]
+                };
+
+                if files.is_empty() {
+                    eprintln!("No .picloud files found in {}", path);
+                    std::process::exit(1);
+                }
+
+                // Find the product name from the resource files
+                let mut product_name = None;
+                for file in &files {
+                    let content = match std::fs::read_to_string(file) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Failed to read {}: {}", file.display(), e);
+                            continue;
+                        }
+                    };
+                    let parsed = match picloud_domain::parser::ResourceFile::parse(&content) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("Failed to parse {}: {}", file.display(), e);
+                            continue;
+                        }
+                    };
+                    for decl in &parsed.resources {
+                        if let picloud_domain::parser::ResourceDeclaration::Product(p) = decl {
+                            product_name = Some(p.name.clone());
+                            break;
+                        }
+                    }
+                    if product_name.is_some() {
+                        break;
+                    }
+                }
+
+                let product = match product_name {
+                    Some(name) => name,
+                    None => {
+                        eprintln!("No Product resource found in .picloud files");
+                        std::process::exit(1);
+                    }
+                };
+
+                println!("  Deleting product: {}", product);
+                match client.post_delete(&product).await {
+                    Ok(resp) => {
+                        let correlation_id = resp
+                            .get("correlationId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        println!("  Product deletion accepted (correlation_id: {})", correlation_id);
+                        println!("  All child resources will be cascading deleted");
+                    }
                     Err(e) => eprintln!("Delete failed: {}", e),
                 }
             }

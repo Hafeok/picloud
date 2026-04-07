@@ -242,6 +242,47 @@ impl picloud_domain::traits::IdentityProvider for FakeIam {
     ) -> picloud_domain::error::Result<picloud_domain::traits::WorkloadCertificate> {
         Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
     }
+    async fn oidc_discovery(&self) -> picloud_domain::error::Result<picloud_domain::identity::OidcDiscoveryDocument> {
+        Ok(picloud_domain::identity::OidcDiscoveryDocument {
+            issuer: "https://picloud.local".to_string(),
+            authorization_endpoint: "https://picloud.local/auth/authorize".to_string(),
+            token_endpoint: "https://picloud.local/auth/token".to_string(),
+            jwks_uri: "https://picloud.local/.well-known/jwks.json".to_string(),
+            response_types_supported: vec!["code".to_string()],
+            subject_types_supported: vec!["public".to_string()],
+            id_token_signing_alg_values_supported: vec!["HS256".to_string()],
+            grant_types_supported: vec!["client_credentials".to_string()],
+            token_endpoint_auth_methods_supported: vec!["client_secret_post".to_string()],
+            scopes_supported: vec!["openid".to_string()],
+        })
+    }
+    async fn jwks(&self) -> picloud_domain::error::Result<picloud_domain::identity::JsonWebKeySet> {
+        Ok(picloud_domain::identity::JsonWebKeySet {
+            keys: vec![picloud_domain::identity::JsonWebKey {
+                kty: "oct".to_string(),
+                kid: "fake-key-1".to_string(),
+                alg: "HS256".to_string(),
+                key_use: "sig".to_string(),
+                k: None,
+            }],
+        })
+    }
+    async fn client_credentials_token(
+        &self,
+        _client_id: &str,
+        _client_secret: &str,
+        _scope: Option<&str>,
+    ) -> picloud_domain::error::Result<picloud_domain::identity::TokenResponse> {
+        Err(picloud_domain::error::PiCloudError::Unauthenticated)
+    }
+    async fn register_app(
+        &self,
+        _product_iri: &picloud_domain::iri::ResourceIri,
+        _redirect_uris: Vec<String>,
+        _scopes: Vec<String>,
+    ) -> picloud_domain::error::Result<picloud_domain::identity::AppRegistration> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
 }
 
 struct FakeStorage;

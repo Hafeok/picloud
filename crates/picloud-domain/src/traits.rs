@@ -76,6 +76,28 @@ pub trait IdentityProvider: Send + Sync {
         &self,
         workload_iri: &ResourceIri,
     ) -> Result<WorkloadCertificate>;
+
+    /// Return the OIDC discovery document for this provider.
+    async fn oidc_discovery(&self) -> Result<crate::identity::OidcDiscoveryDocument>;
+
+    /// Return the JSON Web Key Set for token verification.
+    async fn jwks(&self) -> Result<crate::identity::JsonWebKeySet>;
+
+    /// Authenticate using client credentials (app registration) and return a token response.
+    async fn client_credentials_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scope: Option<&str>,
+    ) -> Result<crate::identity::TokenResponse>;
+
+    /// Register an app (OIDC client) for a product. Returns the client_id and plaintext secret.
+    async fn register_app(
+        &self,
+        product_iri: &ResourceIri,
+        redirect_uris: Vec<String>,
+        scopes: Vec<String>,
+    ) -> Result<crate::identity::AppRegistration>;
 }
 
 #[derive(Debug, Clone)]

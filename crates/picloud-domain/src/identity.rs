@@ -97,6 +97,61 @@ pub enum EnrollmentPurpose {
     PhysicalRecovery,
 }
 
+/// OIDC discovery document — returned at /.well-known/openid-configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OidcDiscoveryDocument {
+    pub issuer: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub jwks_uri: String,
+    pub response_types_supported: Vec<String>,
+    pub subject_types_supported: Vec<String>,
+    pub id_token_signing_alg_values_supported: Vec<String>,
+    pub grant_types_supported: Vec<String>,
+    pub token_endpoint_auth_methods_supported: Vec<String>,
+    pub scopes_supported: Vec<String>,
+}
+
+/// A JSON Web Key — part of the JWKS response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonWebKey {
+    pub kty: String,
+    pub kid: String,
+    pub alg: String,
+    #[serde(rename = "use")]
+    pub key_use: String,
+    /// For HMAC keys, this is "HS256" and the key value is not exposed.
+    /// For RSA/EC keys, include the public key components.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub k: Option<String>,
+}
+
+/// JSON Web Key Set — returned at /.well-known/jwks.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonWebKeySet {
+    pub keys: Vec<JsonWebKey>,
+}
+
+/// Token response from the /auth/token endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+/// Token request for client_credentials grant
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCredentialsRequest {
+    pub grant_type: String,
+    pub client_id: String,
+    pub client_secret: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
 /// An RBAC role — additive permissions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Role {

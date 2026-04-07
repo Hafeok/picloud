@@ -6,4 +6,4 @@
 
 pub mod implementation;
 
-pub use implementation::{LocalIdentityProvider, StoredIdentity};
+pub use implementation::{LocalIdentityProvider, StoredAppRegistration, StoredIdentity};

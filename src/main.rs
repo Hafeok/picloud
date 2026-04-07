@@ -279,6 +279,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
         let provisioner = Provisioner::new(
             event_log_trait.clone(),
+            projector.clone(),
             storage.clone(),
             scheduler.clone(),
             iri_builder,

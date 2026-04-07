@@ -142,6 +142,32 @@ pub enum OntologyFormat {
     Shacl,
 }
 
+/// A Secret — an encrypted value injected into workloads at runtime
+///
+/// Secrets are first-class resources. They are encrypted at rest,
+/// replicated across the cluster, and injected into workloads by the
+/// platform. Workloads reference secrets by name in env declarations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Secret {
+    pub meta: ResourceMeta,
+    /// The encrypted value (base64-encoded ciphertext)
+    pub encrypted_value: String,
+    /// Key ID used for encryption (for key rotation)
+    pub key_id: String,
+}
+
+/// A Role — an RBAC role with permissions
+///
+/// Roles can be platform-scoped or product-scoped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Role {
+    pub meta: ResourceMeta,
+    /// Product scope — None for platform-level roles
+    pub product: Option<String>,
+    /// List of permission strings (e.g. "photo-app/containers/api-server:read")
+    pub permissions: Vec<String>,
+}
+
 /// A Node — a cluster member
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {

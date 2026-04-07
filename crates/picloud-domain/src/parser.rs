@@ -44,6 +44,8 @@ pub enum ResourceDeclaration {
     #[serde(rename = "event-subscription")]
     EventSubscription(EventSubscriptionDecl),
     Ingress(IngressDecl),
+    Secret(SecretDecl),
+    Role(RoleDecl),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +140,23 @@ pub struct IngressDecl {
     pub path: String,
     #[serde(default = "default_true")]
     pub tls: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretDecl {
+    pub name: String,
+    pub product: String,
+    /// The plaintext value (will be encrypted by the platform on apply)
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleDecl {
+    pub name: String,
+    /// Product scope — if set, this is a product-level role
+    #[serde(default)]
+    pub product: Option<String>,
+    pub permissions: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -238,6 +257,18 @@ impl ResourceDeclaration {
                 }
                 Ok(())
             }
+            ResourceDeclaration::Secret(s) => {
+                if s.name.is_empty() || s.product.is_empty() || s.value.is_empty() {
+                    return Err(validation_err("secret", "name, product, and value cannot be empty"));
+                }
+                Ok(())
+            }
+            ResourceDeclaration::Role(r) => {
+                if r.name.is_empty() || r.permissions.is_empty() {
+                    return Err(validation_err("role", "name and permissions cannot be empty"));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -250,6 +281,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Binary(b) => Some(&b.product),
             ResourceDeclaration::EventSubscription(e) => Some(&e.product),
             ResourceDeclaration::Ingress(i) => Some(&i.product),
+            ResourceDeclaration::Secret(s) => Some(&s.product),
+            ResourceDeclaration::Role(r) => r.product.as_deref(),
         }
     }
 
@@ -262,6 +295,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Binary(b) => &b.name,
             ResourceDeclaration::EventSubscription(e) => &e.name,
             ResourceDeclaration::Ingress(i) => &i.name,
+            ResourceDeclaration::Secret(s) => &s.name,
+            ResourceDeclaration::Role(r) => &r.name,
         }
     }
 
@@ -274,6 +309,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Binary(_) => "binary",
             ResourceDeclaration::EventSubscription(_) => "event-subscription",
             ResourceDeclaration::Ingress(_) => "ingress",
+            ResourceDeclaration::Secret(_) => "secret",
+            ResourceDeclaration::Role(_) => "role",
         }
     }
 }

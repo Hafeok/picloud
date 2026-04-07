@@ -16,13 +16,14 @@ use std::sync::Arc;
 use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{IriBuilder, ResourceIri};
 use picloud_domain::storage::StorageIntent;
-use picloud_domain::traits::{EventFilter, EventLog, StorageBackend, WorkloadScheduler, WorkloadSpec};
+use picloud_domain::traits::{EventFilter, EventLog, StateProjector, StorageBackend, WorkloadScheduler, WorkloadSpec};
 use picloud_domain::workload::{ContainerSpec, BinarySpec, ResourceLimits, RestartPolicy};
 use tracing::{error, info, warn};
 
 /// Configuration for the resource provisioner.
 pub struct Provisioner {
     event_log: Arc<dyn EventLog>,
+    projector: Arc<dyn StateProjector>,
     storage: Arc<dyn StorageBackend>,
     scheduler: Arc<dyn WorkloadScheduler>,
     iri_builder: IriBuilder,
@@ -32,12 +33,14 @@ impl Provisioner {
     /// Create a new provisioner with all required dependencies.
     pub fn new(
         event_log: Arc<dyn EventLog>,
+        projector: Arc<dyn StateProjector>,
         storage: Arc<dyn StorageBackend>,
         scheduler: Arc<dyn WorkloadScheduler>,
         iri_builder: IriBuilder,
     ) -> Self {
         Self {
             event_log,
+            projector,
             storage,
             scheduler,
             iri_builder,
@@ -48,11 +51,15 @@ impl Provisioner {
     /// Returns the JoinHandle so the caller can await or abort it.
     pub async fn start(self) -> Result<tokio::task::JoinHandle<()>, picloud_domain::error::PiCloudError> {
         let filter = EventFilter {
-            event_types: vec!["ResourceDeclared".to_string()],
+            event_types: vec![
+                "ResourceDeclared".to_string(),
+                "ProductDeleted".to_string(),
+            ],
             ..Default::default()
         };
         let mut rx = self.event_log.subscribe(filter).await?;
         let event_log = self.event_log.clone();
+        let projector = self.projector.clone();
         let storage = self.storage.clone();
         let scheduler = self.scheduler.clone();
         let iri_builder = self.iri_builder;
@@ -61,20 +68,34 @@ impl Provisioner {
             info!("Resource provisioner started");
             loop {
                 match rx.recv().await {
-                    Ok(event) => {
-                        provision_resource(
-                            &event,
-                            &event_log,
-                            &storage,
-                            &scheduler,
-                            &iri_builder,
-                        )
-                        .await;
-                    }
+                    Ok(event) => match event.event_type.as_str() {
+                        "ResourceDeclared" => {
+                            provision_resource(
+                                &event,
+                                &event_log,
+                                &storage,
+                                &scheduler,
+                                &iri_builder,
+                            )
+                            .await;
+                        }
+                        "ProductDeleted" => {
+                            cascade_delete_product(
+                                &event,
+                                &event_log,
+                                &projector,
+                                &storage,
+                                &scheduler,
+                                &iri_builder,
+                            )
+                            .await;
+                        }
+                        _ => {}
+                    },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(
                             skipped = n,
-                            "Provisioner lagged — some ResourceDeclared events may have been missed"
+                            "Provisioner lagged — some events may have been missed"
                         );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -290,13 +311,160 @@ async fn provision_binary(
     Ok(())
 }
 
+/// Handle cascading deletion of a product and all its child resources.
+///
+/// When a ProductDeleted event arrives:
+/// 1. Query the RDF graph to find all resources belonging to the product
+/// 2. For each child resource: stop workloads, delete volumes
+/// 3. Emit ResourceDeleted events for each child so the RDF projector cleans up
+async fn cascade_delete_product(
+    event: &EventEnvelope,
+    event_log: &Arc<dyn EventLog>,
+    projector: &Arc<dyn StateProjector>,
+    storage: &Arc<dyn StorageBackend>,
+    scheduler: &Arc<dyn WorkloadScheduler>,
+    iri_builder: &IriBuilder,
+) {
+    let product_iri_str = match event.payload.get("product_iri").and_then(|v| v.as_str()) {
+        Some(iri) => iri,
+        None => {
+            warn!(
+                event_id = %event.id,
+                "ProductDeleted event missing product_iri in payload — skipping"
+            );
+            return;
+        }
+    };
+
+    let product_name = match &event.product {
+        Some(name) => name.clone(),
+        None => {
+            warn!(
+                event_id = %event.id,
+                "ProductDeleted event missing product scope — skipping"
+            );
+            return;
+        }
+    };
+
+    info!(
+        product_iri = product_iri_str,
+        correlation_id = %event.correlation_id,
+        "Cascading deletion for product"
+    );
+
+    // Query the RDF graph for all resources belonging to this product.
+    // Resources belonging to a product have IRIs that start with the product IRI.
+    let sparql = format!(
+        "SELECT ?res ?rtype WHERE {{ \
+            ?res <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://picloud.local/ontology#Resource> . \
+            ?res <https://picloud.local/ontology#resourceType> ?rtype . \
+            FILTER(STRSTARTS(STR(?res), \"{}/\")) \
+        }}",
+        product_iri_str
+    );
+
+    let child_resources = match projector.query(&sparql).await {
+        Ok(result) => result.bindings,
+        Err(e) => {
+            error!(
+                product_iri = product_iri_str,
+                error = %e,
+                "Failed to query child resources for cascading deletion"
+            );
+            vec![]
+        }
+    };
+
+    info!(
+        product_iri = product_iri_str,
+        child_count = child_resources.len(),
+        "Found child resources to delete"
+    );
+
+    // Process each child resource
+    for child in &child_resources {
+        let child_iri_str = match child.get("res")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+        {
+            Some(iri) => iri,
+            None => continue,
+        };
+
+        let child_type = child.get("rtype")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+
+        let child_iri = ResourceIri(child_iri_str.to_string());
+
+        info!(
+            resource_iri = child_iri_str,
+            resource_type = child_type,
+            "Deleting child resource"
+        );
+
+        // Stop workloads or delete volumes based on resource type
+        match child_type {
+            "Container" | "Binary" => {
+                if let Err(e) = scheduler.stop(&child_iri).await {
+                    warn!(
+                        resource_iri = child_iri_str,
+                        error = %e,
+                        "Failed to stop workload during cascading deletion — continuing"
+                    );
+                }
+            }
+            "Volume" => {
+                if let Err(e) = storage.delete_volume(&child_iri).await {
+                    warn!(
+                        resource_iri = child_iri_str,
+                        error = %e,
+                        "Failed to delete volume during cascading deletion — continuing"
+                    );
+                }
+            }
+            // Ingress, EventSubscription, etc. — no backend cleanup needed
+            _ => {}
+        }
+
+        // Emit ResourceDeleted event for each child
+        let schema = iri_builder.event_schema("ResourceDeleted", 1);
+        let envelope = EventEnvelope::new(
+            schema,
+            "ResourceDeleted",
+            child_iri,
+            Some(product_name.clone()),
+            event.correlation_id,
+            serde_json::json!({
+                "resource_iri": child_iri_str,
+            }),
+        );
+
+        if let Err(e) = event_log.append(envelope).await {
+            error!(
+                resource_iri = child_iri_str,
+                error = %e,
+                "Failed to emit ResourceDeleted event during cascading deletion"
+            );
+        }
+    }
+
+    info!(
+        product_iri = product_iri_str,
+        deleted_count = child_resources.len(),
+        "Cascading deletion complete"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use picloud_domain::error::Result;
     use picloud_domain::iri::ClusterDomain;
-    use picloud_domain::traits::{VolumeHandle, WorkloadHandle, WorkloadStatus};
+    use picloud_domain::traits::{QueryResult, VolumeHandle, WorkloadHandle, WorkloadStatus};
     use std::sync::Mutex;
     use uuid::Uuid;
 
@@ -344,12 +512,14 @@ mod tests {
 
     struct MockStorage {
         allocated: Mutex<Vec<String>>,
+        deleted: Mutex<Vec<String>>,
     }
 
     impl MockStorage {
         fn new() -> Self {
             Self {
                 allocated: Mutex::new(Vec::new()),
+                deleted: Mutex::new(Vec::new()),
             }
         }
     }
@@ -370,7 +540,8 @@ mod tests {
             })
         }
 
-        async fn delete_volume(&self, _volume_iri: &ResourceIri) -> Result<()> {
+        async fn delete_volume(&self, volume_iri: &ResourceIri) -> Result<()> {
+            self.deleted.lock().unwrap().push(volume_iri.0.clone());
             Ok(())
         }
 
@@ -379,16 +550,79 @@ mod tests {
         }
     }
 
+    // ---- Mock StateProjector ----
+
+    struct MockProjector {
+        resources: Mutex<Vec<(String, String)>>, // (iri, type)
+    }
+
+    impl MockProjector {
+        fn new() -> Self {
+            Self {
+                resources: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn add_resource(&self, iri: &str, resource_type: &str) {
+            self.resources.lock().unwrap().push((iri.to_string(), resource_type.to_string()));
+        }
+    }
+
+    #[async_trait]
+    impl StateProjector for MockProjector {
+        async fn project(&self, _event: &EventEnvelope) -> Result<()> {
+            Ok(())
+        }
+
+        async fn query(&self, sparql: &str) -> Result<QueryResult> {
+            // Return matching resources when query contains STRSTARTS filter
+            let resources = self.resources.lock().unwrap();
+            let bindings: Vec<serde_json::Value> = resources
+                .iter()
+                .filter(|(iri, _)| {
+                    // Simple check: if the SPARQL contains a product IRI prefix filter,
+                    // only return resources whose IRI starts with it
+                    let needle = "STRSTARTS(STR(?res), \"";
+                    if let Some(start) = sparql.find(needle) {
+                        let after = &sparql[start + needle.len()..];
+                        if let Some(end) = after.find("\")") {
+                            let prefix = &after[..end];
+                            return iri.starts_with(prefix);
+                        }
+                    }
+                    true
+                })
+                .map(|(iri, rtype)| {
+                    serde_json::json!({
+                        "res": { "type": "uri", "value": iri },
+                        "rtype": { "type": "literal", "value": rtype },
+                    })
+                })
+                .collect();
+            Ok(QueryResult { bindings })
+        }
+
+        async fn query_product(
+            &self,
+            _product_iri: &ResourceIri,
+            _sparql: &str,
+        ) -> Result<QueryResult> {
+            Ok(QueryResult { bindings: vec![] })
+        }
+    }
+
     // ---- Mock WorkloadScheduler ----
 
     struct MockScheduler {
         scheduled: Mutex<Vec<String>>,
+        stopped: Mutex<Vec<String>>,
     }
 
     impl MockScheduler {
         fn new() -> Self {
             Self {
                 scheduled: Mutex::new(Vec::new()),
+                stopped: Mutex::new(Vec::new()),
             }
         }
     }
@@ -408,7 +642,8 @@ mod tests {
             })
         }
 
-        async fn stop(&self, _workload_iri: &ResourceIri) -> Result<()> {
+        async fn stop(&self, workload_iri: &ResourceIri) -> Result<()> {
+            self.stopped.lock().unwrap().push(workload_iri.0.clone());
             Ok(())
         }
 
@@ -637,12 +872,14 @@ mod tests {
     #[tokio::test]
     async fn provisioner_start_and_process_event() {
         let event_log = Arc::new(MockEventLog::new());
+        let projector = Arc::new(MockProjector::new());
         let storage = Arc::new(MockStorage::new());
         let scheduler = Arc::new(MockScheduler::new());
         let iri_builder = IriBuilder::new(ClusterDomain::default());
 
         let provisioner = Provisioner::new(
             event_log.clone(),
+            projector.clone(),
             storage.clone(),
             scheduler.clone(),
             iri_builder,
@@ -672,5 +909,140 @@ mod tests {
         assert_eq!(appended[0].event_type, "ResourceReady");
 
         handle.abort();
+    }
+
+    // ---- Helper to build a ProductDeleted event ----
+
+    fn make_product_deleted(product_name: &str) -> EventEnvelope {
+        let iri_builder = IriBuilder::new(ClusterDomain::default());
+        let product_iri = iri_builder.product(product_name);
+        EventEnvelope::new(
+            iri_builder.event_schema("ProductDeleted", 1),
+            "ProductDeleted",
+            product_iri.clone(),
+            Some(product_name.to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "product_iri": product_iri.as_str(),
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn cascade_delete_stops_workloads_and_deletes_volumes() {
+        let event_log = Arc::new(MockEventLog::new());
+        let projector = Arc::new(MockProjector::new());
+        let storage = Arc::new(MockStorage::new());
+        let scheduler = Arc::new(MockScheduler::new());
+        let iri_builder = IriBuilder::new(ClusterDomain::default());
+
+        // Register child resources in the mock projector
+        projector.add_resource(
+            "https://picloud.local/products/test-product/containers/api",
+            "Container",
+        );
+        projector.add_resource(
+            "https://picloud.local/products/test-product/volumes/data",
+            "Volume",
+        );
+        projector.add_resource(
+            "https://picloud.local/products/test-product/binaries/worker",
+            "Binary",
+        );
+        projector.add_resource(
+            "https://picloud.local/products/test-product/ingresses/web",
+            "Ingress",
+        );
+
+        let event = make_product_deleted("test-product");
+
+        cascade_delete_product(
+            &event,
+            &(event_log.clone() as Arc<dyn EventLog>),
+            &(projector.clone() as Arc<dyn StateProjector>),
+            &(storage.clone() as Arc<dyn StorageBackend>),
+            &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &iri_builder,
+        )
+        .await;
+
+        // Scheduler should have stopped Container and Binary workloads
+        let stopped = scheduler.stopped.lock().unwrap();
+        assert_eq!(stopped.len(), 2);
+        assert!(stopped.contains(&"https://picloud.local/products/test-product/containers/api".to_string()));
+        assert!(stopped.contains(&"https://picloud.local/products/test-product/binaries/worker".to_string()));
+
+        // Storage should have deleted the volume
+        let deleted = storage.deleted.lock().unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(
+            deleted[0],
+            "https://picloud.local/products/test-product/volumes/data"
+        );
+
+        // ResourceDeleted events should have been emitted for all 4 child resources
+        let appended = event_log.appended_events();
+        assert_eq!(appended.len(), 4);
+        for evt in &appended {
+            assert_eq!(evt.event_type, "ResourceDeleted");
+            assert_eq!(evt.correlation_id, event.correlation_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn cascade_delete_with_no_children_emits_nothing() {
+        let event_log = Arc::new(MockEventLog::new());
+        let projector = Arc::new(MockProjector::new());
+        let storage = Arc::new(MockStorage::new());
+        let scheduler = Arc::new(MockScheduler::new());
+        let iri_builder = IriBuilder::new(ClusterDomain::default());
+
+        let event = make_product_deleted("empty-product");
+
+        cascade_delete_product(
+            &event,
+            &(event_log.clone() as Arc<dyn EventLog>),
+            &(projector.clone() as Arc<dyn StateProjector>),
+            &(storage.clone() as Arc<dyn StorageBackend>),
+            &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &iri_builder,
+        )
+        .await;
+
+        assert!(event_log.appended_events().is_empty());
+        assert!(scheduler.stopped.lock().unwrap().is_empty());
+        assert!(storage.deleted.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cascade_delete_missing_product_iri_skips() {
+        let event_log = Arc::new(MockEventLog::new());
+        let projector = Arc::new(MockProjector::new());
+        let storage = Arc::new(MockStorage::new());
+        let scheduler = Arc::new(MockScheduler::new());
+        let iri_builder = IriBuilder::new(ClusterDomain::default());
+
+        // Event without product_iri in payload
+        let event = EventEnvelope::new(
+            iri_builder.event_schema("ProductDeleted", 1),
+            "ProductDeleted",
+            ResourceIri("https://picloud.local/test".to_string()),
+            Some("test-product".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({}),
+        );
+
+        cascade_delete_product(
+            &event,
+            &(event_log.clone() as Arc<dyn EventLog>),
+            &(projector.clone() as Arc<dyn StateProjector>),
+            &(storage.clone() as Arc<dyn StorageBackend>),
+            &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
+            &iri_builder,
+        )
+        .await;
+
+        // Should have skipped — nothing emitted
+        assert!(event_log.appended_events().is_empty());
     }
 }

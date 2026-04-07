@@ -171,13 +171,22 @@ impl PiCloudHttpServer {
             .route("/products/:name/events", get(handle_events))
             .route("/api/commands", post(handle_command))
             .route("/api/apply", post(handle_apply))
+            .route("/api/delete", post(handle_delete))
             .route("/graph", get(handle_cluster_graph))
+            .route(
+                "/.well-known/openid-configuration",
+                get(handle_oidc_discovery),
+            )
+            .route("/.well-known/jwks.json", get(handle_jwks))
+            .route("/auth/token", post(handle_token))
+            .route("/auth/authorize", get(handle_authorize))
             .with_state(AppState {
                 cluster_root_iri,
                 cluster_domain: self.cluster_domain.clone(),
                 event_log: self.event_log.clone(),
                 projector: self.projector.clone(),
                 cluster: self.cluster.clone(),
+                iam: self.iam.clone(),
             })
     }
 
@@ -210,6 +219,7 @@ struct AppState {
     event_log: Option<Arc<dyn EventLog>>,
     projector: Option<Arc<dyn StateProjector>>,
     cluster: Option<Arc<dyn ClusterMembership>>,
+    iam: Option<Arc<dyn IdentityProvider>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -753,6 +763,32 @@ async fn handle_apply(
                 });
                 (iri, "ResourceDeclared", Some(i.product.clone()), payload)
             }
+            ResourceDeclaration::Secret(s) => {
+                let iri = iri_builder.resource(&s.product, "secrets", &s.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Secret",
+                    "product": s.product,
+                    "name": s.name,
+                });
+                (iri, "ResourceDeclared", Some(s.product.clone()), payload)
+            }
+            ResourceDeclaration::Role(r) => {
+                let product = r.product.clone().unwrap_or_default();
+                let iri = if product.is_empty() {
+                    iri_builder.resource("platform", "roles", &r.name)
+                } else {
+                    iri_builder.resource(&product, "roles", &r.name)
+                };
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Role",
+                    "product": r.product,
+                    "name": r.name,
+                    "permissions": r.permissions,
+                });
+                (iri, "ResourceDeclared", r.product.clone(), payload)
+            }
         };
 
         let schema = iri_builder.event_schema(event_type, 1);
@@ -800,6 +836,61 @@ async fn handle_apply(
     )
 }
 
+/// Request payload for the /api/delete endpoint.
+#[derive(Deserialize)]
+struct DeletePayload {
+    /// Name of the product to delete
+    product: String,
+}
+
+/// Handle product deletion — emits a ProductDeleted event to trigger cascading deletion.
+async fn handle_delete(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<DeletePayload>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let product_iri = iri_builder.product(&payload.product);
+    let correlation_id = Uuid::new_v4();
+
+    let schema = iri_builder.event_schema("ProductDeleted", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "ProductDeleted",
+        product_iri.clone(),
+        Some(payload.product.clone()),
+        correlation_id,
+        serde_json::json!({
+            "product_iri": product_iri.as_str(),
+            "product_name": payload.product,
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "product": payload.product,
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append ProductDeleted event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
 /// Handle SPARQL query against the cluster-level graph (not product-scoped).
 async fn handle_cluster_graph(
     headers: HeaderMap,
@@ -845,6 +936,137 @@ async fn handle_cluster_graph(
             ct,
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// OIDC Handlers
+// ---------------------------------------------------------------------------
+
+/// GET /.well-known/openid-configuration — OIDC discovery document
+async fn handle_oidc_discovery(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    match iam.oidc_discovery().await {
+        Ok(doc) => {
+            let body = serde_json::to_value(&doc).unwrap_or_default();
+            resource_response(body, ContentType::Json)
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /.well-known/jwks.json — JSON Web Key Set
+async fn handle_jwks(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    match iam.jwks().await {
+        Ok(jwks) => {
+            let body = serde_json::to_value(&jwks).unwrap_or_default();
+            resource_response(body, ContentType::Json)
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/token — Token endpoint (client_credentials grant)
+#[derive(Deserialize)]
+struct TokenRequest {
+    grant_type: String,
+    client_id: String,
+    client_secret: String,
+    scope: Option<String>,
+}
+
+async fn handle_token(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<TokenRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    if req.grant_type != "client_credentials" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "unsupported_grant_type",
+                "error_description": "Only client_credentials grant is supported",
+            })),
+        )
+            .into_response();
+    }
+
+    match iam
+        .client_credentials_token(&req.client_id, &req.client_secret, req.scope.as_deref())
+        .await
+    {
+        Ok(token_resp) => {
+            let body = serde_json::to_value(&token_resp).unwrap_or_default();
+            resource_response(body, ContentType::Json)
+        }
+        Err(picloud_domain::error::PiCloudError::Unauthenticated) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "invalid_client",
+                "error_description": "Invalid client_id or client_secret",
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /auth/authorize — Authorization endpoint stub (Phase 2)
+///
+/// Full WebAuthn/passkey ceremony is Phase 3. For now, return a JSON
+/// response indicating that passkey authentication is required.
+async fn handle_authorize(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let issuer = format!("https://{}", state.cluster_domain.0);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "authentication_required",
+            "method": "passkey",
+            "message": "WebAuthn/FIDO2 passkey authentication is required. Full ceremony available in Phase 3.",
+            "issuer": issuer,
+            "authorize_endpoint": format!("{}/auth/authorize", issuer),
+        })),
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,5 +1230,61 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         // Without event log injected, returns 503
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // -- OIDC endpoint tests --
+
+    #[tokio::test]
+    async fn oidc_discovery_returns_503_without_iam() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/.well-known/openid-configuration")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn jwks_returns_503_without_iam() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/.well-known/jwks.json")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn token_returns_503_without_iam() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/auth/token")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"grant_type":"client_credentials","client_id":"x","client_secret":"y"}"#,
+            ))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn authorize_returns_passkey_required() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/auth/authorize")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "authentication_required");
+        assert_eq!(json["method"], "passkey");
     }
 }

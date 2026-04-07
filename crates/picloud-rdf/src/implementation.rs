@@ -604,6 +604,37 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_product_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let product_iri_str = event.payload["product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        // Remove the product resource itself from all graphs
+        self.remove_triples_about_all_graphs(product_iri_str)?;
+
+        // Also remove the product's named graph entirely — all child resources
+        // that were projected into it disappear with it.
+        if let Some(product_name) = event.product.as_deref() {
+            let graph_iri = self.iri_builder.product_graph(product_name);
+            // Remove all triples in the named graph
+            let g = NamedNode::new(graph_iri.as_str())
+                .map_err(|e| PiCloudError::Internal(format!("invalid graph IRI: {e}")))?;
+            let quads: Vec<Quad> = self
+                .store
+                .quads_for_pattern(None, None, None, Some(GraphNameRef::from(&g)))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            for quad in &quads {
+                self.store
+                    .remove(quad)
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
+        }
+
+        debug!(product_iri = product_iri_str, "projected ProductDeleted");
+        Ok(())
+    }
+
     /// Replace the status literal for a resource in the default graph
     /// (and optionally a product graph).
     fn update_status(
@@ -725,6 +756,7 @@ impl StateProjector for OxigraphProjector {
             "ResourceDeleted" => self.project_resource_deleted(event),
             "IdentityCreated" => self.project_identity_created(event),
             "ProductDeployed" => self.project_product_deployed(event),
+            "ProductDeleted" => self.project_product_deleted(event),
             other => {
                 debug!(event_type = other, "unhandled event type — skipping projection");
                 Ok(())
@@ -1070,6 +1102,89 @@ mod tests {
 
         let result = projector
             .query("SELECT ?s ?p ?o WHERE { ?s ?p ?o }")
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_project_product_deleted_removes_product_and_children() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let product_iri = iri_builder.product("photo-app");
+
+        // Deploy a product
+        let deploy_event = EventEnvelope::new(
+            iri_builder.event_schema("ProductDeployed", 1),
+            "ProductDeployed",
+            product_iri.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "product_iri": product_iri.as_str(),
+                "product_name": "photo-app",
+                "version": "1.0.0",
+            }),
+        );
+        projector.project(&deploy_event).await.unwrap();
+
+        // Declare a child resource
+        let container_iri = iri_builder.resource("photo-app", "containers", "api-server");
+        let declared_event = EventEnvelope::new(
+            iri_builder.event_schema("ResourceDeclared", 1),
+            "ResourceDeclared",
+            container_iri.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": container_iri.as_str(),
+                "resource_type": "Container",
+                "product": "photo-app",
+            }),
+        );
+        projector.project(&declared_event).await.unwrap();
+
+        // Verify product exists
+        let result = projector
+            .query(&format!(
+                "SELECT ?s WHERE {{ <{}> <{}resourceType> ?s }}",
+                product_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+
+        // Delete the product
+        let delete_event = EventEnvelope::new(
+            iri_builder.event_schema("ProductDeleted", 1),
+            "ProductDeleted",
+            product_iri.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "product_iri": product_iri.as_str(),
+            }),
+        );
+        projector.project(&delete_event).await.unwrap();
+
+        // Verify product triples are gone
+        let result = projector
+            .query(&format!(
+                "SELECT ?s WHERE {{ <{}> <{}resourceType> ?s }}",
+                product_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+
+        // Verify child resource triples in named graph are gone
+        let result = projector
+            .query_product(
+                &product_iri,
+                &format!("?res <{}resourceType> ?rtype", PICLOUD_NS),
+            )
             .await
             .unwrap();
         assert!(result.bindings.is_empty());
