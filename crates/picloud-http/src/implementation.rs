@@ -215,6 +215,10 @@ impl PiCloudHttpServer {
                 "/products/:name/schemas/events/:event_type/v:version",
                 get(handle_product_event_schema),
             )
+            .route(
+                "/products/:name/event-store/:store/:aggregate_type/:aggregate_id/events",
+                get(handle_event_store_read).post(handle_event_store_append),
+            )
             .route("/api/commands", post(handle_command))
             .route("/api/apply", post(handle_apply))
             .route("/api/delete", post(handle_delete))
@@ -1291,6 +1295,132 @@ async fn handle_ingress_proxy(
                 .into_response()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Product Event Store Handlers
+// ---------------------------------------------------------------------------
+
+/// Request body for appending an event to a product event store.
+#[derive(Deserialize)]
+struct EventStoreAppendRequest {
+    /// Schema IRI for the event (e.g. "https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v1")
+    schema: String,
+    /// The event type name (e.g. "OrderPlaced")
+    #[serde(rename = "type")]
+    event_type: String,
+    /// The event payload
+    payload: serde_json::Value,
+}
+
+/// POST /products/:name/event-store/:store/:aggregate_type/:aggregate_id/events
+///
+/// Append an event to a product's aggregate stream.
+async fn handle_event_store_append(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((product, store, aggregate_type, aggregate_id)): Path<(String, String, String, String)>,
+    Json(body): Json<EventStoreAppendRequest>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+
+    // Build the source IRI for this aggregate stream
+    let source = iri_builder.aggregate_stream(&product, &store, &aggregate_type, &aggregate_id);
+
+    // Parse the schema IRI
+    let schema = match ResourceIri::new(&body.schema) {
+        Ok(iri) => iri,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid schema IRI: {e}") })),
+            );
+        }
+    };
+
+    let correlation_id = Uuid::new_v4();
+    let envelope = EventEnvelope::new(
+        schema,
+        &body.event_type,
+        source,
+        Some(product.clone()),
+        correlation_id,
+        body.payload,
+    );
+    let event_id = envelope.id;
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "eventId": event_id.to_string(),
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append event store event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+/// GET /products/:name/event-store/:store/:aggregate_type/:aggregate_id/events
+///
+/// Read all events for a product's aggregate stream.
+async fn handle_event_store_read(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((product, store, aggregate_type, aggregate_id)): Path<(String, String, String, String)>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let stream_iri = iri_builder.aggregate_stream(&product, &store, &aggregate_type, &aggregate_id);
+    let stream_iri_str = stream_iri.as_str().to_string();
+
+    // Get all events from offset 0, then filter by product + source IRI
+    let all_events = event_log.events_since(0).await;
+    let matching: Vec<serde_json::Value> = all_events
+        .into_iter()
+        .filter(|e| e.product.as_deref() == Some(&product) && e.source.as_str() == stream_iri_str)
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id.to_string(),
+                "schema": e.schema.as_str(),
+                "type": e.event_type,
+                "timestamp": e.timestamp.to_rfc3339(),
+                "source": e.source.as_str(),
+                "correlationId": e.correlation_id.to_string(),
+                "payload": e.payload,
+            })
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "stream": stream_iri_str,
+            "product": product,
+            "store": store,
+            "aggregateType": aggregate_type,
+            "aggregateId": aggregate_id,
+            "events": matching,
+        })),
+    )
 }
 
 // ---------------------------------------------------------------------------

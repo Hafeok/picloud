@@ -19,6 +19,12 @@ use picloud_domain::traits::{EventFilter, EventLog};
 /// Default capacity for the broadcast channel.
 const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
 
+/// When the log exceeds this many events, compaction is eligible.
+const COMPACTION_THRESHOLD: usize = 10_000;
+
+/// Number of most-recent events to retain after compaction.
+const COMPACTION_KEEP: usize = 1_000;
+
 /// In-memory event log backed by a `Vec<EventEnvelope>` and a tokio broadcast
 /// channel for real-time subscriptions.
 pub struct InMemoryEventLog {
@@ -203,6 +209,9 @@ pub struct PersistentEventLog {
     inner: InMemoryEventLog,
     file: TokioMutex<std::fs::File>,
     path: PathBuf,
+    /// Number of events that have been compacted away. This offset is added to
+    /// logical cursors so that `events_since(N)` remains correct after compaction.
+    snapshot_offset: RwLock<usize>,
 }
 
 impl PersistentEventLog {
@@ -267,10 +276,20 @@ impl PersistentEventLog {
             .open(&path)
             .map_err(|e| PiCloudError::Internal(format!("failed to open event log file for append {}: {e}", path.display())))?;
 
+        // Load snapshot offset from the sidecar metadata file, if present.
+        let meta_path = path.with_extension("jsonl.meta");
+        let snapshot_offset = if meta_path.exists() {
+            let meta = std::fs::read_to_string(&meta_path).map_err(|e| PiCloudError::Internal(format!("failed to read compaction metadata {}: {e}", meta_path.display())))?;
+            meta.trim().parse::<usize>().unwrap_or(0)
+        } else {
+            0
+        };
+
         Ok(Self {
             inner,
             file: TokioMutex::new(file),
             path,
+            snapshot_offset: RwLock::new(snapshot_offset),
         })
     }
 
@@ -287,6 +306,130 @@ impl PersistentEventLog {
     /// Return the file path.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Return the current snapshot offset (number of events compacted away).
+    pub async fn snapshot_offset(&self) -> usize {
+        *self.snapshot_offset.read().await
+    }
+
+    /// Return the total logical event count (compacted + in-memory).
+    pub async fn total_event_count(&self) -> usize {
+        *self.snapshot_offset.read().await + self.inner.len().await
+    }
+
+    /// Compact the event log using the default policy: if the in-memory log has
+    /// more than `COMPACTION_THRESHOLD` events, discard all but the most recent
+    /// `COMPACTION_KEEP` events and rewrite the file on disk.
+    pub async fn compact_if_needed(&self) -> Result<bool> {
+        let current_len = self.inner.len().await;
+        if current_len > COMPACTION_THRESHOLD {
+            self.compact(current_len - COMPACTION_KEEP).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Compact the event log, discarding the first `discard_count` events from
+    /// the in-memory log and rewriting the file on disk.
+    ///
+    /// The `snapshot_offset` is advanced by `discard_count` so that callers
+    /// using logical offsets (e.g. the RDF projector cursor) continue to work
+    /// correctly.
+    pub async fn compact(&self, discard_count: usize) -> Result<()> {
+        let current_len = self.inner.len().await;
+        if discard_count == 0 || discard_count > current_len {
+            return Err(PiCloudError::Internal(format!(
+                "invalid discard_count {discard_count} for log with {current_len} events"
+            )));
+        }
+
+        info!(
+            discard_count,
+            current_len,
+            path = %self.path.display(),
+            "Compacting event log"
+        );
+
+        // 1. Drain the first `discard_count` events from the in-memory log.
+        let remaining = {
+            let mut events = self.inner.events.write().await;
+            let remaining: Vec<EventEnvelope> = events.drain(discard_count..).collect();
+            *events = remaining.clone();
+            remaining
+        };
+
+        // 2. Update snapshot_offset.
+        {
+            let mut offset = self.snapshot_offset.write().await;
+            *offset += discard_count;
+        }
+
+        // 3. Rewrite the file on disk with only the remaining events.
+        {
+            let mut file_guard = self.file.lock().await;
+
+            // Write to a temporary file, then rename for atomicity.
+            let tmp_path = self.path.with_extension("jsonl.tmp");
+            {
+                let mut tmp_file = std::fs::File::create(&tmp_path).map_err(|e| {
+                    PiCloudError::Internal(format!(
+                        "failed to create compaction temp file {}: {e}",
+                        tmp_path.display()
+                    ))
+                })?;
+                for event in &remaining {
+                    let line = serde_json::to_string(event).map_err(|e| {
+                        PiCloudError::Internal(format!(
+                            "failed to serialize event during compaction: {e}"
+                        ))
+                    })?;
+                    writeln!(tmp_file, "{}", line).map_err(|e| {
+                        PiCloudError::Internal(format!(
+                            "failed to write event during compaction: {e}"
+                        ))
+                    })?;
+                }
+                tmp_file.flush().map_err(|e| {
+                    PiCloudError::Internal(format!("failed to flush compaction temp file: {e}"))
+                })?;
+            }
+
+            std::fs::rename(&tmp_path, &self.path).map_err(|e| {
+                PiCloudError::Internal(format!(
+                    "failed to rename compaction temp file: {e}"
+                ))
+            })?;
+
+            // Write snapshot offset to the metadata sidecar file.
+            let meta_path = self.path.with_extension("jsonl.meta");
+            let offset_val = *self.snapshot_offset.read().await;
+            std::fs::write(&meta_path, offset_val.to_string()).map_err(|e| {
+                PiCloudError::Internal(format!(
+                    "failed to write compaction metadata: {e}"
+                ))
+            })?;
+
+            // Re-open the file in append mode.
+            let new_file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&self.path)
+                .map_err(|e| {
+                    PiCloudError::Internal(format!(
+                        "failed to reopen event log after compaction: {e}"
+                    ))
+                })?;
+            *file_guard = new_file;
+        }
+
+        info!(
+            remaining = remaining.len(),
+            snapshot_offset = *self.snapshot_offset.read().await,
+            "Event log compaction complete"
+        );
+
+        Ok(())
     }
 }
 
@@ -326,7 +469,11 @@ impl EventLog for PersistentEventLog {
     }
 
     async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
-        self.inner.events_since(offset).await
+        let snap = *self.snapshot_offset.read().await;
+        // The caller uses logical offsets. Subtract the snapshot offset to get
+        // the physical index into the in-memory log.
+        let physical = if offset > snap { offset - snap } else { 0 };
+        self.inner.events_since(physical).await
     }
 }
 
