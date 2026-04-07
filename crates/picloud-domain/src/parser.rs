@@ -201,7 +201,57 @@ impl ResourceFile {
             }
         }
 
+        // Collect all volume names declared in this file, keyed by product.
+        let mut volume_names: HashMap<&str, Vec<&str>> = HashMap::new();
+        for decl in &self.resources {
+            if let ResourceDeclaration::Volume(v) = decl {
+                volume_names
+                    .entry(v.product.as_str())
+                    .or_default()
+                    .push(v.name.as_str());
+            }
+        }
+
+        // Check that every container/binary mount references a volume declared in this file.
+        for decl in &self.resources {
+            let (name, product, mounts) = match decl {
+                ResourceDeclaration::Container(c) => {
+                    (c.name.as_str(), c.product.as_str(), &c.mounts)
+                }
+                ResourceDeclaration::Binary(b) => {
+                    (b.name.as_str(), b.product.as_str(), &b.mounts)
+                }
+                _ => continue,
+            };
+
+            let product_volumes = volume_names.get(product).cloned().unwrap_or_default();
+            for mount in mounts {
+                if !product_volumes.contains(&mount.volume.as_str()) {
+                    return Err(PiCloudError::ResourceValidationFailed {
+                        reason: format!(
+                            "{}: mount references volume '{}' which is not declared in this file for product '{}'",
+                            name, mount.volume, product
+                        ),
+                    });
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Sort resources in dependency order for provisioning.
+    ///
+    /// Order: products first, then volumes, then containers/binaries,
+    /// then everything else. This ensures volumes are provisioned before
+    /// the containers that mount them.
+    pub fn sort_for_provisioning(&mut self) {
+        self.resources.sort_by_key(|decl| match decl {
+            ResourceDeclaration::Product(_) => 0,
+            ResourceDeclaration::Volume(_) => 1,
+            ResourceDeclaration::Container(_) | ResourceDeclaration::Binary(_) => 2,
+            _ => 3,
+        });
     }
 }
 
@@ -627,6 +677,68 @@ mod tests {
         }"#;
         let file = ResourceFile::parse(json).unwrap();
         assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn validation_rejects_mount_referencing_undeclared_volume() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "container", "name": "api", "product": "app", "image": "img:1",
+                  "mounts": [{ "volume": "missing-vol", "path": "/data" }] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        let err = file.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("missing-vol"), "error should mention the missing volume: {msg}");
+    }
+
+    #[test]
+    fn validation_accepts_mount_referencing_declared_volume() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "volume", "name": "data", "product": "app", "size_gb": 10 },
+                { "type": "container", "name": "api", "product": "app", "image": "img:1",
+                  "mounts": [{ "volume": "data", "path": "/data" }] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        file.validate().unwrap();
+    }
+
+    #[test]
+    fn validation_rejects_mount_referencing_volume_from_different_product() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app-a", "version": "1.0.0" },
+                { "type": "product", "name": "app-b", "version": "1.0.0" },
+                { "type": "volume", "name": "data", "product": "app-a", "size_gb": 10 },
+                { "type": "container", "name": "api", "product": "app-b", "image": "img:1",
+                  "mounts": [{ "volume": "data", "path": "/data" }] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn sort_for_provisioning_orders_correctly() {
+        let json = r#"{
+            "resources": [
+                { "type": "container", "name": "api", "product": "app", "image": "img:1" },
+                { "type": "ingress", "name": "web", "product": "app", "target": "api", "port": 8080, "path": "/" },
+                { "type": "volume", "name": "data", "product": "app", "size_gb": 10 },
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "binary", "name": "worker", "product": "app", "executable": "worker" }
+            ]
+        }"#;
+        let mut file = ResourceFile::parse(json).unwrap();
+        file.sort_for_provisioning();
+
+        let types: Vec<&str> = file.resources.iter().map(|r| r.resource_type()).collect();
+        assert_eq!(types, vec!["product", "volume", "container", "binary", "ingress"]);
     }
 
     #[test]

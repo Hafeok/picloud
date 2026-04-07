@@ -20,7 +20,7 @@ use picloud_domain::traits::{
 };
 
 use picloud_cluster::{ClusterConfig, MdnsCluster};
-use picloud_events::InMemoryEventLog;
+use picloud_events::PersistentEventLog;
 use picloud_iam::LocalIdentityProvider;
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
@@ -35,6 +35,7 @@ struct ServerConfig {
     cluster_domain: ClusterDomain,
     http_port: u16,
     bind_addr: IpAddr,
+    events_path: PathBuf,
     storage_path: PathBuf,
     storage_capacity_gb: u64,
     rdf_path: PathBuf,
@@ -64,6 +65,10 @@ impl ServerConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
+        let events_path = std::env::var("PICLOUD_EVENTS_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/events"));
+
         let storage_path = std::env::var("PICLOUD_STORAGE_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/storage"));
@@ -83,6 +88,7 @@ impl ServerConfig {
             cluster_domain,
             http_port,
             bind_addr,
+            events_path,
             storage_path,
             storage_capacity_gb,
             rdf_path,
@@ -131,10 +137,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cluster: Arc<dyn ClusterMembership> = Arc::new(cluster);
     info!("Cluster membership started");
 
-    // 2. Start event log
-    let event_log = Arc::new(InMemoryEventLog::new());
+    // 2. Start event log (persistent, backed by JSON-lines file)
+    let event_log = Arc::new(
+        PersistentEventLog::open(&config.events_path)
+            .expect("failed to open persistent event log"),
+    );
     let event_log_trait: Arc<dyn EventLog> = event_log.clone();
-    info!("Event log started");
+    info!(
+        path = %config.events_path.display(),
+        events = event_log.len().await,
+        "Persistent event log started"
+    );
 
     // 3. Start RDF projector (disk-backed with in-memory fallback)
     //

@@ -5,6 +5,7 @@
 /// The CLI never imports slice internals — it only talks HTTP to the cluster.
 
 use clap::{Parser, Subcommand};
+use futures::StreamExt;
 use serde_json::json;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -19,6 +20,10 @@ struct Cli {
     /// Cluster domain (default: picloud.local)
     #[arg(long, env = "PICLOUD_DOMAIN", default_value = "picloud.local")]
     domain: String,
+
+    /// Port to connect to (default: 7443)
+    #[arg(long, env = "PICLOUD_PORT", default_value = "7443")]
+    port: u16,
 
     /// Path to identity token
     #[arg(long, env = "PICLOUD_TOKEN")]
@@ -177,12 +182,11 @@ struct ClusterClient {
 }
 
 impl ClusterClient {
-    fn new(domain: &str, token: Option<String>) -> Self {
+    fn new(domain: &str, port: u16, token: Option<String>) -> Self {
         Self {
-            base_url: format!("https://{}", domain),
+            base_url: format!("http://{}:{}", domain, port),
             token,
             client: reqwest::Client::builder()
-                .danger_accept_invalid_certs(true) // platform CA not yet in trust store
                 .build()
                 .expect("failed to create HTTP client"),
         }
@@ -289,8 +293,88 @@ impl ClusterClient {
         }
 
         let response = request.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("HTTP {} — {}", status, text).into());
+        }
         let body = response.json::<serde_json::Value>().await?;
         Ok(body)
+    }
+
+    /// Connect to an SSE endpoint and stream events line-by-line.
+    /// Runs until the connection is closed or the caller cancels.
+    async fn get_sse_stream(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut request = self
+            .client
+            .get(format!("{}{}", self.base_url, path))
+            .header("Accept", "text/event-stream");
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("HTTP {} — {}", status, text).into());
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            let text = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&text);
+
+            // Process complete SSE lines
+            while let Some(pos) = buffer.find('\n') {
+                let line = buffer[..pos].trim_end_matches('\r').to_string();
+                buffer = buffer[pos + 1..].to_string();
+
+                if line.starts_with("data: ") {
+                    let data = &line[6..];
+                    // Try to pretty-print JSON, fall back to raw text
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        let event_type = json
+                            .get("event_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let source = json
+                            .get("source")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let timestamp = json
+                            .get("timestamp")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        println!(
+                            "[{}] {} — {}",
+                            timestamp, event_type, source
+                        );
+                        if let Some(payload) = json.get("payload") {
+                            println!(
+                                "  {}",
+                                serde_json::to_string_pretty(payload)
+                                    .unwrap_or_default()
+                                    .replace('\n', "\n  ")
+                            );
+                        }
+                    } else {
+                        println!("{}", data);
+                    }
+                } else if line.starts_with("event: ") {
+                    // SSE event type line — informational
+                    let event_name = &line[7..];
+                    println!("--- {} ---", event_name);
+                }
+                // Skip empty lines and comments (lines starting with ':')
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -304,24 +388,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let cli = Cli::parse();
-    let client = ClusterClient::new(&cli.domain, cli.token);
+    let client = ClusterClient::new(&cli.domain, cli.port, cli.token);
 
     match cli.command {
         Commands::Cluster { command } => match command {
             ClusterCommands::Init { domain, ca_cert } => {
-                println!("Initializing cluster on domain: {}", domain);
-                let payload = json!({
-                    "domain": domain,
-                    "ca_cert": ca_cert,
-                });
-                match client.post_command("ClusterInit", payload).await {
-                    Ok(_) => println!("Cluster initialized successfully"),
-                    Err(e) => {
-                        // In bootstrap mode, the cluster may not be reachable yet
-                        println!("Note: cluster not yet reachable ({})", e);
-                        println!("Bootstrap will be completed when the server starts");
-                    }
+                println!("PiCloud Cluster Bootstrap");
+                println!("=========================");
+                println!();
+                println!("The PiCloud cluster auto-starts when the picloud-server binary runs.");
+                println!("Nodes discover each other via mDNS and form a Raft cluster automatically.");
+                println!();
+                println!("Configuration:");
+                println!("  Domain:  {}", domain);
+                if let Some(ref cert) = ca_cert {
+                    println!("  CA cert: {} (bring-your-own)", cert);
+                } else {
+                    println!("  CA cert: auto-generated (platform CA)");
                 }
+                println!();
+                println!("To start the cluster on this node:");
+                println!("  picloud-server --domain {}", domain);
+                if let Some(ref cert) = ca_cert {
+                    println!("    --ca-cert {}", cert);
+                }
+                println!();
+                println!("On additional nodes, just run picloud-server with the same domain.");
+                println!("They will discover the existing cluster via mDNS and join automatically.");
+                println!();
+                println!("Once running, check cluster status with:");
+                println!("  picloud --port {} cluster status", cli.port);
             }
             ClusterCommands::Recover => {
                 println!("Initiating physical recovery...");
@@ -331,23 +427,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(token) = resp.get("bootstrap_token") {
                             println!("Bootstrap token: {}", token);
                             println!("Token expires in 15 minutes. Use it to re-enroll at:");
-                            println!("  https://{}/enroll", cli.domain);
+                            println!("  http://{}:{}/enroll", cli.domain, cli.port);
                         }
                     }
                     Err(e) => eprintln!("Recovery failed: {}", e),
                 }
             }
-            ClusterCommands::Status => match client.get("/nodes").await {
-                Ok(body) => {
-                    println!("Cluster Status");
-                    println!("==============");
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&body).unwrap_or_default()
-                    );
+            ClusterCommands::Status => {
+                println!("Cluster Status");
+                println!("==============");
+                println!();
+
+                // Fetch cluster root info
+                match client.get("/").await {
+                    Ok(info) => {
+                        if let Some(domain) = info.get("domain").and_then(|v| v.as_str()) {
+                            println!("  Domain:   {}", domain);
+                        }
+                        if let Some(version) = info.get("version").and_then(|v| v.as_str()) {
+                            println!("  Version:  {}", version);
+                        }
+                        if let Some(leader) = info.get("leader").and_then(|v| v.as_str()) {
+                            println!("  Leader:   {}", leader);
+                        }
+                        if let Some(state) = info.get("state").and_then(|v| v.as_str()) {
+                            println!("  State:    {}", state);
+                        }
+                        println!();
+                    }
+                    Err(e) => {
+                        eprintln!("  (Could not fetch cluster info: {})", e);
+                        println!();
+                    }
                 }
-                Err(e) => eprintln!("Failed to get cluster status: {}", e),
-            },
+
+                // Fetch nodes
+                match client.get("/nodes").await {
+                    Ok(body) => {
+                        if let Some(nodes) = body.as_array() {
+                            println!("Nodes ({}):", nodes.len());
+                            println!("  {:<20} {:<15} {:<10} {}", "NAME", "ADDRESS", "ROLE", "STATUS");
+                            println!("  {:<20} {:<15} {:<10} {}", "----", "-------", "----", "------");
+                            for node in nodes {
+                                let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let addr = node.get("address").and_then(|v| v.as_str()).unwrap_or("?");
+                                let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+                                let status = node.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                                println!("  {:<20} {:<15} {:<10} {}", name, addr, role, status);
+                            }
+                        } else {
+                            // Not an array — print raw JSON
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&body).unwrap_or_default()
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to get node list: {}", e),
+                }
+            }
         },
         Commands::Resource { command } => match command {
             ResourceCommands::Apply { path } => {
@@ -497,17 +635,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             ResourceCommands::Status { target } => {
-                let path = if target.starts_with("https://") {
+                let path = if target.starts_with("http://") || target.starts_with("https://") {
                     target.clone()
                 } else {
                     format!("/products/{}", target)
                 };
                 match client.get(&path).await {
                     Ok(body) => {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&body).unwrap_or_default()
-                        );
+                        // Show product-level summary if available
+                        if let Some(name) = body.get("name").and_then(|v| v.as_str()) {
+                            println!("Product: {}", name);
+                            if let Some(status) = body.get("status").and_then(|v| v.as_str()) {
+                                println!("  Status: {}", status);
+                            }
+                            if let Some(iri) = body.get("iri").and_then(|v| v.as_str()) {
+                                println!("  IRI:    {}", iri);
+                            }
+                            println!();
+                        }
+
+                        // Show child resources if present
+                        if let Some(resources) = body.get("resources").and_then(|v| v.as_array()) {
+                            println!("Resources ({}):", resources.len());
+                            println!("  {:<15} {:<25} {}", "TYPE", "NAME", "STATUS");
+                            println!("  {:<15} {:<25} {}", "----", "----", "------");
+                            for res in resources {
+                                let rtype = res.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+                                let rname = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let rstatus = res.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                                println!("  {:<15} {:<25} {}", rtype, rname, rstatus);
+                            }
+                        } else {
+                            // Fallback: print raw JSON
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&body).unwrap_or_default()
+                            );
+                        }
                     }
                     Err(e) => eprintln!("Failed to get status: {}", e),
                 }
@@ -520,8 +684,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "name": name,
                     "email": email,
                 });
-                match client.post_command("IdentityCreate", payload).await {
-                    Ok(_) => println!("Identity created: {}", name),
+                match client.post_command("IdentityCreated", payload).await {
+                    Ok(resp) => {
+                        println!("Identity created: {}", name);
+                        if let Some(iri) = resp.get("iri").and_then(|v| v.as_str()) {
+                            println!("  IRI: {}", iri);
+                        }
+                        println!();
+                        println!("Next steps:");
+                        println!("  1. Register a passkey for this identity");
+                        println!("  2. Admins must register at least 2 passkeys");
+                    }
                     Err(e) => eprintln!("Failed to create identity: {}", e),
                 }
             }
@@ -533,7 +706,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(token) = resp.get("enrollment_token") {
                             println!("Enrollment token: {}", token);
                             println!("Complete re-enrollment at:");
-                            println!("  https://{}/enroll", cli.domain);
+                            println!("  http://{}:{}/enroll", cli.domain, cli.port);
                         }
                     }
                     Err(e) => eprintln!("Passkey reset failed: {}", e),
@@ -542,7 +715,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             IdentityCommands::Token => {
                 println!("Initiating device authentication flow...");
                 println!("Open the following URL in your browser:");
-                println!("  https://{}/auth/device", cli.domain);
+                println!("  http://{}:{}/auth/device", cli.domain, cli.port);
                 println!("Waiting for authentication...");
                 // In a real implementation, this would poll for completion
                 eprintln!("Device flow not yet implemented — use browser enrollment");
@@ -553,26 +726,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 product,
                 correlation_id,
             } => {
-                let mut path = "/api/events/stream".to_string();
-                let mut params = vec![];
-                if let Some(ref p) = product {
-                    params.push(format!("product={}", p));
-                }
-                if let Some(ref c) = correlation_id {
-                    params.push(format!("correlation_id={}", c));
-                }
-                if !params.is_empty() {
-                    path = format!("{}?{}", path, params.join("&"));
-                }
+                // Build the SSE endpoint path
+                let path = if let Some(ref p) = product {
+                    let mut url = format!("/products/{}/events", p);
+                    if let Some(ref c) = correlation_id {
+                        url = format!("{}?correlation_id={}", url, c);
+                    }
+                    url
+                } else {
+                    let mut url = "/api/events/stream".to_string();
+                    let mut params = vec![];
+                    if let Some(ref c) = correlation_id {
+                        params.push(format!("correlation_id={}", c));
+                    }
+                    if !params.is_empty() {
+                        url = format!("{}?{}", url, params.join("&"));
+                    }
+                    url
+                };
 
                 println!("Subscribing to event stream...");
                 if let Some(ref p) = product {
-                    println!("  Product filter: {}", p);
+                    println!("  Product: {}", p);
                 }
-                // In production, this would use SSE streaming
-                match client.get(&path).await {
-                    Ok(body) => println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default()),
-                    Err(e) => eprintln!("Failed to subscribe: {}", e),
+                if let Some(ref c) = correlation_id {
+                    println!("  Correlation ID: {}", c);
+                }
+                println!("  (Press Ctrl+C to stop)");
+                println!();
+
+                match client.get_sse_stream(&path).await {
+                    Ok(()) => println!("Stream ended."),
+                    Err(e) => eprintln!("Stream error: {}", e),
                 }
             }
         },

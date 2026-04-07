@@ -27,6 +27,13 @@ pub trait EventLog: Send + Sync {
         &self,
         filter: EventFilter,
     ) -> Result<tokio::sync::broadcast::Receiver<EventEnvelope>>;
+
+    /// Return all events starting from the given offset (0-based index).
+    ///
+    /// This is the catchup mechanism: a projector that has processed events
+    /// 0..N calls `events_since(N)` to get everything it missed. A new node
+    /// joining the cluster calls `events_since(0)` to replay the full log.
+    async fn events_since(&self, offset: usize) -> Vec<EventEnvelope>;
 }
 
 #[derive(Debug, Clone, Default)]

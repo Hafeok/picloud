@@ -691,6 +691,10 @@ async fn handle_apply(
         );
     }
 
+    // Sort resources in dependency order: products -> volumes -> containers/binaries -> rest
+    let mut resource_file = resource_file;
+    resource_file.sort_for_provisioning();
+
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let correlation_id = Uuid::new_v4();
     let mut results = Vec::new();

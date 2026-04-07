@@ -49,7 +49,7 @@ sophia_api   = "0.8"
 axum         = { version = "0.7", features = ["macros"] }
 tower        = { version = "0.4", features = ["util"] }
 tower-http   = { version = "0.5", features = ["trace", "cors", "auth"] }
-reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest      = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
 hyper        = { version = "1", features = ["full"] }
 
 # TLS / PKI
@@ -76,6 +76,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # CLI
 clap         = { version = "4", features = ["derive", "env"] }
+
+# POSIX
+libc         = "0.2"
 
 # Storage
 bytes        = "1"

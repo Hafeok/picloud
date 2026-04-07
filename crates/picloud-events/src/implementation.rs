@@ -4,13 +4,15 @@
 //! broadcast-based pub/sub and idempotency deduplication via `idempotency_key`.
 
 use std::collections::HashSet;
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Mutex as TokioMutex, RwLock};
 use tracing::{debug, info};
 
-use picloud_domain::error::Result;
+use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::events::EventEnvelope;
 use picloud_domain::traits::{EventFilter, EventLog};
 
@@ -155,6 +157,15 @@ impl EventLog for InMemoryEventLog {
 
         Ok(filtered_rx)
     }
+
+    async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
+        let events = self.events.read().await;
+        if offset >= events.len() {
+            Vec::new()
+        } else {
+            events[offset..].to_vec()
+        }
+    }
 }
 
 /// Check whether an event matches the given filter criteria.
@@ -177,6 +188,146 @@ fn matches_filter(event: &EventEnvelope, filter: &EventFilter) -> bool {
     }
 
     true
+}
+
+/// Persistent event log that wraps `InMemoryEventLog` and also writes events
+/// to a JSON-lines file on disk.
+///
+/// On construction, if the file exists, all persisted events are replayed into
+/// the in-memory log. On append, the event is serialized as a single JSON line
+/// and appended to the file before being forwarded to the in-memory log.
+///
+/// The broadcast channel from the inner log is preserved, so real-time pub/sub
+/// works exactly as with `InMemoryEventLog`.
+pub struct PersistentEventLog {
+    inner: InMemoryEventLog,
+    file: TokioMutex<std::fs::File>,
+    path: PathBuf,
+}
+
+impl PersistentEventLog {
+    /// Open (or create) a persistent event log backed by the given file path.
+    ///
+    /// If the file already exists, all events are replayed into memory.
+    /// The parent directory is created if it does not exist.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+
+        // Ensure parent directory exists.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| PiCloudError::Internal(format!("failed to create event log directory {}: {e}", parent.display())))?;
+        }
+
+        let inner = InMemoryEventLog::new();
+
+        // Replay existing events if the file exists.
+        if path.exists() {
+            let file = std::fs::File::open(&path).map_err(|e| PiCloudError::Internal(format!("failed to open event log file {}: {e}", path.display())))?;
+            let reader = std::io::BufReader::new(file);
+            let mut replayed = 0u64;
+
+            for (line_no, line) in reader.lines().enumerate() {
+                let line = line.map_err(|e| PiCloudError::Internal(format!("failed to read event log line {}: {e}", line_no + 1)))?;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let event: EventEnvelope =
+                    serde_json::from_str(trimmed).map_err(|e| PiCloudError::Internal(format!(
+                            "failed to deserialize event at line {}: {e}",
+                            line_no + 1
+                        )))?;
+
+                // Record idempotency key.
+                if let Some(ref key) = event.idempotency_key {
+                    // We access the inner fields directly during replay to avoid
+                    // broadcasting replayed events (there are no subscribers yet).
+                    futures::executor::block_on(async {
+                        inner.seen_keys.write().await.insert(key.clone());
+                    });
+                }
+                futures::executor::block_on(async {
+                    inner.events.write().await.push(event);
+                });
+                replayed += 1;
+            }
+            if replayed > 0 {
+                info!(
+                    path = %path.display(),
+                    events = replayed,
+                    "Replayed events from persistent log"
+                );
+            }
+        }
+
+        // Open the file in append mode for subsequent writes.
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| PiCloudError::Internal(format!("failed to open event log file for append {}: {e}", path.display())))?;
+
+        Ok(Self {
+            inner,
+            file: TokioMutex::new(file),
+            path,
+        })
+    }
+
+    /// Return the number of events currently stored in memory.
+    pub async fn len(&self) -> usize {
+        self.inner.len().await
+    }
+
+    /// Return whether the log is empty.
+    pub async fn is_empty(&self) -> bool {
+        self.inner.is_empty().await
+    }
+
+    /// Return the file path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+#[async_trait]
+impl EventLog for PersistentEventLog {
+    async fn append(&self, event: EventEnvelope) -> Result<()> {
+        // Check idempotency before writing to disk.
+        if let Some(ref key) = event.idempotency_key {
+            let seen = self.inner.seen_keys.read().await;
+            if seen.contains(key) {
+                debug!(
+                    idempotency_key = %key,
+                    event_id = %event.id,
+                    "Duplicate idempotency key — skipping persistent append"
+                );
+                return Ok(());
+            }
+        }
+
+        // Serialize and write to disk first (durability before broadcast).
+        {
+            let line = serde_json::to_string(&event).map_err(|e| PiCloudError::Internal(format!("failed to serialize event {}: {e}", event.id)))?;
+            let mut file = self.file.lock().await;
+            writeln!(*file, "{}", line).map_err(|e| PiCloudError::Internal(format!("failed to write event to log file: {e}")))?;
+            file.flush().map_err(|e| PiCloudError::Internal(format!("failed to flush event log file: {e}")))?;
+        }
+
+        // Delegate to in-memory log for broadcast + storage.
+        self.inner.append(event).await
+    }
+
+    async fn subscribe(
+        &self,
+        filter: EventFilter,
+    ) -> Result<broadcast::Receiver<EventEnvelope>> {
+        self.inner.subscribe(filter).await
+    }
+
+    async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
+        self.inner.events_since(offset).await
+    }
 }
 
 /// A per-product event store that scopes all operations to a single product.
@@ -220,6 +371,16 @@ impl EventLog for ProductEventStore {
         // Enforce product scope: always filter by this product.
         filter.product = Some(self.product.clone());
         self.inner.subscribe(filter).await
+    }
+
+    async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
+        // Return only events scoped to this product.
+        self.inner
+            .events_since(offset)
+            .await
+            .into_iter()
+            .filter(|e| e.product.as_deref() == Some(&self.product))
+            .collect()
     }
 }
 
@@ -489,5 +650,130 @@ mod tests {
         log.append(make_event("NodeJoined", None, cid)).await.unwrap();
 
         assert_eq!(log.len().await, 2);
+    }
+
+    // ---- PersistentEventLog tests ----
+
+    #[tokio::test]
+    async fn persistent_log_creates_file_and_appends() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        assert_eq!(log.len().await, 0);
+
+        let cid = Uuid::new_v4();
+        log.append(make_event("NodeJoined", None, cid)).await.unwrap();
+        log.append(make_event("ResourceReady", None, cid)).await.unwrap();
+
+        assert_eq!(log.len().await, 2);
+        assert!(path.exists());
+
+        // File should have 2 lines
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn persistent_log_replays_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        // Write events with the first instance.
+        {
+            let log = PersistentEventLog::open(&path).unwrap();
+            log.append(make_event("NodeJoined", None, cid)).await.unwrap();
+            log.append(make_event("ResourceDeclared", None, cid)).await.unwrap();
+            log.append(make_event("ResourceReady", None, cid)).await.unwrap();
+            assert_eq!(log.len().await, 3);
+        }
+
+        // Re-open -- events should be replayed from disk.
+        {
+            let log = PersistentEventLog::open(&path).unwrap();
+            assert_eq!(log.len().await, 3);
+
+            let events = log.events_since(0).await;
+            assert_eq!(events.len(), 3);
+            assert_eq!(events[0].event_type, "NodeJoined");
+            assert_eq!(events[1].event_type, "ResourceDeclared");
+            assert_eq!(events[2].event_type, "ResourceReady");
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_log_idempotency_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        let mut event = make_event("NodeJoined", None, cid);
+        event.idempotency_key = Some("key-abc".to_string());
+
+        // Write the event.
+        {
+            let log = PersistentEventLog::open(&path).unwrap();
+            log.append(event.clone()).await.unwrap();
+            assert_eq!(log.len().await, 1);
+        }
+
+        // Re-open and try to append the same event -- should be deduplicated.
+        {
+            let log = PersistentEventLog::open(&path).unwrap();
+            assert_eq!(log.len().await, 1);
+            log.append(event.clone()).await.unwrap();
+            assert_eq!(log.len().await, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_log_broadcast_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        let mut rx = log.subscribe(EventFilter::default()).await.unwrap();
+
+        let cid = Uuid::new_v4();
+        let event = make_event("NodeJoined", None, cid);
+        let event_id = event.id;
+
+        log.append(event).await.unwrap();
+
+        let received = rx.recv().await.expect("should receive event via broadcast");
+        assert_eq!(received.id, event_id);
+    }
+
+    #[tokio::test]
+    async fn persistent_log_events_since() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        let cid = Uuid::new_v4();
+
+        log.append(make_event("A", None, cid)).await.unwrap();
+        log.append(make_event("B", None, cid)).await.unwrap();
+        log.append(make_event("C", None, cid)).await.unwrap();
+
+        let since_1 = log.events_since(1).await;
+        assert_eq!(since_1.len(), 2);
+        assert_eq!(since_1[0].event_type, "B");
+        assert_eq!(since_1[1].event_type, "C");
+
+        let since_3 = log.events_since(3).await;
+        assert!(since_3.is_empty());
+    }
+
+    #[tokio::test]
+    async fn persistent_log_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deep").join("nested").join("events.jsonl");
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        log.append(make_event("NodeJoined", None, Uuid::new_v4())).await.unwrap();
+        assert!(path.exists());
     }
 }

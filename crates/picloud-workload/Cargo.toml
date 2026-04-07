@@ -18,6 +18,7 @@ oci-spec = { workspace = true }
 uuid     = { workspace = true }
 chrono   = { workspace = true }
 rand     = { workspace = true }
+libc     = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

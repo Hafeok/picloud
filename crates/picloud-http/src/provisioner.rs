@@ -17,7 +17,7 @@ use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{IriBuilder, ResourceIri};
 use picloud_domain::storage::StorageIntent;
 use picloud_domain::traits::{EventFilter, EventLog, StateProjector, StorageBackend, WorkloadScheduler, WorkloadSpec};
-use picloud_domain::workload::{ContainerSpec, BinarySpec, ResourceLimits, RestartPolicy};
+use picloud_domain::workload::{ContainerSpec, BinarySpec, EnvValue, PortMapping, ResourceLimits, RestartPolicy, VolumeMount};
 use tracing::{error, info, warn};
 
 /// Configuration for the resource provisioner.
@@ -240,6 +240,76 @@ async fn provision_volume(
     Ok(())
 }
 
+/// Parse volume mounts from a JSON payload array.
+fn parse_mounts(payload: &serde_json::Value) -> Vec<VolumeMount> {
+    payload
+        .get("mounts")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| serde_json::from_value::<VolumeMount>(m.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parse environment variables from a JSON payload object.
+fn parse_env(payload: &serde_json::Value) -> std::collections::HashMap<String, EnvValue> {
+    payload
+        .get("env")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| {
+                    let env_val = serde_json::from_value::<EnvValue>(v.clone())
+                        .unwrap_or_else(|_| EnvValue::Literal(v.as_str().unwrap_or("").to_string()));
+                    (k.clone(), env_val)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parse resource limits from a JSON payload.
+fn parse_resource_limits(payload: &serde_json::Value) -> ResourceLimits {
+    ResourceLimits {
+        cpu_millicores: payload
+            .get("cpu_millicores")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        memory_mb: payload
+            .get("memory_mb")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+    }
+}
+
+/// Parse port mappings from a JSON payload array.
+fn parse_ports(payload: &serde_json::Value) -> Vec<PortMapping> {
+    payload
+        .get("ports")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| serde_json::from_value::<PortMapping>(p.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parse string args from a JSON payload array.
+fn parse_args(payload: &serde_json::Value) -> Vec<String> {
+    payload
+        .get("args")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| a.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Provision a container by calling WorkloadScheduler::schedule.
 async fn provision_container(
     scheduler: &Arc<dyn WorkloadScheduler>,
@@ -261,13 +331,10 @@ async fn provision_container(
     let spec = WorkloadSpec::Container(ContainerSpec {
         image,
         identity,
-        resources: ResourceLimits {
-            cpu_millicores: None,
-            memory_mb: None,
-        },
-        mounts: vec![],
-        env: std::collections::HashMap::new(),
-        ports: vec![],
+        resources: parse_resource_limits(payload),
+        mounts: parse_mounts(payload),
+        env: parse_env(payload),
+        ports: parse_ports(payload),
         health_check: None,
         restart_policy: RestartPolicy::Always,
     });
@@ -296,14 +363,11 @@ async fn provision_binary(
 
     let spec = WorkloadSpec::Binary(BinarySpec {
         executable,
-        args: vec![],
+        args: parse_args(payload),
         identity,
-        resources: ResourceLimits {
-            cpu_millicores: None,
-            memory_mb: None,
-        },
-        mounts: vec![],
-        env: std::collections::HashMap::new(),
+        resources: parse_resource_limits(payload),
+        mounts: parse_mounts(payload),
+        env: parse_env(payload),
         restart_policy: RestartPolicy::Always,
     });
 
@@ -505,6 +569,15 @@ mod tests {
             _filter: EventFilter,
         ) -> Result<tokio::sync::broadcast::Receiver<EventEnvelope>> {
             Ok(self.tx.subscribe())
+        }
+
+        async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
+            let events = self.appended.lock().unwrap();
+            if offset >= events.len() {
+                Vec::new()
+            } else {
+                events[offset..].to_vec()
+            }
         }
     }
 
