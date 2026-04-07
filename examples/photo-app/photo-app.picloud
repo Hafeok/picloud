@@ -1,0 +1,56 @@
+{
+  "resources": [
+    {
+      "type": "product",
+      "name": "photo-app",
+      "version": "1.0.0",
+      "description": "Photo sharing application"
+    },
+    {
+      "type": "volume",
+      "name": "media-store",
+      "product": "photo-app",
+      "size_gb": 100,
+      "durability": "full-replication",
+      "performance": "standard"
+    },
+    {
+      "type": "container",
+      "name": "api-server",
+      "product": "photo-app",
+      "image": "registry.example.com/photo-api:1.0.0",
+      "identity": "api-worker",
+      "cpu": "500m",
+      "memory": "512MB",
+      "mounts": [
+        { "volume": "media-store", "path": "/data" }
+      ],
+      "env": {
+        "LOG_LEVEL": "info",
+        "DB_URL": { "secret": "db-connection" }
+      },
+      "ports": [8080]
+    },
+    {
+      "type": "container",
+      "name": "background-processor",
+      "product": "photo-app",
+      "image": "registry.example.com/photo-worker:1.0.0",
+      "identity": "worker-identity",
+      "cpu": "250m",
+      "memory": "256MB",
+      "mounts": [
+        { "volume": "media-store", "path": "/data", "read_only": true }
+      ]
+    },
+    {
+      "type": "ingress",
+      "name": "api-ingress",
+      "product": "photo-app",
+      "target": "api-server",
+      "port": 8080,
+      "path": "/products/photo-app/api",
+      "tls": true
+    }
+  ]
+}
