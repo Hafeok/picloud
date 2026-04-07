@@ -10,19 +10,20 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tracing::info;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use picloud_domain::iri::ClusterDomain;
 use picloud_domain::traits::{
-    ClusterMembership, DnsRegistry, EventLog, IdentityProvider, StorageBackend,
-    WorkloadScheduler,
+    ClusterMembership, DnsRegistry, EventFilter, EventLog, IdentityProvider,
+    StateProjector, StorageBackend, WorkloadScheduler,
 };
 
 use picloud_cluster::{ClusterConfig, MdnsCluster};
 use picloud_events::InMemoryEventLog;
 use picloud_iam::LocalIdentityProvider;
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
+use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
 use picloud_workload::ProcessScheduler;
 
@@ -35,6 +36,7 @@ struct ServerConfig {
     bind_addr: IpAddr,
     storage_path: PathBuf,
     storage_capacity_gb: u64,
+    rdf_path: PathBuf,
 }
 
 impl ServerConfig {
@@ -70,6 +72,10 @@ impl ServerConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(100);
 
+        let rdf_path = std::env::var("PICLOUD_RDF_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/rdf"));
+
         Self {
             node_id,
             node_name,
@@ -78,6 +84,7 @@ impl ServerConfig {
             bind_addr,
             storage_path,
             storage_capacity_gb,
+            rdf_path,
         }
     }
 }
@@ -124,14 +131,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Cluster membership started");
 
     // 2. Start event log
-    let event_log = InMemoryEventLog::new();
-    let event_log: Arc<dyn EventLog> = Arc::new(event_log);
+    let event_log = Arc::new(InMemoryEventLog::new());
+    let event_log_trait: Arc<dyn EventLog> = event_log.clone();
     info!("Event log started");
 
-    // 3. Start RDF projector
-    // The projector will be wired to consume events from the event log
-    // For now, it's available for direct queries
-    info!("RDF projector started");
+    // 3. Start RDF projector (disk-backed)
+    //
+    // On a fresh node the store is empty and cursor = 0, so it replays
+    // the entire event log on first boot.
+    //
+    // On a restarting node the store already has data and the cursor
+    // is restored from a metadata triple — only missed events are replayed.
+    //
+    // On a late-joining node the Raft log is replicated first, then the
+    // projector replays all events to build the full graph from scratch.
+    let projector = OxigraphProjector::open(
+        &config.rdf_path,
+        config.cluster_domain.clone(),
+    ).unwrap_or_else(|e| {
+        warn!("Failed to open disk-backed store ({e}), falling back to in-memory");
+        OxigraphProjector::with_domain(config.cluster_domain.clone())
+            .expect("in-memory store creation should not fail")
+    });
+    let projector = Arc::new(projector);
+
+    // Startup catchup: replay any events the projector missed
+    {
+        let cursor = projector.cursor();
+        let missed = event_log.events_since(cursor).await;
+        if !missed.is_empty() {
+            info!(
+                cursor = cursor,
+                missed = missed.len(),
+                "Replaying missed events into RDF store"
+            );
+            projector.replay(&missed).await?;
+        } else {
+            info!(cursor = cursor, "RDF store is up to date");
+        }
+    }
+
+    // Background projection loop: subscribe to live events and project
+    // them as they arrive. This keeps the graph continuously up to date.
+    {
+        let projector = Arc::clone(&projector);
+        let event_log = event_log_trait.clone();
+        tokio::spawn(async move {
+            let mut rx = match event_log.subscribe(EventFilter::default()).await {
+                Ok(rx) => rx,
+                Err(e) => {
+                    error!("Failed to subscribe to event log for projection: {e}");
+                    return;
+                }
+            };
+            info!("Background RDF projection loop started");
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Err(e) = projector.project(&event).await {
+                            error!(
+                                event_id = %event.id,
+                                event_type = %event.event_type,
+                                "Projection failed: {e}"
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(
+                            skipped = n,
+                            "Projection subscriber lagged — events may need re-replay"
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("Event log closed — stopping projection loop");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    let projector: Arc<dyn StateProjector> = projector;
+    info!(
+        path = %config.rdf_path.display(),
+        "RDF projector started"
+    );
 
     // 4. Start IAM service
     let iam_key = config.node_id.as_bytes();
@@ -193,7 +277,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Shutting down");
 
     // Suppress unused variable warnings — these Arc handles keep services alive
+    drop(event_log_trait);
     drop(event_log);
+    drop(projector);
     drop(iam);
     drop(storage);
     drop(scheduler);

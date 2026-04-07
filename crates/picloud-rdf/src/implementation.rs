@@ -1,6 +1,18 @@
 //! OxigraphProjector — projects platform events into an RDF triplestore.
 //!
-//! Uses Oxigraph in-memory mode. Implements `StateProjector` from picloud-domain.
+//! Supports both in-memory mode (for tests) and disk-backed mode (for
+//! production). In disk-backed mode, the Oxigraph store is persisted via
+//! RocksDB and survives process restarts. A replay cursor tracks the last
+//! projected event offset so that on restart the node only projects events
+//! it missed rather than replaying the entire log.
+//!
+//! **Distribution model**: the RDF graph is NOT replicated directly. The
+//! Raft-replicated event log is the shared state. Each node independently
+//! projects its own local Oxigraph copy from the log. Because projectors
+//! are deterministic, all nodes converge to the same graph.
+
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use oxigraph::model::{
@@ -8,7 +20,7 @@ use oxigraph::model::{
 };
 use oxigraph::sparql::QueryResults;
 use oxigraph::store::Store;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::events::EventEnvelope;
@@ -25,33 +37,163 @@ fn picloud_term(local: &str) -> NamedNode {
 }
 
 /// The Oxigraph-backed implementation of `StateProjector`.
+///
+/// Tracks a replay cursor (`last_projected_offset`) so that on startup
+/// the node can call `replay()` with events from the log and only project
+/// those it hasn't seen yet. The cursor is atomically incremented after
+/// each successful projection.
 pub struct OxigraphProjector {
     store: Store,
     iri_builder: IriBuilder,
+    /// The number of events this projector has processed. On startup this
+    /// is 0 (fresh/in-memory) or restored from a metadata triple in the
+    /// store (disk-backed). After projecting event at log index N the
+    /// cursor becomes N+1, meaning "give me events starting at N+1".
+    last_projected_offset: AtomicUsize,
 }
 
 impl OxigraphProjector {
-    /// Create a new in-memory projector.
+    /// Create a new **in-memory** projector (for tests and single-run usage).
     pub fn new() -> Result<Self> {
         let store = Store::new().map_err(|e| PiCloudError::Internal(e.to_string()))?;
         Ok(Self {
             store,
             iri_builder: IriBuilder::new(ClusterDomain::default()),
+            last_projected_offset: AtomicUsize::new(0),
         })
     }
 
-    /// Create a new projector with a custom cluster domain.
+    /// Create a new in-memory projector with a custom cluster domain.
     pub fn with_domain(domain: ClusterDomain) -> Result<Self> {
         let store = Store::new().map_err(|e| PiCloudError::Internal(e.to_string()))?;
         Ok(Self {
             store,
             iri_builder: IriBuilder::new(domain),
+            last_projected_offset: AtomicUsize::new(0),
         })
+    }
+
+    /// Open a **disk-backed** projector at the given path.
+    ///
+    /// If the directory already contains an Oxigraph store, it is reopened
+    /// and the replay cursor is restored from a metadata triple stored in
+    /// the graph. This means a restarting node skips events it already
+    /// projected.
+    ///
+    /// If the directory is empty, a fresh store is created and the cursor
+    /// starts at 0 — the node will replay the entire log on first boot.
+    pub fn open(path: impl AsRef<Path>, domain: ClusterDomain) -> Result<Self> {
+        let store = Store::open(path.as_ref())
+            .map_err(|e| PiCloudError::Internal(format!(
+                "Failed to open Oxigraph store at {}: {e}",
+                path.as_ref().display(),
+            )))?;
+
+        // Try to restore the replay cursor from a metadata triple:
+        //   <picloud:meta/projector> picloud:lastProjectedOffset "N"
+        let cursor = Self::read_cursor_from_store(&store).unwrap_or(0);
+
+        info!(
+            path = %path.as_ref().display(),
+            restored_cursor = cursor,
+            "Opened disk-backed Oxigraph store"
+        );
+
+        Ok(Self {
+            store,
+            iri_builder: IriBuilder::new(domain),
+            last_projected_offset: AtomicUsize::new(cursor),
+        })
+    }
+
+    /// The current replay cursor — the next log offset the projector
+    /// expects. Pass this to `event_log.events_since(cursor)` to get
+    /// the events the projector hasn't seen.
+    pub fn cursor(&self) -> usize {
+        self.last_projected_offset.load(Ordering::Relaxed)
+    }
+
+    /// Replay a batch of historical events (e.g. on startup catchup).
+    ///
+    /// Projects each event in order and advances the cursor. This is the
+    /// mechanism that gets a new or restarted node up to speed:
+    ///
+    /// ```text
+    /// let missed = event_log.events_since(projector.cursor()).await;
+    /// projector.replay(&missed).await?;
+    /// // projector is now caught up — subscribe to live events
+    /// ```
+    pub async fn replay(&self, events: &[EventEnvelope]) -> Result<usize> {
+        let mut projected = 0;
+        for event in events {
+            self.project(event).await?;
+            projected += 1;
+        }
+        if projected > 0 {
+            self.persist_cursor()?;
+            info!(events_projected = projected, cursor = self.cursor(), "Replay complete");
+        }
+        Ok(projected)
     }
 
     /// Returns a reference to the `IriBuilder`.
     pub fn iri_builder(&self) -> &IriBuilder {
         &self.iri_builder
+    }
+
+    /// Persist the current cursor value into the store as a metadata triple.
+    /// Only meaningful for disk-backed stores (in-memory stores lose it anyway).
+    fn persist_cursor(&self) -> Result<()> {
+        let meta_subject = "https://picloud.local/meta/projector";
+        let meta_predicate = &format!("{PICLOUD_NS}lastProjectedOffset");
+        let cursor = self.cursor();
+
+        // Remove old cursor triple
+        let s = NamedNode::new(meta_subject)
+            .map_err(|e| PiCloudError::Internal(format!("invalid meta IRI: {e}")))?;
+        let p = NamedNodeRef::new(meta_predicate)
+            .map_err(|e| PiCloudError::Internal(format!("invalid meta predicate: {e}")))?;
+
+        let old_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                None,
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &old_quads {
+            let _ = self.store.remove(quad);
+        }
+
+        // Write new cursor
+        self.insert_triple(
+            meta_subject,
+            meta_predicate,
+            Literal::new_simple_literal(cursor.to_string()).into(),
+        )?;
+
+        // Flush to disk if the store supports it
+        self.store.flush().map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Read the replay cursor from the store's metadata triple.
+    fn read_cursor_from_store(store: &Store) -> Option<usize> {
+        let sparql = format!(
+            "SELECT ?offset WHERE {{ <https://picloud.local/meta/projector> <{PICLOUD_NS}lastProjectedOffset> ?offset }}"
+        );
+        if let Ok(QueryResults::Solutions(solutions)) = store.query(&sparql) {
+            for solution in solutions.flatten() {
+                if let Some(Term::Literal(lit)) = solution.get("offset") {
+                    return lit.value().parse::<usize>().ok();
+                }
+            }
+        }
+        None
     }
 
     /// Insert a single triple into the default graph.
@@ -435,7 +577,7 @@ fn term_to_json(term: &Term) -> serde_json::Value {
 #[async_trait]
 impl StateProjector for OxigraphProjector {
     async fn project(&self, event: &EventEnvelope) -> Result<()> {
-        match event.event_type.as_str() {
+        let result = match event.event_type.as_str() {
             "NodeJoined" => self.project_node_joined(event),
             "NodeLeft" => self.project_node_left(event),
             "ResourceDeclared" => self.project_resource_declared(event),
@@ -445,7 +587,19 @@ impl StateProjector for OxigraphProjector {
                 debug!(event_type = other, "unhandled event type — skipping projection");
                 Ok(())
             }
+        };
+
+        if result.is_ok() {
+            self.last_projected_offset.fetch_add(1, Ordering::Relaxed);
+        } else {
+            warn!(
+                event_id = %event.id,
+                event_type = %event.event_type,
+                "Projection failed — cursor NOT advanced"
+            );
         }
+
+        result
     }
 
     async fn query(&self, sparql: &str) -> Result<QueryResult> {
@@ -697,6 +851,63 @@ mod tests {
             result.bindings[0]["rtype"]["value"].as_str().unwrap(),
             "Container"
         );
+    }
+
+    #[tokio::test]
+    async fn test_cursor_advances_on_projection() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        assert_eq!(projector.cursor(), 0);
+
+        let event = make_node_joined_event(&iri_builder);
+        projector.project(&event).await.unwrap();
+        assert_eq!(projector.cursor(), 1);
+
+        // Unknown events also advance the cursor (they succeed with a skip)
+        let unknown = EventEnvelope::new(
+            iri_builder.event_schema("Unknown", 1),
+            "Unknown",
+            ResourceIri::new("https://picloud.local/test").unwrap(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({}),
+        );
+        projector.project(&unknown).await.unwrap();
+        assert_eq!(projector.cursor(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_replay_batch() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        let events = vec![
+            make_node_joined_event(&iri_builder),
+            EventEnvelope::new(
+                iri_builder.event_schema("ResourceDeclared", 1),
+                "ResourceDeclared",
+                iri_builder.resource("photo-app", "containers", "api"),
+                Some("photo-app".to_string()),
+                Uuid::new_v4(),
+                serde_json::json!({
+                    "resource_iri": iri_builder.resource("photo-app", "containers", "api").as_str(),
+                    "resource_type": "Container",
+                    "product": "photo-app",
+                }),
+            ),
+        ];
+
+        let count = projector.replay(&events).await.unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(projector.cursor(), 2);
+
+        // Verify data was actually projected
+        let result = projector
+            .query("SELECT ?s WHERE { ?s a <https://picloud.local/ontology#Node> }")
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
     }
 
     #[tokio::test]

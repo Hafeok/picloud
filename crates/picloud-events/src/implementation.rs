@@ -53,6 +53,20 @@ impl InMemoryEventLog {
     pub async fn is_empty(&self) -> bool {
         self.events.read().await.is_empty()
     }
+
+    /// Return all events starting from the given offset (0-based index).
+    ///
+    /// This is the catchup mechanism: a projector that has processed events
+    /// 0..N calls `events_since(N)` to get everything it missed. A new node
+    /// joining the cluster calls `events_since(0)` to replay the full log.
+    pub async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
+        let events = self.events.read().await;
+        if offset >= events.len() {
+            Vec::new()
+        } else {
+            events[offset..].to_vec()
+        }
+    }
 }
 
 impl Default for InMemoryEventLog {
@@ -417,6 +431,52 @@ mod tests {
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
         assert!(result.is_err(), "should not receive other-app event");
+    }
+
+    #[tokio::test]
+    async fn test_events_since_full_replay() {
+        let log = InMemoryEventLog::new();
+        let cid = Uuid::new_v4();
+
+        log.append(make_event("NodeJoined", None, cid)).await.unwrap();
+        log.append(make_event("ResourceDeclared", None, cid)).await.unwrap();
+        log.append(make_event("ResourceReady", None, cid)).await.unwrap();
+
+        // Full replay from offset 0
+        let all = log.events_since(0).await;
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].event_type, "NodeJoined");
+        assert_eq!(all[2].event_type, "ResourceReady");
+    }
+
+    #[tokio::test]
+    async fn test_events_since_partial_replay() {
+        let log = InMemoryEventLog::new();
+        let cid = Uuid::new_v4();
+
+        log.append(make_event("NodeJoined", None, cid)).await.unwrap();
+        log.append(make_event("ResourceDeclared", None, cid)).await.unwrap();
+        log.append(make_event("ResourceReady", None, cid)).await.unwrap();
+
+        // Partial replay from offset 2 (already seen first two)
+        let missed = log.events_since(2).await;
+        assert_eq!(missed.len(), 1);
+        assert_eq!(missed[0].event_type, "ResourceReady");
+    }
+
+    #[tokio::test]
+    async fn test_events_since_at_end_returns_empty() {
+        let log = InMemoryEventLog::new();
+        let cid = Uuid::new_v4();
+
+        log.append(make_event("NodeJoined", None, cid)).await.unwrap();
+
+        let missed = log.events_since(1).await;
+        assert!(missed.is_empty());
+
+        // Beyond end also returns empty
+        let missed = log.events_since(100).await;
+        assert!(missed.is_empty());
     }
 
     #[tokio::test]
