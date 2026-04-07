@@ -42,7 +42,7 @@ futures      = "0.3"
 openraft     = { version = "0.9", features = ["serde"] }
 
 # RDF / SPARQL
-oxigraph     = "0.4"
+oxigraph     = { version = "0.4", default-features = false }
 sophia_api   = "0.8"
 
 # HTTP server + client

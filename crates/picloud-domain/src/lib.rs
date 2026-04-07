@@ -18,3 +18,4 @@ pub mod storage;
 pub mod workload;
 pub mod product;
 pub mod traits;
+pub mod parser;

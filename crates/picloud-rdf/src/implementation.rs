@@ -293,6 +293,130 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_resource_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let resource_iri_str = event.payload["resource_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        // Remove from all graphs (default + product named graph)
+        self.remove_triples_about_all_graphs(resource_iri_str)?;
+        debug!(resource_iri = resource_iri_str, "projected ResourceDeleted");
+        Ok(())
+    }
+
+    fn project_identity_created(&self, event: &EventEnvelope) -> Result<()> {
+        let identity_iri_str = event.payload["identity_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let identity_type = event.payload["identity_type"]
+            .as_str()
+            .unwrap_or("Identity");
+        let name = event.payload["name"]
+            .as_str()
+            .unwrap_or_default();
+
+        self.insert_triple(
+            identity_iri_str,
+            RDF_TYPE,
+            picloud_term("Identity").into(),
+        )?;
+        self.insert_triple(
+            identity_iri_str,
+            &format!("{PICLOUD_NS}identityType"),
+            Literal::new_simple_literal(identity_type).into(),
+        )?;
+        self.insert_triple(
+            identity_iri_str,
+            &format!("{PICLOUD_NS}name"),
+            Literal::new_simple_literal(name).into(),
+        )?;
+        self.insert_triple(
+            identity_iri_str,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("active").into(),
+        )?;
+
+        // If product-scoped, also insert into the product's named graph
+        if let Some(product) = event.payload["product"].as_str() {
+            let graph_iri = self.iri_builder.product_graph(product);
+            self.insert_triple_in_graph(
+                identity_iri_str,
+                RDF_TYPE,
+                picloud_term("Identity").into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                identity_iri_str,
+                &format!("{PICLOUD_NS}name"),
+                Literal::new_simple_literal(name).into(),
+                graph_iri.as_str(),
+            )?;
+        }
+
+        debug!(identity_iri = identity_iri_str, "projected IdentityCreated");
+        Ok(())
+    }
+
+    fn project_product_deployed(&self, event: &EventEnvelope) -> Result<()> {
+        let product_iri_str = event.payload["product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let product_name = event.payload["product_name"]
+            .as_str()
+            .unwrap_or_default();
+        let version = event.payload["version"]
+            .as_str()
+            .unwrap_or("0.0.0");
+
+        // Insert product as a Resource with type "Product"
+        self.insert_triple(
+            product_iri_str,
+            RDF_TYPE,
+            picloud_term("Resource").into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}resourceType"),
+            Literal::new_simple_literal("Product").into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}name"),
+            Literal::new_simple_literal(product_name).into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}version"),
+            Literal::new_simple_literal(version).into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("deployed").into(),
+        )?;
+
+        // Register SPARQL endpoint and event stream IRIs
+        let graph_iri = self.iri_builder.product_graph(product_name);
+        let events_iri = self.iri_builder.product_events(product_name);
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}sparqlEndpoint"),
+            NamedNode::new(graph_iri.as_str())
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?
+                .into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}eventStream"),
+            NamedNode::new(events_iri.as_str())
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?
+                .into(),
+        )?;
+
+        debug!(product_iri = product_iri_str, "projected ProductDeployed");
+        Ok(())
+    }
+
     fn project_resource_failed(&self, event: &EventEnvelope) -> Result<()> {
         let resource_iri_str = event.payload["resource_iri"]
             .as_str()
@@ -441,6 +565,9 @@ impl StateProjector for OxigraphProjector {
             "ResourceDeclared" => self.project_resource_declared(event),
             "ResourceReady" => self.project_resource_ready(event),
             "ResourceFailed" => self.project_resource_failed(event),
+            "ResourceDeleted" => self.project_resource_deleted(event),
+            "IdentityCreated" => self.project_identity_created(event),
+            "ProductDeployed" => self.project_product_deployed(event),
             other => {
                 debug!(event_type = other, "unhandled event type — skipping projection");
                 Ok(())

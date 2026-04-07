@@ -7,6 +7,7 @@
 /// This crate depends only on picloud-domain. Trait objects for event log,
 /// state projection, etc. are injected from the composition root.
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query},
@@ -19,10 +20,16 @@ use axum::{
     Json, Router,
 };
 use futures::stream;
-use picloud_domain::iri::{ClusterDomain, IriBuilder};
+use picloud_domain::events::EventEnvelope;
+use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
+use picloud_domain::traits::{
+    ClusterMembership, EventFilter, EventLog, IdentityProvider, StateProjector,
+    StorageBackend, WorkloadScheduler,
+};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
+use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Content negotiation
@@ -102,6 +109,12 @@ pub fn resource_response(
 pub struct PiCloudHttpServer {
     pub bind_addr: SocketAddr,
     pub cluster_domain: ClusterDomain,
+    pub event_log: Option<Arc<dyn EventLog>>,
+    pub projector: Option<Arc<dyn StateProjector>>,
+    pub cluster: Option<Arc<dyn ClusterMembership>>,
+    pub iam: Option<Arc<dyn IdentityProvider>>,
+    pub storage: Option<Arc<dyn StorageBackend>>,
+    pub scheduler: Option<Arc<dyn WorkloadScheduler>>,
 }
 
 impl PiCloudHttpServer {
@@ -109,7 +122,32 @@ impl PiCloudHttpServer {
         Self {
             bind_addr,
             cluster_domain,
+            event_log: None,
+            projector: None,
+            cluster: None,
+            iam: None,
+            storage: None,
+            scheduler: None,
         }
+    }
+
+    /// Inject all platform dependencies.
+    pub fn with_dependencies(
+        mut self,
+        event_log: Arc<dyn EventLog>,
+        projector: Arc<dyn StateProjector>,
+        cluster: Arc<dyn ClusterMembership>,
+        iam: Arc<dyn IdentityProvider>,
+        storage: Arc<dyn StorageBackend>,
+        scheduler: Arc<dyn WorkloadScheduler>,
+    ) -> Self {
+        self.event_log = Some(event_log);
+        self.projector = Some(projector);
+        self.cluster = Some(cluster);
+        self.iam = Some(iam);
+        self.storage = Some(storage);
+        self.scheduler = Some(scheduler);
+        self
     }
 
     /// Build the axum [`Router`] with all platform routes.
@@ -134,6 +172,9 @@ impl PiCloudHttpServer {
             .with_state(AppState {
                 cluster_root_iri,
                 cluster_domain: self.cluster_domain.clone(),
+                event_log: self.event_log.clone(),
+                projector: self.projector.clone(),
+                cluster: self.cluster.clone(),
             })
     }
 
@@ -163,6 +204,9 @@ impl PiCloudHttpServer {
 struct AppState {
     cluster_root_iri: String,
     cluster_domain: ClusterDomain,
+    event_log: Option<Arc<dyn EventLog>>,
+    projector: Option<Arc<dyn StateProjector>>,
+    cluster: Option<Arc<dyn ClusterMembership>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -174,11 +218,33 @@ async fn handle_cluster_root(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Response {
     let ct = content_type_from_headers(&headers);
+
+    // Query real cluster members if available
+    let nodes = if let Some(ref cluster) = state.cluster {
+        match cluster.members().await {
+            Ok(members) => members
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "@id": m.node_iri.as_str(),
+                        "nodeId": m.node_id.to_string(),
+                        "address": m.address,
+                        "isLeader": m.is_leader,
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     resource_response(
         serde_json::json!({
             "@id": state.cluster_root_iri,
             "type": "PiCloudCluster",
             "domain": state.cluster_domain.0,
+            "nodes": nodes,
         }),
         ct,
     )
@@ -192,13 +258,33 @@ async fn handle_nodes(
     headers: HeaderMap,
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Response {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
+
+    let nodes = if let Some(ref cluster) = state.cluster {
+        match cluster.members().await {
+            Ok(members) => members
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "@id": m.node_iri.as_str(),
+                        "nodeId": m.node_id.to_string(),
+                        "address": m.address,
+                        "isLeader": m.is_leader,
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     resource_response(
         serde_json::json!({
             "@id": iri_builder.cluster_root().to_string(),
             "type": "NodeList",
-            "nodes": [],
+            "nodes": nodes,
         }),
         ct,
     )
@@ -209,29 +295,75 @@ async fn handle_node(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
-    resource_response(
-        serde_json::json!({
-            "@id": iri_builder.node(&name).to_string(),
-            "type": "Node",
-            "name": name,
-        }),
-        ct,
-    )
+
+    // Try to find the node in real cluster state
+    let node_iri = iri_builder.node(&name);
+    let node_data = if let Some(ref cluster) = state.cluster {
+        match cluster.members().await {
+            Ok(members) => members.iter().find(|m| m.node_iri == node_iri).map(|m| {
+                serde_json::json!({
+                    "@id": m.node_iri.as_str(),
+                    "type": "Node",
+                    "nodeId": m.node_id.to_string(),
+                    "name": name,
+                    "address": m.address,
+                    "isLeader": m.is_leader,
+                })
+            }),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    match node_data {
+        Some(data) => resource_response(data, ct),
+        None => resource_response(
+            serde_json::json!({
+                "@id": node_iri.as_str(),
+                "type": "Node",
+                "name": name,
+            }),
+            ct,
+        ),
+    }
 }
 
 async fn handle_products(
     headers: HeaderMap,
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Response {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
     let ct = content_type_from_headers(&headers);
+
+    // Query the RDF graph for all products
+    let products = if let Some(ref projector) = state.projector {
+        match projector
+            .query("SELECT ?product ?status WHERE { ?product <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://picloud.local/ontology#Resource> . ?product <https://picloud.local/ontology#resourceType> \"Product\" . OPTIONAL { ?product <https://picloud.local/ontology#status> ?status } }")
+            .await
+        {
+            Ok(result) => result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "@id": row["product"]["value"],
+                        "status": row.get("status").and_then(|s| s.get("value")),
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     resource_response(
         serde_json::json!({
-            "@id": iri_builder.cluster_root().to_string(),
+            "@id": state.cluster_root_iri,
             "type": "ProductList",
-            "products": [],
+            "products": products,
         }),
         ct,
     )
@@ -242,13 +374,42 @@ async fn handle_product(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
+    let product_iri = iri_builder.product(&name);
+
+    // Query RDF graph for product details
+    let resources = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?res ?rtype ?status WHERE {{ ?res <https://picloud.local/ontology#resourceType> ?rtype . ?res <https://picloud.local/ontology#status> ?status . FILTER(STRSTARTS(STR(?res), \"{}/\")) }}",
+            product_iri.as_str()
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "@id": row["res"]["value"],
+                        "type": row["rtype"]["value"],
+                        "status": row.get("status").and_then(|s| s.get("value")),
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     resource_response(
         serde_json::json!({
-            "@id": iri_builder.product(&name).to_string(),
+            "@id": product_iri.as_str(),
             "type": "Product",
             "name": name,
+            "resources": resources,
+            "graph": iri_builder.product_graph(&name).as_str(),
+            "events": iri_builder.product_events(&name).as_str(),
         }),
         ct,
     )
@@ -259,14 +420,34 @@ async fn handle_resource(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path((product, resource_type, resource_name)): Path<(String, String, String)>,
 ) -> Response {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
+    let resource_iri = iri_builder.resource(&product, &resource_type, &resource_name);
+
+    // Try to get resource status from RDF graph
+    let status = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?status WHERE {{ <{}> <https://picloud.local/ontology#status> ?status }}",
+            resource_iri.as_str()
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result
+                .bindings
+                .first()
+                .and_then(|row| row["status"]["value"].as_str().map(String::from)),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     resource_response(
         serde_json::json!({
-            "@id": iri_builder.resource(&product, &resource_type, &resource_name).to_string(),
+            "@id": resource_iri.as_str(),
             "type": resource_type,
             "name": resource_name,
             "product": product,
+            "status": status.unwrap_or_else(|| "unknown".to_string()),
         }),
         ct,
     )
@@ -283,50 +464,189 @@ async fn handle_graph(
     Path(name): Path<String>,
     Query(params): Query<GraphQuery>,
 ) -> Response {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
-    resource_response(
-        serde_json::json!({
-            "@id": iri_builder.product_graph(&name).to_string(),
-            "type": "SparqlEndpoint",
-            "product": name,
-            "query": params.query.unwrap_or_default(),
-            "results": [],
-        }),
-        ct,
-    )
+
+    match params.query {
+        Some(sparql) if !sparql.is_empty() => {
+            // Execute real SPARQL query against the product graph
+            if let Some(ref projector) = state.projector {
+                let product_iri = iri_builder.product(&name);
+                match projector.query_product(&product_iri, &sparql).await {
+                    Ok(result) => resource_response(
+                        serde_json::json!({
+                            "@id": iri_builder.product_graph(&name).as_str(),
+                            "type": "SparqlResult",
+                            "product": name,
+                            "results": result.bindings,
+                        }),
+                        ct,
+                    ),
+                    Err(e) => resource_response(
+                        serde_json::json!({
+                            "@id": iri_builder.product_graph(&name).as_str(),
+                            "type": "SparqlError",
+                            "error": e.to_string(),
+                        }),
+                        ct,
+                    ),
+                }
+            } else {
+                resource_response(
+                    serde_json::json!({
+                        "@id": iri_builder.product_graph(&name).as_str(),
+                        "type": "SparqlEndpoint",
+                        "error": "projector not available",
+                    }),
+                    ct,
+                )
+            }
+        }
+        _ => resource_response(
+            serde_json::json!({
+                "@id": iri_builder.product_graph(&name).as_str(),
+                "type": "SparqlEndpoint",
+                "product": name,
+                "hint": "Provide a ?query= parameter with a SPARQL query",
+            }),
+            ct,
+        ),
+    }
 }
+
+type SseStream = std::pin::Pin<
+    Box<dyn futures::Stream<Item = Result<Event, std::convert::Infallible>> + Send>,
+>;
 
 async fn handle_events(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path(name): Path<String>,
-) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let iri_builder = IriBuilder::new(state.cluster_domain);
+) -> Sse<SseStream> {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let event_iri = iri_builder.product_events(&name).to_string();
 
-    // Placeholder: emit a single connected event then keep alive
+    // Subscribe to real event stream if event log is available
+    if let Some(ref event_log) = state.event_log {
+        let filter = EventFilter {
+            product: Some(name.clone()),
+            ..Default::default()
+        };
+        if let Ok(mut rx) = event_log.subscribe(filter).await {
+            let stream: SseStream = Box::pin(async_stream::stream! {
+                // Send connected event first
+                yield Ok(Event::default()
+                    .event("connected")
+                    .data(serde_json::json!({ "stream": event_iri }).to_string()));
+
+                loop {
+                    match rx.recv().await {
+                        Ok(envelope) => {
+                            let data = serde_json::json!({
+                                "id": envelope.id.to_string(),
+                                "type": envelope.event_type,
+                                "timestamp": envelope.timestamp.to_rfc3339(),
+                                "source": envelope.source.as_str(),
+                                "correlationId": envelope.correlation_id.to_string(),
+                                "payload": envelope.payload,
+                            });
+                            yield Ok(Event::default()
+                                .event(&envelope.event_type)
+                                .data(data.to_string()));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            yield Ok(Event::default()
+                                .event("lagged")
+                                .data(format!("{{\"skipped\":{n}}}")));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+            return Sse::new(stream).keep_alive(KeepAlive::default());
+        }
+    }
+
+    // Fallback: emit a single connected event then keep alive
     let initial = Event::default()
         .event("connected")
         .data(serde_json::json!({ "stream": event_iri }).to_string());
 
-    Sse::new(stream::once(async { Ok(initial) })).keep_alive(KeepAlive::default())
+    let stream: SseStream = Box::pin(stream::once(async { Ok(initial) }));
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 #[derive(Deserialize, Serialize)]
 struct CommandPayload {
-    #[serde(flatten)]
-    extra: serde_json::Value,
+    /// The event type, e.g. "ResourceDeclared"
+    #[serde(rename = "type")]
+    event_type: Option<String>,
+    /// The source resource IRI
+    source: Option<String>,
+    /// The product scope (if applicable)
+    product: Option<String>,
+    /// Event payload data
+    #[serde(default)]
+    payload: serde_json::Value,
+    /// Optional idempotency key
+    idempotency_key: Option<String>,
 }
 
-async fn handle_command(Json(payload): Json<CommandPayload>) -> impl IntoResponse {
-    // Placeholder — the composition root will inject the real EventLog
-    (
-        StatusCode::ACCEPTED,
-        Json(serde_json::json!({
-            "status": "accepted",
-            "payload": payload.extra,
-        })),
-    )
+async fn handle_command(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(cmd): Json<CommandPayload>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let event_type = cmd.event_type.unwrap_or_else(|| "Command".to_string());
+    let correlation_id = Uuid::new_v4();
+    let source_str = cmd
+        .source
+        .unwrap_or_else(|| format!("{}/api/commands", state.cluster_root_iri));
+
+    let source = match ResourceIri::new(&source_str) {
+        Ok(iri) => iri,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid source IRI: {e}") })),
+            );
+        }
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let schema = iri_builder.event_schema(&event_type, 1);
+
+    let mut envelope = EventEnvelope::new(
+        schema,
+        &event_type,
+        source,
+        cmd.product,
+        correlation_id,
+        cmd.payload,
+    );
+    envelope.idempotency_key = cmd.idempotency_key;
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append command event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -479,15 +799,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn command_returns_accepted() {
+    async fn command_returns_unavailable_without_event_log() {
         let app = test_server().build_router();
         let req = Request::builder()
             .method("POST")
             .uri("/api/commands")
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"action":"test"}"#))
+            .body(Body::from(r#"{"type":"ResourceDeclared","payload":{}}"#))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+        // Without event log injected, returns 503
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

@@ -10,21 +10,23 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use picloud_domain::iri::ClusterDomain;
 use picloud_domain::traits::{
-    ClusterMembership, DnsRegistry, EventLog, IdentityProvider, StorageBackend,
-    WorkloadScheduler,
+    ClusterMembership, DnsRegistry, EventFilter, EventLog, IdentityProvider, StateProjector,
+    StorageBackend, WorkloadScheduler,
 };
 
 use picloud_cluster::{ClusterConfig, MdnsCluster};
 use picloud_events::InMemoryEventLog;
 use picloud_iam::LocalIdentityProvider;
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
+use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
 use picloud_workload::ProcessScheduler;
+use picloud_http::PiCloudHttpServer;
 
 /// Server configuration, loaded from env or defaults
 struct ServerConfig {
@@ -124,22 +126,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Cluster membership started");
 
     // 2. Start event log
-    let event_log = InMemoryEventLog::new();
-    let event_log: Arc<dyn EventLog> = Arc::new(event_log);
+    let event_log = Arc::new(InMemoryEventLog::new());
+    let event_log_trait: Arc<dyn EventLog> = event_log.clone();
     info!("Event log started");
 
     // 3. Start RDF projector
-    // The projector will be wired to consume events from the event log
-    // For now, it's available for direct queries
+    let projector = Arc::new(
+        OxigraphProjector::with_domain(config.cluster_domain.clone())
+            .expect("failed to initialize RDF projector"),
+    );
+    let projector_trait: Arc<dyn StateProjector> = projector.clone();
     info!("RDF projector started");
 
-    // 4. Start IAM service
+    // 4. Wire event log → RDF projector (projection loop)
+    {
+        let projector = projector_trait.clone();
+        let mut rx = event_log_trait
+            .subscribe(EventFilter::default())
+            .await
+            .expect("failed to subscribe to event log");
+
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Err(e) = projector.project(&event).await {
+                            error!(
+                                event_type = %event.event_type,
+                                error = %e,
+                                "Failed to project event into RDF graph"
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        error!(skipped = n, "Projection loop lagged — events may be missing from graph");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("Event log closed — projection loop stopping");
+                        break;
+                    }
+                }
+            }
+        });
+        info!("Event projection loop started");
+    }
+
+    // 5. Start IAM service
     let iam_key = config.node_id.as_bytes();
     let iam = LocalIdentityProvider::new(iam_key, config.cluster_domain.clone());
     let iam: Arc<dyn IdentityProvider> = Arc::new(iam);
     info!("IAM service started");
 
-    // 5. Start storage backend
+    // 6. Start storage backend
     let storage = LocalStorageBackend::new(
         config.storage_path.clone(),
         config.node_id,
@@ -152,18 +190,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Storage backend started"
     );
 
-    // 6. Start workload scheduler
+    // 7. Start workload scheduler
     let scheduler = ProcessScheduler::new(config.node_id, config.cluster_domain.clone());
     let scheduler: Arc<dyn WorkloadScheduler> = Arc::new(scheduler);
     info!("Workload scheduler started");
 
-    // 7. Start network/DNS/TLS
+    // 8. Start network/DNS/TLS
     let dns = InMemoryDnsRegistry::new();
     let dns: Arc<dyn DnsRegistry> = Arc::new(dns);
-    let ca = PlatformCa::new()?;
+    let _ca = PlatformCa::new()?;
     info!("Network services started (DNS + CA)");
 
-    // 8. Register this node's DNS entry
+    // 9. Register this node's DNS entry
     let node_iri = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone())
         .node(&config.node_name);
     dns.register(
@@ -172,12 +210,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // 9. Start HTTP server
+    // 10. Emit NodeJoined event for this node
+    {
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let node_joined = picloud_domain::events::EventEnvelope::new(
+            iri_builder.event_schema("NodeJoined", 1),
+            "NodeJoined",
+            node_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "node_id": config.node_id.to_string(),
+                "node_name": config.node_name,
+                "node_iri": node_iri.as_str(),
+                "address": format!("{}:{}", config.bind_addr, config.http_port),
+            }),
+        );
+        event_log_trait.append(node_joined).await?;
+        info!("NodeJoined event emitted");
+    }
+
+    // 11. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
-    info!(
-        addr = %http_addr,
-        "HTTP server listening"
-    );
+    let http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
+        .with_dependencies(
+            event_log_trait.clone(),
+            projector_trait.clone(),
+            cluster.clone(),
+            iam.clone(),
+            storage.clone(),
+            scheduler.clone(),
+        );
 
     // Log startup summary
     let members = cluster.members().await?;
@@ -187,19 +250,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "PiCloud server ready"
     );
 
-    // Keep running until signal
-    tokio::signal::ctrl_c().await?;
+    // Run HTTP server until shutdown signal
+    tokio::select! {
+        result = http_server.start() => {
+            if let Err(e) = result {
+                error!(error = %e, "HTTP server failed");
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Shutdown signal received");
+        }
+    }
 
     info!("Shutting down");
-
-    // Suppress unused variable warnings — these Arc handles keep services alive
-    drop(event_log);
-    drop(iam);
-    drop(storage);
-    drop(scheduler);
-    drop(dns);
-    drop(ca);
-    drop(cluster);
-
     Ok(())
 }

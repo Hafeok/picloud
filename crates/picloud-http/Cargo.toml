@@ -21,6 +21,7 @@ hyper      = { workspace = true }
 reqwest    = { workspace = true }
 uuid       = { workspace = true }
 futures    = { workspace = true }
+async-stream = "0.3"
 
 [dev-dependencies]
 http       = "1"
