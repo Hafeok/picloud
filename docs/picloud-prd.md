@@ -65,7 +65,7 @@ PiCloud is designed for LLM-driven development. Resource definitions are the con
 
 **Storage:** NVMe drives are dedicated to platform-managed block storage. The operating system runs from a separate boot device (SD card or USB). The platform owns the NVMe entirely.
 
-**Cluster size:** Minimum 1 node (single-node mode, no replication). Replication becomes active as nodes are added. The platform adjusts replication factor automatically based on cluster size. There is no maximum node count.
+**Tenant identity:** Every cluster has a domain (default: `picloud.local`) and a cluster ID generated at `cluster init`. Together these form the dual tenant boundary — the domain is the human-readable identity, the cluster ID is the cryptographic boundary. All resource IRIs are scoped to the cluster domain. Multiple clusters on the same network are fully isolated by domain and CA. Changing a cluster's domain after init is not supported.
 
 ---
 
@@ -161,7 +161,9 @@ Every IRI is dereferenceable over HTTPS. The platform serves RDF representations
 **Platform-scoped resources** (exist outside any Product):
 - `node` — a cluster member
 - `identity` — a human user
+- `group` — a collection of identities sharing roles — membership managed by inference rules
 - `role` — a platform-level RBAC role
+- `inference-rule` — a SPARQL CONSTRUCT query that derives new graph facts, manages group membership, or fires alerts
 
 **Product-scoped resources**:
 - `product` — the deployment unit itself, declares version and metadata
@@ -172,7 +174,9 @@ Every IRI is dereferenceable over HTTPS. The platform serves RDF representations
 - `identity` — a workload identity (service account)
 - `event-subscription` — a declared subscription to another Product's event stream
 - `ontology` — a `.ttl` or `.shacl` file bound to the Product version
-- `dns-record` — an internal DNS entry
+- `inference-rule` — a product-scoped SPARQL CONSTRUCT rule for alerts and derived facts
+- `config` — typed key-value configuration store with tags, live-reloaded via events
+- `feature-flag` — version-bound on/off flag, SDK-evaluated with event invalidation
 
 ### Resource definition syntax
 
@@ -276,6 +280,18 @@ Each Product maintains its own named graph within Oxigraph, scoped to that Produ
 ### Observability
 
 Because all state is derived from events, the platform provides complete historical observability for free. Any point-in-time cluster state can be reconstructed by replaying the event log to that timestamp. This is not a debugging tool — it is a fundamental property of the architecture.
+
+### Replay
+
+Replay is a first-class platform and product capability. Any product or the platform itself can replay its event log over any time range, against specific aggregates, or in bulk batches of up to 1000 aggregates.
+
+Replay always uses the **currently deployed version's projectors** — not the projectors that originally processed the events. This is how bugs in historical projectors are corrected retroactively. Schema IRIs on every event (ADR-031) ensure current projectors can correctly interpret any historical payload.
+
+Replay builds a **shadow projection** in a separate named graph while the live graph continues serving traffic. When the shadow projection is complete, it is atomically swapped with the live graph. Live traffic is never interrupted.
+
+Replayed events are re-emitted to all active subscribers with a `replay` marker field containing the `replay_id`, `original_timestamp`, and `replayed_at`. Subscribers can inspect this field to suppress irreversible side effects (emails, payments) while still updating their projections. The event `id` field ensures fully idempotent subscribers require no changes.
+
+Replay is accessible via the CLI, the HTTP API, and the SDK. It emits its own lifecycle events (`ReplayStarted`, `ReplayProgress`, `ReplayCompleted`, `ReplayFailed`) which are projected into the cluster RDF graph and subscribable via the standard event stream.
 
 ---
 
@@ -555,8 +571,12 @@ Files are the source of truth. Deleting a resource from a file and redeploying c
 
 ```bash
 # Cluster management
-picloud cluster init                    # bootstrap first node
-picloud cluster status                  # query cluster state from RDF graph
+picloud cluster init                               # default tenant (picloud.local)
+picloud cluster init --domain acme.local           # named tenant
+picloud cluster init --domain acme.local \         # BYO CA
+  --ca-cert ./acme-ca.pem --ca-key ./acme-ca-key.pem
+picloud cluster recover                            # physical recovery
+picloud cluster status                             # query cluster state from RDF graph
 
 # Resource operations
 picloud resource apply ./photo-app/     # deploy all .picloud files in directory
@@ -571,9 +591,26 @@ picloud identity token                  # get CLI token for current user
 picloud events stream                   # subscribe to platform event stream
 picloud events stream --product photo-app  # subscribe to product event stream
 
+# Replay
+picloud cluster replay --from "2025-06-01T00:00:00Z"               # platform replay
+picloud resource replay photo-app --from "2025-06-01T00:00:00Z"    # product replay
+picloud resource replay photo-app \                                 # aggregate replay
+  --aggregate Photo \
+  --id 123e4567-e89b-12d3-a456-426614174000 \
+  --from "2025-06-01T00:00:00Z"
+picloud resource replay photo-app \                                 # batch replay
+  --aggregate Photo --ids-file ./photo-ids.txt \
+  --from "2025-06-01T00:00:00Z"
+
 # Graph queries
 picloud graph query --sparql "SELECT ?s ?p ?o WHERE { ?s ?p ?o }"
 picloud graph query --product photo-app --sparql "..."
+
+# Telemetry queries (ADR-046)
+picloud telemetry query --signal traces \
+  --from "2025-07-01T00:00:00Z" --to "2025-07-01T01:00:00Z" \
+  --sql "SELECT operation_name, AVG(duration_ms) FROM traces GROUP BY operation_name"
+picloud telemetry query --signal metrics --sql "SELECT * FROM metrics WHERE product = 'photo-app'"
 ```
 
 ### Command execution model
@@ -658,7 +695,99 @@ Event schemas are declared as `.ttl` or `.shacl` files and deployed as part of t
 
 ---
 
-## 14. SDK Model
+## 15. Inference, Metrics & Alerts
+
+### Tagging
+
+Every platform resource supports an arbitrary set of `key:value` tags. Tags are declared in resource definition files and manageable via CLI. Tag changes emit `TagAdded` and `TagRemoved` events, which are projected into the RDF graph and immediately trigger inference rule evaluation.
+
+```bicep
+container 'api-server' = {
+  product: 'photo-app'
+  image: 'photo-api:1.0.0'
+  tags: {
+    'team': 'backend'
+    'environment': 'production'
+  }
+}
+```
+
+### Groups
+
+A `group` is an IAM resource that holds a set of roles. Users in a group inherit all roles assigned to it. Group membership is managed automatically by SPARQL CONSTRUCT inference rules — never by manual assignment.
+
+```bicep
+group 'backend-developers' = {
+  roles: ['product-developer', 'log-viewer']
+  tags: { 'team': 'backend' }
+}
+
+inference-rule 'backend-group-membership' = {
+  scope: 'platform'
+  trigger: 'event'
+  trigger-events: ['TagAdded', 'TagRemoved', 'IdentityCreated']
+  reconciliation: true
+  construct: '''
+    CONSTRUCT {
+      <https://picloud.local/groups/backend-developers>
+          picloud:hasMember ?user .
+    }
+    WHERE {
+      ?user a picloud:HumanIdentity ;
+            picloud:tag [ picloud:tagKey "team" ; picloud:tagValue "backend" ] .
+    }
+  '''
+}
+```
+
+When a user receives the tag `team:backend`, the rule fires within one event cycle and the user is added to the group. Their next token includes the inherited roles.
+
+### Inference rules
+
+SPARQL CONSTRUCT queries are a first-class resource type. Rules run on matching events and on a 10-minute reconciliation schedule. Produced triples are written to the appropriate named graph. New or retracted triples emit events.
+
+Two inference layers work together:
+- **RDFS/OWL inference** (Oxigraph built-in) — structural facts from ontology axioms. Subclass hierarchies, transitive properties, equivalences. Always live, no trigger needed.
+- **SPARQL CONSTRUCT rules** — operational rules. Group membership, alert conditions, derived state. Event-driven with reconciliation safety net.
+
+### Hardware metrics
+
+The platform ships a built-in metrics agent in the `picloud-server` binary. Every node samples hardware metrics every 15 seconds and emits `MetricRecorded` events:
+
+- CPU usage (%) — per core and aggregate
+- Memory used / total (MB)
+- Disk used / total / read rate / write rate
+- CPU temperature (°C)
+- Network bytes in/out
+
+The RDF projector writes the latest values as triples on each node's IRI, overwriting previous values. Historical values are queryable via event log replay.
+
+Product workloads emit their own domain metrics (request counts, error rates, latency) as events to the product event bus. The platform does not collect these — workloads emit them, the SDK provides helpers.
+
+### Alerts
+
+Alerts are produced by SPARQL CONSTRUCT rules that assert `picloud:Alert` triples. When a new alert triple is materialised, the platform emits `AlertFired`. When the condition clears and the triple is retracted, `AlertResolved` is emitted. No built-in notification targets — subscribers build notification products on top.
+
+**Built-in platform alert rules:**
+
+| Condition | Threshold | Severity |
+|---|---|---|
+| CPU temperature | > 80°C | critical |
+| CPU temperature | > 70°C | warning |
+| Memory usage | > 90% | critical |
+| Memory usage | > 80% | warning |
+| Disk usage | > 90% | critical |
+| Node unreachable | Raft heartbeat missed | critical |
+| Workload failed | `ResourceStatus = Failed` | critical |
+
+Active alerts are always queryable from the cluster graph:
+```bash
+picloud graph query --sparql "SELECT * WHERE { ?a a picloud:Alert . }"
+```
+
+---
+
+## 16. SDK Model
 
 The platform generates SDKs in three languages from its own RDF ontology. The ontology is the source of truth — adding a resource type or event type to the platform automatically flows through to all SDKs on the next generation pass.
 
@@ -708,7 +837,7 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 
 ---
 
-## 15. Phase Plan
+## 17. Phase Plan
 
 ### Phase 1 — Cluster Foundation (MVP)
 
@@ -745,34 +874,53 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 - [ ] Cascading deletion — delete Product cascades to all child resources
 - [ ] Per-product event bus
 - [ ] Ingress resource with automatic TLS
-- [ ] CLI: `events stream`, `graph query`, `identity token`
+- [ ] Product configuration store — typed key-value with tags, workload override, live reload
+- [ ] Feature flags — version-bound on/off, SDK evaluation, event invalidation
+- [ ] `PICLOUD_PRODUCT_VERSION` injected into all workloads at startup
+- [ ] OTel environment variables injected into all workloads at startup
+- [ ] OTLP endpoint at `https://picloud.local/otel`
+- [ ] OTel event stream — in-process pub/sub for traces, metrics, logs
+- [ ] Parquet time-series store — traces, metrics, logs with hourly partitioning
+- [ ] DataFusion SQL over Parquet via `picloud telemetry query`
+- [ ] Metric aggregator — OTel stream → MetricRecorded events every 15s
+- [ ] CLI traces — every command produces an OTel trace
+- [ ] W3C trace context propagation — platform to workload correlation
+- [ ] Telemetry retention policy — configurable per signal type
+- [ ] CLI: `events stream`, `graph query`, `identity token`, `telemetry query`
 
 **Exit criteria:** A Product with a container, volume, and workload identity deploys end-to-end. A user authenticates against a Product-hosted application via OIDC.
 
 ---
 
-### Phase 3 — RDF Application Storage, Event Store, and Inter-Product Communication
+### Phase 3 — RDF, Event Store, Inference, Metrics & Alerts
 
-**Goal:** Products have first-class RDF storage and event sourcing. Products can communicate via events and graph queries. SDKs ship.
+**Goal:** Products have first-class RDF storage and event sourcing. Inference rules, group membership, hardware metrics, and alerts are operational. SDKs ship.
 
 - [ ] `rdf-store` resource type — managed Oxigraph per Product
 - [ ] IAM-gated SPARQL endpoint per Product
 - [ ] Ontology resource type — `.ttl` and `.shacl` files bound to Product version
-- [ ] Cluster-level ontology registry in platform graph
+- [ ] RDFS/OWL inference enabled on platform and product graphs
+- [ ] Universal tagging — `TagAdded`/`TagRemoved` events, SPARQL-queryable on all resources
+- [ ] `group` resource type — roles assignable to groups, users inherit
+- [ ] `inference-rule` resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation
+- [ ] Group membership rules via inference engine
+- [ ] Platform metrics agent — `MetricRecorded` events at 15s interval per node
+- [ ] Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure)
+- [ ] `AlertFired` / `AlertResolved` events
 - [ ] `event-store` resource type — managed event log + aggregate streams per Product
 - [ ] Product event schema IRIs served from platform HTTP layer
 - [ ] Automatic RDF projection of Product aggregate events into Product graph
+- [ ] Event replay — shadow projection, atomic swap, marked replay events
+- [ ] Aggregate-scoped replay (single and batch up to 1000)
 - [ ] `event-subscription` resource type
 - [ ] Platform-managed event routing between Products
-- [ ] Per-product named graph in cluster Oxigraph
 - [ ] Product discoverability — cluster SPARQL query returns all Products, their events, their ontologies
 - [ ] SDK generator — Rust, TypeScript, .NET generated from platform ontology
 - [ ] SDK publication — crates.io, npm, NuGet via platform CI
-- [ ] `picloud sdk publish` command for on-demand generation
+- [ ] `picloud sdk publish` command
 - [ ] .NET Aspire integration package
-- [ ] CLI: `graph query --product`, ontology inspection, `sdk publish`
 
-**Exit criteria:** Two Products communicate exclusively via events. One Product appends to its event store and queries the resulting RDF graph. SDKs are published and a workload uses the TypeScript SDK to append an event.
+**Exit criteria:** An inference rule automatically assigns a user to a group on tag change. A CPU temperature alert fires and resolves. A Product appends to its event store and queries the RDF projection. SDKs are published.
 
 ---
 
@@ -787,6 +935,6 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 
 ---
 
-## 16. Open Questions
+## 18. Open Questions
 
 1. **CA trust distribution** — external clients (operator laptops, browsers, RDF tools) must trust the platform CA or BYO-CA to connect to `picloud.local` over HTTPS. The `picloud ca export` command handles certificate export, but the installation step is OS-specific and manual. A `picloud ca install` command that handles OS trust store installation on common platforms (macOS, Linux, Windows) would improve the setup experience.
