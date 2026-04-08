@@ -31,6 +31,41 @@ use picloud_domain::traits::{QueryResult, StateProjector};
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const PICLOUD_NS: &str = "https://picloud.local/ontology#";
 
+/// Named graph that holds inferred group memberships (ADR-036).
+/// Explicit memberships live only in the default graph.
+/// Inferred memberships are materialized in both this graph AND the default
+/// graph so that a single `?x picloud:memberOf ?g` pattern finds everything.
+/// When re-running inference, we delete from this graph first, then from the
+/// default graph, then re-derive — explicit memberships are untouched.
+const INFERRED_MEMBERSHIPS_GRAPH: &str = "https://picloud.local/graphs/inferred-memberships";
+
+/// A single declarative SPARQL WHERE clause that derives every
+/// (identity, group) pair implied by the current rules and tags.
+///
+/// Uses the double-negation pattern:
+///   "there does NOT EXIST an unsatisfied condition for the rule"
+///   ≡ "ALL conditions are satisfied"
+///
+/// Key-only conditions (no value) match any value for that key because
+/// `!BOUND(?reqValue)` short-circuits the value comparison.
+const INFERENCE_WHERE_CLAUSE: &str = r#"
+    ?rule  a                                      <https://picloud.local/ontology#GroupMembershipRule> .
+    ?rule  <https://picloud.local/ontology#targetGroup>  ?group .
+    ?identity a                                   <https://picloud.local/ontology#Identity> .
+    FILTER EXISTS { ?rule <https://picloud.local/ontology#requiresTag> ?_anyCond }
+    FILTER NOT EXISTS {
+        ?rule <https://picloud.local/ontology#requiresTag> ?cond .
+        ?cond <https://picloud.local/ontology#tagKey>      ?reqKey .
+        OPTIONAL { ?cond <https://picloud.local/ontology#tagValue> ?reqValue }
+        FILTER NOT EXISTS {
+            ?identity <https://picloud.local/ontology#hasTag> ?tag .
+            ?tag      <https://picloud.local/ontology#tagKey> ?reqKey .
+            OPTIONAL { ?tag <https://picloud.local/ontology#tagValue> ?tagVal }
+            FILTER ( !BOUND(?reqValue) || ?tagVal = ?reqValue )
+        }
+    }
+"#;
+
 /// Constructs a PiCloud ontology IRI, e.g. `https://picloud.local/ontology#Node`.
 fn picloud_term(local: &str) -> NamedNode {
     NamedNode::new(format!("{PICLOUD_NS}{local}")).expect("valid picloud ontology IRI")
@@ -589,8 +624,9 @@ impl OxigraphProjector {
             .unwrap_or(event.source.as_str());
 
         self.remove_triples_about_all_graphs(group_iri_str)?;
-        // Also remove all memberOf triples pointing to this group
-        self.remove_membership_triples_for_group(group_iri_str)?;
+        // Re-derive inferred memberships — any that pointed to the deleted
+        // group will vanish because the group's rules are gone.
+        self.run_membership_inference()?;
         debug!(group_iri = group_iri_str, "projected GroupDeleted");
         Ok(())
     }
@@ -717,8 +753,8 @@ impl OxigraphProjector {
             }
         }
 
-        // Evaluate this rule against all existing identities and materialize memberships
-        self.evaluate_membership_rule(rule_iri_str, group_iri_str, event)?;
+        // Re-derive all inferred memberships via native SPARQL inference
+        self.run_membership_inference()?;
 
         debug!(rule_iri = rule_iri_str, "projected GroupMembershipRuleCreated");
         Ok(())
@@ -728,30 +764,29 @@ impl OxigraphProjector {
         let rule_iri_str = event.payload["rule_iri"]
             .as_str()
             .unwrap_or(event.source.as_str());
-        let group_iri_str = event.payload["group_iri"]
-            .as_str()
-            .unwrap_or_default();
 
-        // Remove all triples about the rule (including condition sub-resources)
-        self.remove_triples_about_all_graphs(rule_iri_str)?;
-
-        // Remove condition node triples (they use rule_iri#cond-N pattern)
-        // We query for all condition IRIs first
+        // Collect condition node IRIs BEFORE removing the rule triples
         let cond_query = format!(
             "SELECT ?cond WHERE {{ <{}> <{}requiresTag> ?cond }}",
             rule_iri_str, PICLOUD_NS
         );
-        if let Ok(result) = self.execute_query(&cond_query) {
-            for binding in &result.bindings {
-                if let Some(cond_iri) = binding["cond"]["value"].as_str() {
-                    self.remove_triples_about(cond_iri)?;
-                }
-            }
+        let cond_iris: Vec<String> = self.execute_query(&cond_query)
+            .map(|r| r.bindings.iter()
+                .filter_map(|b| b["cond"]["value"].as_str().map(String::from))
+                .collect())
+            .unwrap_or_default();
+
+        // Remove all triples about the rule itself
+        self.remove_triples_about_all_graphs(rule_iri_str)?;
+
+        // Remove condition sub-resource triples
+        for cond_iri in &cond_iris {
+            self.remove_triples_about(cond_iri)?;
         }
 
-        // Re-evaluate all remaining rules for this group to clean up memberships
-        // that were only inferred by the deleted rule
-        self.reevaluate_group_memberships(group_iri_str)?;
+        // Re-derive all inferred memberships — memberships that depended
+        // solely on the deleted rule will vanish.
+        self.run_membership_inference()?;
 
         debug!(rule_iri = rule_iri_str, "projected GroupMembershipRuleDeleted");
         Ok(())
@@ -794,8 +829,8 @@ impl OxigraphProjector {
             Literal::new_simple_literal(value).into(),
         )?;
 
-        // If this is an identity, re-evaluate all group membership rules
-        self.reevaluate_all_rules_for_identity(resource_iri_str)?;
+        // Re-derive inferred memberships — new tag may satisfy a rule
+        self.run_membership_inference()?;
 
         debug!(resource_iri = resource_iri_str, key = key, "projected ResourceTagged");
         Ok(())
@@ -839,249 +874,74 @@ impl OxigraphProjector {
         // Remove the tag node triples
         self.remove_triples_about(&tag_iri)?;
 
-        // If this is an identity, re-evaluate all group membership rules
-        self.reevaluate_all_rules_for_identity(resource_iri_str)?;
+        // Re-derive inferred memberships — removed tag may invalidate a rule
+        self.run_membership_inference()?;
 
         debug!(resource_iri = resource_iri_str, key = key, "projected ResourceUntagged");
         Ok(())
     }
 
-    // ---- Group membership inference helpers (ADR-036) ----
+    // ---- Native SPARQL-based group membership inference (ADR-036) ----
+    //
+    // Instead of procedural Rust code that loops through rules and builds
+    // per-rule queries, we use a single declarative SPARQL inference query
+    // (the double-negation pattern in INFERENCE_WHERE_CLAUSE) and SPARQL
+    // UPDATE operations to materialize/retract inferred memberOf triples.
+    //
+    // Explicit memberships (from GroupMemberAdded events) live only in the
+    // default graph. Inferred memberships live in both the default graph
+    // AND the `inferred-memberships` named graph. This lets us cleanly
+    // rebuild inferred memberships without touching explicit ones.
 
-    /// Remove all `?identity picloud:memberOf <group>` triples.
-    fn remove_membership_triples_for_group(&self, group_iri: &str) -> Result<()> {
-        let p = NamedNode::new(format!("{PICLOUD_NS}memberOf"))
-            .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
-        let o = NamedNode::new(group_iri)
-            .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?;
-
-        let quads: Vec<Quad> = self
-            .store
-            .quads_for_pattern(
-                None,
-                Some(NamedNodeRef::new(p.as_str()).unwrap()),
-                Some((&o).into()),
-                Some(GraphNameRef::DefaultGraph),
-            )
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
-        for quad in &quads {
-            self.store
-                .remove(quad)
-                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    /// Evaluate a single membership rule and materialize `memberOf` triples
-    /// for all identities whose tags match the rule's conditions.
-    fn evaluate_membership_rule(
-        &self,
-        rule_iri: &str,
-        group_iri: &str,
-        _event: &EventEnvelope,
-    ) -> Result<()> {
-        // Build a SPARQL query that finds all identities matching the rule's
-        // tag conditions. We read the conditions from the graph.
-        let conditions_query = format!(
-            "SELECT ?key ?value WHERE {{ <{}> <{}requiresTag> ?cond . ?cond <{}tagKey> ?key . OPTIONAL {{ ?cond <{}tagValue> ?value }} }}",
-            rule_iri, PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+    /// Re-derive ALL inferred group memberships from the current graph state.
+    ///
+    /// This is the single entry point for inference. Called after any event
+    /// that could change the result: ResourceTagged, ResourceUntagged,
+    /// GroupMembershipRuleCreated, GroupMembershipRuleDeleted, GroupDeleted.
+    ///
+    /// Three SPARQL UPDATE operations, executed atomically against the store:
+    ///
+    /// 1. **Delete** old inferred memberOf triples from the default graph
+    ///    (only those that also appear in the inferred graph — explicit
+    ///    memberships are untouched).
+    /// 2. **Drop** the inferred-memberships named graph.
+    /// 3. **Insert** freshly derived memberships into both graphs using
+    ///    the declarative double-negation inference query.
+    fn run_membership_inference(&self) -> Result<()> {
+        // Step 1: Remove old inferred memberOf triples from the default graph.
+        // Only triples that exist in the inferred graph are removed — explicit
+        // memberships (which only live in the default graph) are preserved.
+        let delete_old_from_default = format!(
+            "DELETE {{ ?s <{ns}memberOf> ?o }} WHERE {{ GRAPH <{ig}> {{ ?s <{ns}memberOf> ?o }} }}",
+            ns = PICLOUD_NS,
+            ig = INFERRED_MEMBERSHIPS_GRAPH,
         );
+        self.store
+            .update(&delete_old_from_default)
+            .map_err(|e| PiCloudError::Internal(format!("inference delete failed: {e}")))?;
 
-        let conditions_result = self.execute_query(&conditions_query)?;
-        if conditions_result.bindings.is_empty() {
-            return Ok(());
-        }
+        // Step 2: Clear the inferred-memberships named graph.
+        let clear_inferred = format!("DROP SILENT GRAPH <{}>", INFERRED_MEMBERSHIPS_GRAPH);
+        self.store
+            .update(&clear_inferred)
+            .map_err(|e| PiCloudError::Internal(format!("inference clear failed: {e}")))?;
 
-        // Build a SPARQL query to find identities matching ALL conditions
-        let mut patterns = String::new();
-        patterns.push_str("?identity a <https://picloud.local/ontology#Identity> .\n");
-
-        for (i, binding) in conditions_result.bindings.iter().enumerate() {
-            let key = binding["key"]["value"].as_str().unwrap_or_default();
-            let tag_var = format!("?tag{}", i);
-            patterns.push_str(&format!(
-                "?identity <{}hasTag> {} .\n{} <{}tagKey> \"{}\" .\n",
-                PICLOUD_NS, tag_var, tag_var, PICLOUD_NS, key
-            ));
-            if let Some(value) = binding.get("value").and_then(|v| v["value"].as_str()) {
-                patterns.push_str(&format!(
-                    "{} <{}tagValue> \"{}\" .\n",
-                    tag_var, PICLOUD_NS, value
-                ));
-            }
-        }
-
-        let identity_query = format!("SELECT DISTINCT ?identity WHERE {{ {} }}", patterns);
-        let identity_result = self.execute_query(&identity_query)?;
-
-        for binding in &identity_result.bindings {
-            if let Some(identity_iri) = binding["identity"]["value"].as_str() {
-                // Check if membership already exists
-                let exists_query = format!(
-                    "ASK {{ <{}> <{}memberOf> <{}> }}",
-                    identity_iri, PICLOUD_NS, group_iri
-                );
-                if let Ok(result) = self.execute_query(&exists_query) {
-                    if let Some(already_member) = result.bindings.first()
-                        .and_then(|b| b["result"].as_bool())
-                    {
-                        if already_member {
-                            continue;
-                        }
-                    }
-                }
-
-                self.insert_triple(
-                    identity_iri,
-                    &format!("{PICLOUD_NS}memberOf"),
-                    NamedNode::new(group_iri)
-                        .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?
-                        .into(),
-                )?;
-                debug!(
-                    identity_iri = identity_iri,
-                    group_iri = group_iri,
-                    rule_iri = rule_iri,
-                    "inferred group membership from rule"
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Re-evaluate all rules for a specific group and rebuild inferred memberships.
-    fn reevaluate_group_memberships(&self, group_iri: &str) -> Result<()> {
-        // Remove all current memberships for this group
-        self.remove_membership_triples_for_group(group_iri)?;
-
-        // Find all rules targeting this group
-        let rules_query = format!(
-            "SELECT ?rule WHERE {{ ?rule a <{}GroupMembershipRule> . ?rule <{}targetGroup> <{}> }}",
-            PICLOUD_NS, PICLOUD_NS, group_iri
+        // Step 3: Derive and insert new inferred memberships into both the
+        // default graph and the inferred named graph.
+        let insert_inferred = format!(
+            "INSERT {{ \
+                ?identity <{ns}memberOf> ?group . \
+                GRAPH <{ig}> {{ ?identity <{ns}memberOf> ?group }} \
+            }} WHERE {{ {where_clause} }}",
+            ns = PICLOUD_NS,
+            ig = INFERRED_MEMBERSHIPS_GRAPH,
+            where_clause = INFERENCE_WHERE_CLAUSE,
         );
-        let rules_result = self.execute_query(&rules_query)?;
+        self.store
+            .update(&insert_inferred)
+            .map_err(|e| PiCloudError::Internal(format!("inference insert failed: {e}")))?;
 
-        // Create a dummy event for the evaluate call
-        let dummy_event = EventEnvelope::new(
-            ResourceIri(format!("https://picloud.local/schemas/events/internal/v1")),
-            "internal",
-            ResourceIri(group_iri.to_string()),
-            None,
-            uuid::Uuid::new_v4(),
-            serde_json::json!({}),
-        );
-
-        for binding in &rules_result.bindings {
-            if let Some(rule_iri) = binding["rule"]["value"].as_str() {
-                self.evaluate_membership_rule(rule_iri, group_iri, &dummy_event)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Re-evaluate all membership rules that could apply to a given identity.
-    fn reevaluate_all_rules_for_identity(&self, identity_iri: &str) -> Result<()> {
-        // Check if this resource is actually an identity
-        let is_identity_query = format!(
-            "ASK {{ <{}> a <{}Identity> }}",
-            identity_iri, PICLOUD_NS
-        );
-        if let Ok(result) = self.execute_query(&is_identity_query) {
-            if let Some(is_identity) = result.bindings.first()
-                .and_then(|b| b["result"].as_bool())
-            {
-                if !is_identity {
-                    return Ok(());
-                }
-            }
-        }
-
-        // Find all membership rules in the system
-        let rules_query = format!(
-            "SELECT ?rule ?group WHERE {{ ?rule a <{}GroupMembershipRule> . ?rule <{}targetGroup> ?group }}",
-            PICLOUD_NS, PICLOUD_NS
-        );
-        let rules_result = self.execute_query(&rules_query)?;
-
-        for binding in &rules_result.bindings {
-            if let (Some(rule_iri), Some(group_iri)) = (
-                binding["rule"]["value"].as_str(),
-                binding["group"]["value"].as_str(),
-            ) {
-                // Check if this identity matches this rule's conditions
-                let conditions_query = format!(
-                    "SELECT ?key ?value WHERE {{ <{}> <{}requiresTag> ?cond . ?cond <{}tagKey> ?key . OPTIONAL {{ ?cond <{}tagValue> ?value }} }}",
-                    rule_iri, PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
-                );
-                let conditions_result = self.execute_query(&conditions_query)?;
-
-                let mut all_match = true;
-                for cond_binding in &conditions_result.bindings {
-                    let key = cond_binding["key"]["value"].as_str().unwrap_or_default();
-                    let value = cond_binding.get("value").and_then(|v| v["value"].as_str());
-
-                    let mut check_query = format!(
-                        "ASK {{ <{}> <{}hasTag> ?tag . ?tag <{}tagKey> \"{}\"",
-                        identity_iri, PICLOUD_NS, PICLOUD_NS, key
-                    );
-                    if let Some(val) = value {
-                        check_query.push_str(&format!(
-                            " . ?tag <{}tagValue> \"{}\"",
-                            PICLOUD_NS, val
-                        ));
-                    }
-                    check_query.push_str(" }");
-
-                    if let Ok(result) = self.execute_query(&check_query) {
-                        if let Some(matches) = result.bindings.first()
-                            .and_then(|b| b["result"].as_bool())
-                        {
-                            if !matches {
-                                all_match = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if all_match && !conditions_result.bindings.is_empty() {
-                    // Add membership if not already present
-                    let exists_query = format!(
-                        "ASK {{ <{}> <{}memberOf> <{}> }}",
-                        identity_iri, PICLOUD_NS, group_iri
-                    );
-                    let already_member = self.execute_query(&exists_query)
-                        .ok()
-                        .and_then(|r| r.bindings.first()?.get("result")?.as_bool())
-                        .unwrap_or(false);
-
-                    if !already_member {
-                        self.insert_triple(
-                            identity_iri,
-                            &format!("{PICLOUD_NS}memberOf"),
-                            NamedNode::new(group_iri)
-                                .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?
-                                .into(),
-                        )?;
-                        debug!(
-                            identity_iri = identity_iri,
-                            group_iri = group_iri,
-                            rule_iri = rule_iri,
-                            "inferred group membership from rule (identity re-eval)"
-                        );
-                    }
-                } else {
-                    // Remove membership for this group if it was inferred and no longer matches
-                    // (only remove if no rule still matches)
-                    // We skip explicit removal here — the full reevaluate_group_memberships
-                    // handles that case when rules are deleted
-                }
-            }
-        }
-
+        debug!("re-derived inferred group memberships via SPARQL");
         Ok(())
     }
 
