@@ -127,6 +127,10 @@ pub enum PlatformEvent {
 
     // --- Telemetry events (ADR-045) ---
     TelemetryAggregated(TelemetryAggregatedPayload),
+
+    // --- Node failure / workload rescheduling events ---
+    NodeUnreachable(NodeUnreachablePayload),
+    WorkloadRescheduled(WorkloadRescheduledPayload),
 }
 
 // --- Payload types ---
@@ -451,6 +455,36 @@ pub struct TelemetryAggregatedPayload {
     pub log_count: u64,
     /// Summary metric entries computed from OTel data
     pub summaries: Vec<MetricEntry>,
+}
+
+// --- Node failure / workload rescheduling payloads ---
+
+/// Payload for NodeUnreachable event.
+/// Emitted when a peer node disappears from mDNS discovery,
+/// indicating it has gone down or lost network connectivity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeUnreachablePayload {
+    /// The node ID that became unreachable
+    pub node_id: Uuid,
+    /// The node IRI
+    pub node_iri: ResourceIri,
+    /// The node name
+    pub node_name: String,
+    /// The last known address of the node
+    pub last_address: String,
+}
+
+/// Payload for WorkloadRescheduled event.
+/// Emitted when a workload is rescheduled from a failed node
+/// to a healthy node in the cluster.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkloadRescheduledPayload {
+    /// IRI of the workload that was rescheduled
+    pub workload_iri: ResourceIri,
+    /// Node that the workload was previously running on
+    pub from_node_iri: ResourceIri,
+    /// Reason for rescheduling
+    pub reason: String,
 }
 
 // --- Telemetry record types (ADR-046) ---

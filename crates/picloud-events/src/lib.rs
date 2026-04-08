@@ -6,4 +6,4 @@
 
 pub mod implementation;
 
-pub use implementation::{InMemoryEventLog, PersistentEventLog, ProductEventStore};
+pub use implementation::{InMemoryEventLog, PersistentEventLog, ProductEventStore, WriteCallback, WriteThroughEventLog};

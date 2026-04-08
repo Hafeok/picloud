@@ -477,6 +477,83 @@ impl EventLog for PersistentEventLog {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Write-through event log (for Raft replication)
+// ---------------------------------------------------------------------------
+
+/// A write callback that receives a serialised event and submits it through
+/// an external replication mechanism (e.g. Raft consensus).
+///
+/// The callback must return `Ok(())` once the event has been durably committed
+/// by the replication layer. The local backing store will be populated by the
+/// replication layer's apply callback — not by `WriteThroughEventLog` itself.
+pub type WriteCallback =
+    Arc<dyn Fn(EventEnvelope) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> + Send + Sync>;
+
+/// An `EventLog` implementation that routes writes through an external
+/// replication mechanism while delegating reads and subscriptions to a local
+/// backing store.
+///
+/// This is the key piece that enables Raft-based event replication:
+///
+/// ```text
+/// HTTP handler
+///   → WriteThroughEventLog.append(event)
+///     → write_callback (Raft client_write)
+///       → Raft replicates to all nodes
+///       → Each node's apply callback appends to its local PersistentEventLog
+///         → PersistentEventLog broadcasts to subscribers
+/// ```
+///
+/// `subscribe()` and `events_since()` read from the local backing store,
+/// which is populated asynchronously by the Raft apply callback.
+pub struct WriteThroughEventLog {
+    /// The local backing event log (populated by the Raft apply callback).
+    local: Arc<dyn EventLog>,
+    /// The write callback that submits events to the replication layer.
+    write_cb: WriteCallback,
+}
+
+impl WriteThroughEventLog {
+    /// Create a new write-through event log.
+    ///
+    /// - `local`: the local backing store used for reads and subscriptions.
+    ///   The replication layer's apply callback must append committed events
+    ///   to this same store.
+    /// - `write_cb`: called on every `append()` to submit the event to the
+    ///   replication layer.
+    pub fn new(local: Arc<dyn EventLog>, write_cb: WriteCallback) -> Self {
+        Self { local, write_cb }
+    }
+}
+
+#[async_trait]
+impl EventLog for WriteThroughEventLog {
+    async fn append(&self, event: EventEnvelope) -> Result<()> {
+        // Submit the event to the replication layer (e.g. Raft client_write).
+        // The replication layer will call back into the local store once the
+        // event is committed across the cluster.
+        (self.write_cb)(event).await
+    }
+
+    async fn subscribe(
+        &self,
+        filter: EventFilter,
+    ) -> Result<broadcast::Receiver<EventEnvelope>> {
+        // Reads come from the local backing store.
+        self.local.subscribe(filter).await
+    }
+
+    async fn events_since(&self, offset: usize) -> Vec<EventEnvelope> {
+        // Reads come from the local backing store.
+        self.local.events_since(offset).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Product event store
+// ---------------------------------------------------------------------------
+
 /// A per-product event store that scopes all operations to a single product.
 ///
 /// This is a Phase 3 feature that wraps an `InMemoryEventLog` (or any `EventLog`
@@ -1072,5 +1149,92 @@ mod tests {
 
         // Discarding more than available should fail.
         assert!(log.compact(11).await.is_err());
+    }
+
+    // ---- WriteThroughEventLog tests ----
+
+    #[tokio::test]
+    async fn write_through_routes_append_to_callback() {
+        // The "local" store simulates the backing store that the apply
+        // callback would populate after Raft commits the entry.
+        let local = Arc::new(InMemoryEventLog::new());
+        let local_for_cb = Arc::clone(&local);
+
+        // The write callback simulates Raft: it serialises, then
+        // "applies" by appending to the local store (mimicking what the
+        // Raft state machine apply callback does).
+        let write_cb: WriteCallback = Arc::new(move |event: EventEnvelope| {
+            let store = Arc::clone(&local_for_cb);
+            Box::pin(async move {
+                store.append(event).await
+            })
+        });
+
+        let wt = WriteThroughEventLog::new(local.clone() as Arc<dyn EventLog>, write_cb);
+        let cid = Uuid::new_v4();
+
+        // Subscribe before appending — the subscription reads from the local store.
+        let mut rx = wt.subscribe(EventFilter::default()).await.unwrap();
+
+        let event = make_event("NodeJoined", None, cid);
+        let event_id = event.id;
+
+        // Append through the write-through log.
+        wt.append(event).await.unwrap();
+
+        // The local store should have the event (placed there by the callback).
+        assert_eq!(local.len().await, 1);
+
+        // The subscriber should receive the event.
+        let received = rx.recv().await.expect("should receive event from local store");
+        assert_eq!(received.id, event_id);
+    }
+
+    #[tokio::test]
+    async fn write_through_events_since_reads_from_local() {
+        let local = Arc::new(InMemoryEventLog::new());
+        let local_for_cb = Arc::clone(&local);
+
+        let write_cb: WriteCallback = Arc::new(move |event: EventEnvelope| {
+            let store = Arc::clone(&local_for_cb);
+            Box::pin(async move { store.append(event).await })
+        });
+
+        let wt = WriteThroughEventLog::new(local.clone() as Arc<dyn EventLog>, write_cb);
+        let cid = Uuid::new_v4();
+
+        wt.append(make_event("A", None, cid)).await.unwrap();
+        wt.append(make_event("B", None, cid)).await.unwrap();
+        wt.append(make_event("C", None, cid)).await.unwrap();
+
+        let all = wt.events_since(0).await;
+        assert_eq!(all.len(), 3);
+
+        let from_1 = wt.events_since(1).await;
+        assert_eq!(from_1.len(), 2);
+        assert_eq!(from_1[0].event_type, "B");
+    }
+
+    #[tokio::test]
+    async fn write_through_callback_error_propagates() {
+        let local = Arc::new(InMemoryEventLog::new());
+
+        // A callback that always fails — simulates Raft rejecting a write
+        // (e.g. this node is not the leader).
+        let write_cb: WriteCallback = Arc::new(|_event: EventEnvelope| {
+            Box::pin(async {
+                Err(PiCloudError::Internal("not the leader".to_string()))
+            })
+        });
+
+        let wt = WriteThroughEventLog::new(local.clone() as Arc<dyn EventLog>, write_cb);
+        let cid = Uuid::new_v4();
+
+        let result = wt.append(make_event("NodeJoined", None, cid)).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not the leader"));
+
+        // The local store should be empty since the callback failed.
+        assert_eq!(local.len().await, 0);
     }
 }

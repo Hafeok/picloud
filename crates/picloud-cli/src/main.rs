@@ -1505,10 +1505,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 service,
                 sql,
             } => {
-                if sql.is_some() {
-                    println!("Note: SQL parsing is not yet implemented. Returning all matching records.");
-                }
-
                 let endpoint = match signal.as_str() {
                     "traces" | "spans" => "/telemetry/spans",
                     "metrics" => "/telemetry/metrics",
@@ -1527,6 +1523,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if let Some(ref s) = service {
                     params.push(format!("service={}", urlencoding(s)));
+                }
+
+                // Parse SQL WHERE clause if provided
+                if let Some(ref sql_str) = sql {
+                    let sql_params = parse_sql_where_clause(sql_str);
+                    for (key, value) in &sql_params {
+                        // Map SQL field names to query param names
+                        let param_name = match key.as_str() {
+                            "service" | "service_name" => "service",
+                            "operation" | "operation_name" => "operation",
+                            "metric_name" | "name" => "metric_name",
+                            "duration_ms" | "min_duration_ms" => "min_duration_ms",
+                            "product" => "service", // product maps to service filter
+                            other => {
+                                eprintln!("Warning: unknown SQL field '{}' — skipping", other);
+                                continue;
+                            }
+                        };
+                        // Avoid duplicates if --service was also passed
+                        if !params.iter().any(|p| p.starts_with(&format!("{}=", param_name))) {
+                            params.push(format!("{}={}", param_name, urlencoding(value)));
+                        }
+                    }
                 }
 
                 let path = if params.is_empty() {
@@ -1953,4 +1972,129 @@ fn urlencoding(s: &str) -> String {
         .replace('?', "%3F")
         .replace('{', "%7B")
         .replace('}', "%7D")
+}
+
+/// Parse a simple SQL WHERE clause into field-value pairs.
+///
+/// Supports patterns like:
+///   SELECT * FROM traces WHERE product = 'photo-app' AND duration_ms > 100
+///
+/// Extracts `field = 'value'` and `field > number` conditions from the WHERE clause.
+/// Returns a vec of (field_name, value_string) pairs.
+fn parse_sql_where_clause(sql: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+
+    // Find the WHERE clause (case-insensitive)
+    let sql_upper = sql.to_uppercase();
+    let where_pos = match sql_upper.find("WHERE") {
+        Some(pos) => pos + 5,
+        None => return results,
+    };
+
+    let where_clause = &sql[where_pos..];
+
+    // Split on AND (case-insensitive) to get individual conditions
+    let mut parts = Vec::new();
+    let mut remaining = where_clause.trim();
+    loop {
+        let upper = remaining.to_uppercase();
+        if let Some(pos) = upper.find(" AND ") {
+            parts.push(remaining[..pos].trim());
+            remaining = remaining[pos + 5..].trim();
+        } else {
+            if !remaining.is_empty() {
+                parts.push(remaining.trim());
+            }
+            break;
+        }
+    }
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // Try to parse: field = 'value'
+        // or: field = value
+        // or: field > number
+        // or: field >= number
+
+        // Find the operator
+        let (field, value) = if let Some(pos) = part.find(">=") {
+            let field = part[..pos].trim();
+            let val = part[pos + 2..].trim().trim_matches('\'').trim_matches('"');
+            (field, val)
+        } else if let Some(pos) = part.find('>') {
+            let field = part[..pos].trim();
+            let val = part[pos + 1..].trim().trim_matches('\'').trim_matches('"');
+            (field, val)
+        } else if let Some(pos) = part.find('=') {
+            let field = part[..pos].trim();
+            let val = part[pos + 1..].trim().trim_matches('\'').trim_matches('"');
+            (field, val)
+        } else {
+            continue;
+        };
+
+        if !field.is_empty() && !value.is_empty() {
+            results.push((field.to_lowercase(), value.to_string()));
+        }
+    }
+
+    results
+}
+
+#[cfg(test)]
+mod sql_parse_tests {
+    use super::parse_sql_where_clause;
+
+    #[test]
+    fn parse_basic_equality() {
+        let sql = "SELECT * FROM traces WHERE service = 'api-server'";
+        let result = parse_sql_where_clause(sql);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], ("service".to_string(), "api-server".to_string()));
+    }
+
+    #[test]
+    fn parse_multiple_conditions() {
+        let sql = "SELECT * FROM traces WHERE product = 'photo-app' AND duration_ms > 100";
+        let result = parse_sql_where_clause(sql);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("product".to_string(), "photo-app".to_string()));
+        assert_eq!(result[1], ("duration_ms".to_string(), "100".to_string()));
+    }
+
+    #[test]
+    fn parse_case_insensitive_keywords() {
+        let sql = "select * from spans where service_name = 'web' and operation_name = 'GET /api'";
+        let result = parse_sql_where_clause(sql);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("service_name".to_string(), "web".to_string()));
+        assert_eq!(result[1], ("operation_name".to_string(), "GET /api".to_string()));
+    }
+
+    #[test]
+    fn parse_no_where_clause() {
+        let sql = "SELECT * FROM traces";
+        let result = parse_sql_where_clause(sql);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_greater_than_or_equal() {
+        let sql = "SELECT * FROM traces WHERE duration_ms >= 200";
+        let result = parse_sql_where_clause(sql);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], ("duration_ms".to_string(), "200".to_string()));
+    }
+
+    #[test]
+    fn parse_double_quoted_value() {
+        let sql = r#"SELECT * FROM traces WHERE service = "photo-svc""#;
+        let result = parse_sql_where_clause(sql);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], ("service".to_string(), "photo-svc".to_string()));
+    }
 }

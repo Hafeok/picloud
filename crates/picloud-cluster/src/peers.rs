@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::RwLock;
 
+use tokio::sync::broadcast;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -24,13 +25,23 @@ pub struct PeerInfo {
 /// Thread-safe peer list maintained by mDNS discovery.
 pub struct PeerList {
     peers: RwLock<HashMap<Uuid, PeerInfo>>,
+    /// Channel for notifying consumers when a peer is removed.
+    removed_tx: broadcast::Sender<PeerInfo>,
 }
 
 impl PeerList {
     pub fn new() -> Self {
+        let (removed_tx, _) = broadcast::channel(32);
         Self {
             peers: RwLock::new(HashMap::new()),
+            removed_tx,
         }
+    }
+
+    /// Subscribe to peer removal notifications.
+    /// Returns a broadcast receiver that yields PeerInfo for each removed peer.
+    pub fn subscribe_removals(&self) -> broadcast::Receiver<PeerInfo> {
+        self.removed_tx.subscribe()
     }
 
     /// Add or update a peer. Returns true if this is a new peer.
@@ -52,6 +63,7 @@ impl PeerList {
         let removed = peers.remove(node_id);
         if let Some(ref p) = removed {
             info!(node_id = %p.node_id, node_name = %p.node_name, "Peer removed");
+            let _ = self.removed_tx.send(p.clone());
         }
         removed
     }
@@ -79,6 +91,7 @@ impl PeerList {
                     node_name = %p.node_name,
                     "Peer removed (mDNS service gone)"
                 );
+                let _ = self.removed_tx.send(p);
             }
         }
     }

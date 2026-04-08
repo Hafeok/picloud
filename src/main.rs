@@ -21,7 +21,7 @@ use picloud_domain::traits::{
 };
 
 use picloud_cluster::{ClusterConfig, InMemoryClusterIdentityStore, MdnsCluster};
-use picloud_events::PersistentEventLog;
+use picloud_events::{PersistentEventLog, WriteThroughEventLog};
 use picloud_iam::{InMemorySecretStore, LocalIdentityProvider};
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
@@ -138,15 +138,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Cluster membership started");
 
     // 2. Start event log (persistent, backed by JSON-lines file)
+    //
+    // The PersistentEventLog is the LOCAL backing store. It is populated
+    // by the Raft apply callback — never written to directly by HTTP
+    // handlers or other consumers.
     let event_log = Arc::new(
         PersistentEventLog::open(&config.events_path)
             .expect("failed to open persistent event log"),
     );
-    let event_log_trait: Arc<dyn EventLog> = event_log.clone();
 
     // 2b. Start Raft consensus node
     //
-    // The apply callback feeds committed Raft entries into the event log.
+    // The apply callback feeds committed Raft entries into the local event log.
+    // This is how replicated events arrive on every node in the cluster.
     let event_log_for_raft = event_log.clone();
     let apply_cb: picloud_cluster::ApplyCallback = Arc::new(move |json: &str| {
         if let Ok(envelope) = serde_json::from_str::<picloud_domain::events::EventEnvelope>(json) {
@@ -181,11 +185,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let raft_router = picloud_cluster::raft_rpc_router(Arc::clone(&raft));
     info!(raft_node_id, "Raft consensus node started");
 
+    // 2c. Create the write-through event log that routes all appends through Raft.
+    //
+    // When any consumer calls event_log_trait.append(event):
+    //   1. The event is serialised and submitted via raft.client_write()
+    //   2. Raft replicates to all nodes in the cluster
+    //   3. Each node's apply callback (above) deserialises and appends to
+    //      its local PersistentEventLog
+    //   4. The local PersistentEventLog broadcasts to subscribers
+    //
+    // Reads (subscribe, events_since) go directly to the local backing store.
+    let raft_for_write = Arc::clone(&raft);
+    let write_cb: picloud_events::WriteCallback = Arc::new(move |event: picloud_domain::events::EventEnvelope| {
+        let raft = Arc::clone(&raft_for_write);
+        Box::pin(async move {
+            let event_json = serde_json::to_string(&event).map_err(|e| {
+                picloud_domain::error::PiCloudError::Internal(format!(
+                    "failed to serialize event for Raft: {e}"
+                ))
+            })?;
+            let request = picloud_cluster::ClientRequest { event_json };
+            raft.client_write(request).await.map_err(|e| {
+                picloud_domain::error::PiCloudError::Internal(format!(
+                    "Raft client_write failed: {e}"
+                ))
+            })?;
+            Ok(())
+        })
+    });
+    let event_log_local: Arc<dyn EventLog> = event_log.clone();
+    let write_through_log = Arc::new(WriteThroughEventLog::new(event_log_local, write_cb));
+    let event_log_trait: Arc<dyn EventLog> = write_through_log;
+
+    // Start node failure watcher: subscribe to peer removals from mDNS
+    // and emit NodeUnreachable events into the event log.
+    {
+        let peers = cluster.peers().clone();
+        let event_log_for_watcher = event_log_trait.clone();
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let mut removal_rx = peers.subscribe_removals();
+        tokio::spawn(async move {
+            info!("Node failure watcher started");
+            loop {
+                match removal_rx.recv().await {
+                    Ok(removed_peer) => {
+                        info!(
+                            node_id = %removed_peer.node_id,
+                            node_name = %removed_peer.node_name,
+                            "Peer disappeared from mDNS — emitting NodeUnreachable"
+                        );
+                        let node_iri = iri_builder.node(&removed_peer.node_name);
+                        let event = picloud_domain::events::EventEnvelope::new(
+                            iri_builder.event_schema("NodeUnreachable", 1),
+                            "NodeUnreachable",
+                            node_iri.clone(),
+                            None,
+                            Uuid::new_v4(),
+                            serde_json::json!({
+                                "node_id": removed_peer.node_id.to_string(),
+                                "node_iri": node_iri.as_str(),
+                                "node_name": removed_peer.node_name,
+                                "last_address": removed_peer.address,
+                            }),
+                        );
+                        if let Err(e) = event_log_for_watcher.append(event).await {
+                            error!("Failed to emit NodeUnreachable event: {e}");
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "Node failure watcher lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("Peer removal channel closed — stopping node failure watcher");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     let cluster: Arc<dyn ClusterMembership> = Arc::new(cluster);
     info!(
         path = %config.events_path.display(),
         events = event_log.len().await,
-        "Persistent event log started"
+        "Persistent event log started (writes go through Raft)"
     );
 
     // 3. Start RDF projector (disk-backed with in-memory fallback)

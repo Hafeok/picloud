@@ -77,6 +77,9 @@ pub enum PiCloudError {
     #[error("Telemetry query failed: {reason}")]
     TelemetryQueryFailed { reason: String },
 
+    #[error("SQL parse error: {reason}")]
+    SqlParseError { reason: String },
+
     // --- Generic ---
     #[error("Internal error: {0}")]
     Internal(String),

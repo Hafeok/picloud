@@ -68,6 +68,7 @@ impl Provisioner {
             event_types: vec![
                 "ResourceDeclared".to_string(),
                 "ProductDeleted".to_string(),
+                "NodeUnreachable".to_string(),
             ],
             ..Default::default()
         };
@@ -104,6 +105,15 @@ impl Provisioner {
                                 &projector,
                                 &storage,
                                 &scheduler,
+                                &iri_builder,
+                            )
+                            .await;
+                        }
+                        "NodeUnreachable" => {
+                            reschedule_workloads_from_failed_node(
+                                &event,
+                                &event_log,
+                                &projector,
                                 &iri_builder,
                             )
                             .await;
@@ -622,6 +632,163 @@ async fn cascade_delete_product(
         product_iri = product_iri_str,
         deleted_count = child_resources.len(),
         "Cascading deletion complete"
+    );
+}
+
+/// Handle workload rescheduling when a node becomes unreachable.
+///
+/// When a NodeUnreachable event arrives:
+/// 1. Extract the failed node's IRI from the event payload
+/// 2. Query the RDF graph for workloads that were running on the failed node
+/// 3. For each workload, emit a ResourceDeclared event to reschedule it
+/// 4. Emit a WorkloadRescheduled event for tracking
+async fn reschedule_workloads_from_failed_node(
+    event: &EventEnvelope,
+    event_log: &Arc<dyn EventLog>,
+    projector: &Arc<dyn StateProjector>,
+    iri_builder: &IriBuilder,
+) {
+    let node_iri_str = match event.payload.get("node_iri").and_then(|v| v.as_str()) {
+        Some(iri) => iri,
+        None => {
+            warn!(
+                event_id = %event.id,
+                "NodeUnreachable event missing node_iri in payload — skipping"
+            );
+            return;
+        }
+    };
+
+    let node_name = event
+        .payload
+        .get("node_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    info!(
+        node_iri = node_iri_str,
+        node_name = node_name,
+        "Handling node failure — querying for affected workloads"
+    );
+
+    // Query the RDF graph for workloads that were scheduled on the failed node.
+    // Workloads are linked to nodes via picloud:scheduledOn predicate.
+    let sparql = format!(
+        "SELECT ?workload ?rtype ?product WHERE {{ \
+            ?workload <https://picloud.local/ontology#scheduledOn> <{}> . \
+            ?workload <https://picloud.local/ontology#resourceType> ?rtype . \
+            OPTIONAL {{ ?workload <https://picloud.local/ontology#product> ?product }} \
+        }}",
+        node_iri_str
+    );
+
+    let affected_workloads = match projector.query(&sparql).await {
+        Ok(result) => result.bindings,
+        Err(e) => {
+            error!(
+                node_iri = node_iri_str,
+                error = %e,
+                "Failed to query workloads on failed node"
+            );
+            return;
+        }
+    };
+
+    if affected_workloads.is_empty() {
+        info!(
+            node_iri = node_iri_str,
+            "No workloads found on failed node — nothing to reschedule"
+        );
+        return;
+    }
+
+    info!(
+        node_iri = node_iri_str,
+        workload_count = affected_workloads.len(),
+        "Found workloads to reschedule from failed node"
+    );
+
+    for workload in &affected_workloads {
+        let workload_iri_str = match workload
+            .get("workload")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+        {
+            Some(iri) => iri,
+            None => continue,
+        };
+
+        let resource_type = workload
+            .get("rtype")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Container");
+
+        let product = workload
+            .get("product")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let workload_iri = ResourceIri(workload_iri_str.to_string());
+        let correlation_id = uuid::Uuid::new_v4();
+
+        info!(
+            workload_iri = workload_iri_str,
+            resource_type = resource_type,
+            "Rescheduling workload from failed node"
+        );
+
+        // Emit WorkloadRescheduled event for tracking
+        let rescheduled_schema = iri_builder.event_schema("WorkloadRescheduled", 1);
+        let rescheduled_event = EventEnvelope::new(
+            rescheduled_schema,
+            "WorkloadRescheduled",
+            workload_iri.clone(),
+            product.clone(),
+            correlation_id,
+            serde_json::json!({
+                "workload_iri": workload_iri_str,
+                "from_node_iri": node_iri_str,
+                "reason": format!("Node {} became unreachable", node_name),
+            }),
+        );
+
+        if let Err(e) = event_log.append(rescheduled_event).await {
+            error!(
+                workload_iri = workload_iri_str,
+                error = %e,
+                "Failed to emit WorkloadRescheduled event"
+            );
+        }
+
+        // Re-emit ResourceDeclared to trigger re-provisioning on a healthy node
+        let declared_schema = iri_builder.event_schema("ResourceDeclared", 1);
+        let declared_event = EventEnvelope::new(
+            declared_schema,
+            "ResourceDeclared",
+            workload_iri,
+            product,
+            correlation_id,
+            serde_json::json!({
+                "resource_iri": workload_iri_str,
+                "resource_type": resource_type,
+            }),
+        );
+
+        if let Err(e) = event_log.append(declared_event).await {
+            error!(
+                workload_iri = workload_iri_str,
+                error = %e,
+                "Failed to emit ResourceDeclared event for rescheduling"
+            );
+        }
+    }
+
+    info!(
+        node_iri = node_iri_str,
+        rescheduled_count = affected_workloads.len(),
+        "Workload rescheduling complete for failed node"
     );
 }
 
