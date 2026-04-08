@@ -25,7 +25,7 @@ use picloud_events::{PersistentEventLog, WriteThroughEventLog};
 use picloud_iam::{InMemorySecretStore, LocalIdentityProvider};
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
-use picloud_storage::LocalStorageBackend;
+use picloud_storage::{LocalStorageBackend, StorageReplicator};
 use picloud_workload::ProcessScheduler;
 use picloud_http::{InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner};
 
@@ -446,6 +446,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Storage backend started"
     );
 
+    // 6b. Start storage replicator (cross-node file sync)
+    {
+        let replicator = StorageReplicator::new(
+            config.storage_path.clone(),
+            cluster.clone(),
+            config.node_id,
+            10, // sync interval seconds
+        );
+        replicator.start();
+        info!("Storage replicator started (10s interval)");
+    }
+
     // 7. Start workload scheduler (with secret store for env var resolution)
     let scheduler = ProcessScheduler::with_secret_store(
         config.node_id,
@@ -691,7 +703,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .with_ingress_table(ingress_table)
         .with_extra_router(raft_router)
-        .with_otel(otel_stream.clone(), telemetry_store_trait.clone());
+        .with_otel(otel_stream.clone(), telemetry_store_trait.clone())
+        .with_storage_path(config.storage_path.clone());
     if let Some(tls) = tls_config {
         http_server = http_server.with_tls_config(tls);
     }

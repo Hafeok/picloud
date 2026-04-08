@@ -54,6 +54,43 @@ pub enum PerformanceTier {
     Archive,
 }
 
+// ---------------------------------------------------------------------------
+// Replication sync types (shared between picloud-storage and picloud-http)
+// ---------------------------------------------------------------------------
+
+/// A single file entry in a volume manifest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestEntry {
+    /// Relative path within the volume directory.
+    pub path: String,
+    /// File size in bytes.
+    pub size: u64,
+    /// Last modification time as Unix timestamp (seconds).
+    pub mtime: i64,
+}
+
+/// The manifest for a single volume — lists every file it contains.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeManifest {
+    pub volume: String,
+    pub files: Vec<ManifestEntry>,
+}
+
+/// A file to be synced to a remote node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncFileEntry {
+    /// Relative path within the volume directory.
+    pub path: String,
+    /// Base64-encoded file content.
+    pub data: String,
+}
+
+/// Request body for the POST /internal/storage/sync/:volume endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncRequest {
+    pub files: Vec<SyncFileEntry>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

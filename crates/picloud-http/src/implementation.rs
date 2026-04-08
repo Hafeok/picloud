@@ -8,6 +8,7 @@
 /// state projection, etc. are injected from the composition root.
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -146,6 +147,8 @@ pub struct PiCloudHttpServer {
     pub extra_router: Option<Router>,
     pub otel_stream: Option<Arc<crate::otel::OtelStream>>,
     pub telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
+    /// Root directory containing volume subdirectories (for storage sync endpoints).
+    pub storage_path: Option<PathBuf>,
 }
 
 impl PiCloudHttpServer {
@@ -164,7 +167,14 @@ impl PiCloudHttpServer {
             extra_router: None,
             otel_stream: None,
             telemetry_store: None,
+            storage_path: None,
         }
+    }
+
+    /// Set the storage path for internal storage sync endpoints.
+    pub fn with_storage_path(mut self, path: PathBuf) -> Self {
+        self.storage_path = Some(path);
+        self
     }
 
     /// Inject all platform dependencies.
@@ -289,6 +299,15 @@ impl PiCloudHttpServer {
             .route("/auth/enroll", post(handle_enroll))
             .route("/auth/device/begin", post(handle_device_begin))
             .route("/auth/device/poll", post(handle_device_poll))
+            // --- Internal storage sync routes ---
+            .route(
+                "/internal/storage/manifest/:volume",
+                get(handle_storage_manifest),
+            )
+            .route(
+                "/internal/storage/sync/:volume",
+                post(handle_storage_sync),
+            )
             // --- OTel / Telemetry routes (ADR-045, ADR-046) ---
             .route("/otel", post(handle_otel_ingest))
             .route("/telemetry/spans", get(handle_telemetry_spans))
@@ -304,6 +323,7 @@ impl PiCloudHttpServer {
                 ingress_routes: self.ingress_routes.clone(),
                 otel_stream: self.otel_stream.clone(),
                 telemetry_store: self.telemetry_store.clone(),
+                storage_path: self.storage_path.clone(),
             });
 
         // Merge any extra routes (e.g. Raft RPC endpoints from picloud-cluster)
@@ -366,6 +386,8 @@ struct AppState {
     ingress_routes: IngressTable,
     otel_stream: Option<Arc<crate::otel::OtelStream>>,
     telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
+    /// Root directory containing volume subdirectories (for storage sync endpoints).
+    storage_path: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -3205,6 +3227,188 @@ async fn handle_telemetry_metrics(
 }
 
 // ---------------------------------------------------------------------------
+// Internal storage sync handlers
+// ---------------------------------------------------------------------------
+
+/// GET /internal/storage/manifest/:volume
+///
+/// Returns a JSON manifest listing all files in the given volume directory
+/// with their relative path, size, and mtime.
+async fn handle_storage_manifest(
+    Path(volume): Path<String>,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let storage_path = match &state.storage_path {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Storage path not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let volume_path = storage_path.join(&volume);
+    let manifest = build_volume_manifest(&volume, &volume_path);
+    (StatusCode::OK, Json(serde_json::json!(manifest))).into_response()
+}
+
+/// POST /internal/storage/sync/:volume
+///
+/// Receives file data as JSON with base64-encoded content and writes files
+/// to the local volume directory, creating subdirectories as needed.
+async fn handle_storage_sync(
+    Path(volume): Path<String>,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<picloud_domain::storage::SyncRequest>,
+) -> Response {
+    let storage_path = match &state.storage_path {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "Storage path not configured"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let volume_path = storage_path.join(&volume);
+
+    // Ensure the volume directory exists (it may not yet exist on this replica)
+    if let Err(e) = tokio::fs::create_dir_all(&volume_path).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to create volume directory: {e}")
+            })),
+        )
+            .into_response();
+    }
+
+    let mut synced = 0usize;
+    let mut errors = Vec::new();
+
+    for file_entry in &body.files {
+        let file_path = volume_path.join(&file_entry.path);
+
+        // Create parent directories if needed
+        if let Some(parent) = file_path.parent() {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                errors.push(format!("{}: {e}", file_entry.path));
+                continue;
+            }
+        }
+
+        // Decode base64 content
+        let data = match base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &file_entry.data,
+        ) {
+            Ok(d) => d,
+            Err(e) => {
+                errors.push(format!("{}: base64 decode error: {e}", file_entry.path));
+                continue;
+            }
+        };
+
+        // Write file
+        if let Err(e) = tokio::fs::write(&file_path, &data).await {
+            errors.push(format!("{}: write error: {e}", file_entry.path));
+            continue;
+        }
+
+        synced += 1;
+    }
+
+    if errors.is_empty() {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "synced": synced,
+                "volume": volume,
+            })),
+        )
+            .into_response()
+    } else {
+        (
+            StatusCode::MULTI_STATUS,
+            Json(serde_json::json!({
+                "synced": synced,
+                "volume": volume,
+                "errors": errors,
+            })),
+        )
+            .into_response()
+    }
+}
+
+/// Walk a volume directory and build a manifest of all files.
+fn build_volume_manifest(
+    volume_name: &str,
+    volume_path: &std::path::Path,
+) -> picloud_domain::storage::VolumeManifest {
+    let mut files = Vec::new();
+
+    if volume_path.is_dir() {
+        collect_volume_files(volume_path, volume_path, &mut files);
+    }
+
+    picloud_domain::storage::VolumeManifest {
+        volume: volume_name.to_string(),
+        files,
+    }
+}
+
+/// Recursively collect file metadata from a volume directory.
+fn collect_volume_files(
+    base: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut Vec<picloud_domain::storage::ManifestEntry>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_volume_files(base, &path, out);
+        } else if path.is_file() {
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+
+            let metadata = match std::fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
+            out.push(picloud_domain::storage::ManifestEntry {
+                path: relative,
+                size: metadata.len(),
+                mtime,
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -3743,6 +3947,195 @@ mod tests {
         let req = Request::builder()
             .uri("/products/photo-app/event-store/main/Order/order-1/events")
             .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // --- Storage sync endpoint tests ---
+
+    fn test_server_with_storage(storage_path: PathBuf) -> PiCloudHttpServer {
+        PiCloudHttpServer::new(
+            "127.0.0.1:0".parse().unwrap(),
+            ClusterDomain::default(),
+        )
+        .with_storage_path(storage_path)
+    }
+
+    #[tokio::test]
+    async fn storage_manifest_returns_file_list() {
+        let dir = std::env::temp_dir().join(format!("picloud-http-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Create a volume with files
+        let vol_dir = dir.join("test-vol");
+        std::fs::create_dir_all(&vol_dir).unwrap();
+        std::fs::write(vol_dir.join("file1.txt"), b"hello").unwrap();
+        std::fs::create_dir_all(vol_dir.join("sub")).unwrap();
+        std::fs::write(vol_dir.join("sub/file2.txt"), b"world!").unwrap();
+
+        let app = test_server_with_storage(dir.clone()).build_router();
+        let req = Request::builder()
+            .uri("/internal/storage/manifest/test-vol")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["volume"], "test-vol");
+        let files = json["files"].as_array().unwrap();
+        assert_eq!(files.len(), 2);
+
+        let paths: Vec<&str> = files.iter().map(|f| f["path"].as_str().unwrap()).collect();
+        assert!(paths.contains(&"file1.txt"));
+        assert!(paths.contains(&"sub/file2.txt"));
+
+        // Check sizes
+        let f1 = files.iter().find(|f| f["path"] == "file1.txt").unwrap();
+        assert_eq!(f1["size"], 5); // "hello"
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn storage_manifest_empty_volume() {
+        let dir = std::env::temp_dir().join(format!("picloud-http-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("empty-vol")).unwrap();
+
+        let app = test_server_with_storage(dir.clone()).build_router();
+        let req = Request::builder()
+            .uri("/internal/storage/manifest/empty-vol")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["files"].as_array().unwrap().len(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn storage_manifest_nonexistent_volume() {
+        let dir = std::env::temp_dir().join(format!("picloud-http-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let app = test_server_with_storage(dir.clone()).build_router();
+        let req = Request::builder()
+            .uri("/internal/storage/manifest/no-such-vol")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["files"].as_array().unwrap().len(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn storage_sync_writes_files() {
+        use base64::Engine;
+
+        let dir = std::env::temp_dir().join(format!("picloud-http-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let app = test_server_with_storage(dir.clone()).build_router();
+
+        let file_data = base64::engine::general_purpose::STANDARD.encode(b"hello world");
+        let nested_data = base64::engine::general_purpose::STANDARD.encode(b"nested content");
+
+        let body = serde_json::json!({
+            "files": [
+                {"path": "test.txt", "data": file_data},
+                {"path": "sub/dir/deep.txt", "data": nested_data},
+            ]
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/internal/storage/sync/new-vol")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert_eq!(json["synced"], 2);
+        assert_eq!(json["volume"], "new-vol");
+
+        // Verify files were written
+        let content = std::fs::read_to_string(dir.join("new-vol/test.txt")).unwrap();
+        assert_eq!(content, "hello world");
+
+        let nested = std::fs::read_to_string(dir.join("new-vol/sub/dir/deep.txt")).unwrap();
+        assert_eq!(nested, "nested content");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn storage_sync_creates_volume_dir() {
+        use base64::Engine;
+
+        let dir = std::env::temp_dir().join(format!("picloud-http-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Volume dir does not exist yet
+        assert!(!dir.join("brand-new-vol").exists());
+
+        let app = test_server_with_storage(dir.clone()).build_router();
+
+        let file_data = base64::engine::general_purpose::STANDARD.encode(b"data");
+        let body = serde_json::json!({
+            "files": [{"path": "file.bin", "data": file_data}]
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/internal/storage/sync/brand-new-vol")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Volume dir should now exist
+        assert!(dir.join("brand-new-vol").exists());
+        assert!(dir.join("brand-new-vol/file.bin").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn storage_manifest_returns_503_without_storage_path() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/internal/storage/manifest/some-vol")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn storage_sync_returns_503_without_storage_path() {
+        let app = test_server().build_router();
+        let body = serde_json::json!({"files": []});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/internal/storage/sync/some-vol")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);

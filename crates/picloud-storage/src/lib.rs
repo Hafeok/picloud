@@ -8,5 +8,7 @@
 //! directories to simulate NVMe block storage.
 
 pub mod implementation;
+pub mod replication;
 
 pub use implementation::LocalStorageBackend;
+pub use replication::StorageReplicator;
