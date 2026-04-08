@@ -635,6 +635,468 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    /// Project a MetricRecorded event (ADR-040).
+    ///
+    /// Upserts the latest metric values as triples on the node IRI.
+    /// Previous metric triples for this node are removed first so the
+    /// graph always holds only the current values.
+    fn project_metric_recorded(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        let metrics = match event.payload["metrics"].as_array() {
+            Some(arr) => arr,
+            None => {
+                warn!("MetricRecorded event missing metrics array");
+                return Ok(());
+            }
+        };
+
+        // Map metric names to RDF predicate local names
+        let metric_predicates: &[(&str, &str)] = &[
+            ("cpu_usage_percent", "cpuUsagePercent"),
+            ("memory_used_mb", "memoryUsedMb"),
+            ("memory_total_mb", "memoryTotalMb"),
+            ("disk_used_gb", "diskUsedGb"),
+            ("disk_total_gb", "diskTotalGb"),
+            ("cpu_temp_celsius", "cpuTempCelsius"),
+        ];
+
+        // Remove old metric triples for this node (upsert pattern)
+        let s = NamedNode::new(node_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid node IRI: {e}")))?;
+
+        for &(_, predicate_local) in metric_predicates {
+            let pred = format!("{PICLOUD_NS}{predicate_local}");
+            let p = NamedNodeRef::new(&pred)
+                .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+            let old_quads: Vec<Quad> = self
+                .store
+                .quads_for_pattern(
+                    Some(SubjectRef::from(&s)),
+                    Some(p),
+                    None,
+                    Some(GraphNameRef::DefaultGraph),
+                )
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            for quad in &old_quads {
+                self.store
+                    .remove(quad)
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
+        }
+
+        // Also remove old metricsUpdatedAt triple
+        {
+            let pred = format!("{PICLOUD_NS}metricsUpdatedAt");
+            let p = NamedNodeRef::new(&pred)
+                .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+            let old_quads: Vec<Quad> = self
+                .store
+                .quads_for_pattern(
+                    Some(SubjectRef::from(&s)),
+                    Some(p),
+                    None,
+                    Some(GraphNameRef::DefaultGraph),
+                )
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            for quad in &old_quads {
+                self.store
+                    .remove(quad)
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
+        }
+
+        // Insert new metric triples
+        for metric in metrics {
+            let name = metric["name"].as_str().unwrap_or_default();
+            let value = metric["value"].as_f64().unwrap_or(0.0);
+
+            // Find the matching predicate local name
+            if let Some(&(_, predicate_local)) = metric_predicates.iter().find(|&&(n, _)| n == name) {
+                self.insert_triple(
+                    node_iri_str,
+                    &format!("{PICLOUD_NS}{predicate_local}"),
+                    Literal::new_typed_literal(
+                        value.to_string(),
+                        NamedNode::new("http://www.w3.org/2001/XMLSchema#double")
+                            .expect("valid XSD IRI"),
+                    )
+                    .into(),
+                )?;
+            }
+        }
+
+        // Insert metricsUpdatedAt timestamp
+        self.insert_triple(
+            node_iri_str,
+            &format!("{PICLOUD_NS}metricsUpdatedAt"),
+            Literal::new_typed_literal(
+                event.timestamp.to_rfc3339(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#dateTime")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+
+        debug!(node_iri = node_iri_str, "projected MetricRecorded");
+        Ok(())
+    }
+
+    /// Project a TagAdded event — inserts blank-node tag triples (ADR-036).
+    ///
+    /// RDF representation:
+    /// ```turtle
+    /// <resource> picloud:tag [ picloud:tagKey "key" ; picloud:tagValue "value" ] .
+    /// ```
+    fn project_tag_added(&self, event: &EventEnvelope) -> Result<()> {
+        let resource_iri_str = event.payload["resource_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let key = event.payload["key"]
+            .as_str()
+            .unwrap_or_default();
+        let value = event.payload["value"]
+            .as_str()
+            .unwrap_or_default();
+
+        // Use a deterministic blank node ID based on resource + key + value
+        // so that removal can find it.
+        let bnode_id = format!("tag-{}-{}-{}", resource_iri_str, key, value);
+        let bnode_id_safe = bnode_id
+            .replace("://", "-")
+            .replace('/', "-")
+            .replace('.', "-")
+            .replace(':', "-");
+        let bnode = oxigraph::model::BlankNode::new(&bnode_id_safe)
+            .map_err(|e| PiCloudError::Internal(format!("invalid bnode id: {e}")))?;
+
+        let subject = NamedNode::new(resource_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid subject IRI: {e}")))?;
+        let tag_pred = NamedNode::new(format!("{PICLOUD_NS}tag"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let tag_key_pred = NamedNode::new(format!("{PICLOUD_NS}tagKey"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let tag_value_pred = NamedNode::new(format!("{PICLOUD_NS}tagValue"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+
+        // <resource> picloud:tag _:bnode
+        self.store
+            .insert(QuadRef::new(
+                &subject,
+                &tag_pred,
+                &bnode,
+                GraphNameRef::DefaultGraph,
+            ))
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+        // _:bnode picloud:tagKey "key"
+        self.store
+            .insert(QuadRef::new(
+                &bnode,
+                &tag_key_pred,
+                &Literal::new_simple_literal(key),
+                GraphNameRef::DefaultGraph,
+            ))
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+        // _:bnode picloud:tagValue "value"
+        self.store
+            .insert(QuadRef::new(
+                &bnode,
+                &tag_value_pred,
+                &Literal::new_simple_literal(value),
+                GraphNameRef::DefaultGraph,
+            ))
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+        // If product-scoped, also insert into the product's named graph
+        if let Some(product) = &event.product {
+            let graph_iri = self.iri_builder.product_graph(product);
+            let g = NamedNode::new(graph_iri.as_str())
+                .map_err(|e| PiCloudError::Internal(format!("invalid graph IRI: {e}")))?;
+            self.store
+                .insert_named_graph(NamedNodeRef::new(graph_iri.as_str()).unwrap())
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+            self.store
+                .insert(QuadRef::new(&subject, &tag_pred, &bnode, &g))
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            self.store
+                .insert(QuadRef::new(
+                    &bnode,
+                    &tag_key_pred,
+                    &Literal::new_simple_literal(key),
+                    &g,
+                ))
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            self.store
+                .insert(QuadRef::new(
+                    &bnode,
+                    &tag_value_pred,
+                    &Literal::new_simple_literal(value),
+                    &g,
+                ))
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        debug!(
+            resource_iri = resource_iri_str,
+            tag_key = key,
+            tag_value = value,
+            "projected TagAdded"
+        );
+        Ok(())
+    }
+
+    /// Project a TagRemoved event — removes matching tag blank-node triples (ADR-036).
+    fn project_tag_removed(&self, event: &EventEnvelope) -> Result<()> {
+        let resource_iri_str = event.payload["resource_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let key = event.payload["key"]
+            .as_str()
+            .unwrap_or_default();
+        let value = event.payload["value"]
+            .as_str()
+            .unwrap_or_default();
+
+        // Reconstruct the deterministic blank node ID
+        let bnode_id = format!("tag-{}-{}-{}", resource_iri_str, key, value);
+        let bnode_id_safe = bnode_id
+            .replace("://", "-")
+            .replace('/', "-")
+            .replace('.', "-")
+            .replace(':', "-");
+        let bnode = oxigraph::model::BlankNode::new(&bnode_id_safe)
+            .map_err(|e| PiCloudError::Internal(format!("invalid bnode id: {e}")))?;
+
+        // Remove all triples about the blank node (in all graphs)
+        let quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(Some(SubjectRef::from(&bnode)), None, None, None)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        // Remove the <resource> picloud:tag _:bnode triple (in all graphs)
+        let subject = NamedNode::new(resource_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid subject IRI: {e}")))?;
+        let tag_pred = NamedNode::new(format!("{PICLOUD_NS}tag"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let link_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&subject)),
+                Some(NamedNodeRef::new(tag_pred.as_str()).unwrap()),
+                Some(oxigraph::model::TermRef::from(&bnode)),
+                None,
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &link_quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        debug!(
+            resource_iri = resource_iri_str,
+            tag_key = key,
+            tag_value = value,
+            "projected TagRemoved"
+        );
+        Ok(())
+    }
+
+    /// Project a ConfigChanged event — insert/update/delete config entry triples (ADR-043).
+    fn project_config_changed(&self, event: &EventEnvelope) -> Result<()> {
+        let config_iri_str = event.payload["config_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let key = event.payload["key"]
+            .as_str()
+            .unwrap_or_default();
+        let action = event.payload["action"]
+            .as_str()
+            .unwrap_or("set");
+        let product = event.product.as_deref();
+
+        if action == "deleted" {
+            self.remove_triples_about_all_graphs(config_iri_str)?;
+            debug!(config_iri = config_iri_str, key = key, "projected ConfigChanged (deleted)");
+            return Ok(());
+        }
+
+        let value = event.payload["value"]
+            .as_str()
+            .unwrap_or_default();
+        let config_type = event.payload["config_type"]
+            .as_str()
+            .unwrap_or("string");
+
+        // Remove existing triples for this entry (in case of update)
+        self.remove_triples_about_all_graphs(config_iri_str)?;
+
+        // Insert config entry triples
+        self.insert_triple(
+            config_iri_str,
+            RDF_TYPE,
+            picloud_term("ConfigEntry").into(),
+        )?;
+        self.insert_triple(
+            config_iri_str,
+            &format!("{PICLOUD_NS}configKey"),
+            Literal::new_simple_literal(key).into(),
+        )?;
+        self.insert_triple(
+            config_iri_str,
+            &format!("{PICLOUD_NS}configValue"),
+            Literal::new_simple_literal(value).into(),
+        )?;
+        self.insert_triple(
+            config_iri_str,
+            &format!("{PICLOUD_NS}configType"),
+            Literal::new_simple_literal(config_type).into(),
+        )?;
+
+        if let Some(product_name) = product {
+            let graph_iri = self.iri_builder.product_graph(product_name);
+            self.insert_triple_in_graph(
+                config_iri_str,
+                RDF_TYPE,
+                picloud_term("ConfigEntry").into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                config_iri_str,
+                &format!("{PICLOUD_NS}configKey"),
+                Literal::new_simple_literal(key).into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                config_iri_str,
+                &format!("{PICLOUD_NS}configValue"),
+                Literal::new_simple_literal(value).into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                config_iri_str,
+                &format!("{PICLOUD_NS}configType"),
+                Literal::new_simple_literal(config_type).into(),
+                graph_iri.as_str(),
+            )?;
+        }
+
+        debug!(config_iri = config_iri_str, key = key, "projected ConfigChanged (set)");
+        Ok(())
+    }
+
+    /// Project a FeatureFlagChanged event — insert/update/delete flag triples (ADR-044).
+    fn project_feature_flag_changed(&self, event: &EventEnvelope) -> Result<()> {
+        let flag_iri_str = event.payload["flag_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let flag_name = event.payload["flag_name"]
+            .as_str()
+            .unwrap_or_default();
+        let action = event.payload["action"]
+            .as_str()
+            .unwrap_or("set");
+        let product = event.product.as_deref();
+
+        if action == "deleted" {
+            self.remove_triples_about_all_graphs(flag_iri_str)?;
+            debug!(flag_iri = flag_iri_str, name = flag_name, "projected FeatureFlagChanged (deleted)");
+            return Ok(());
+        }
+
+        let enabled = event.payload["enabled"].as_bool().unwrap_or(false);
+        let version_expr = event.payload["version_expr"]
+            .as_str()
+            .or_else(|| event.payload["version"].as_str())
+            .unwrap_or("");
+        let description = event.payload["description"]
+            .as_str()
+            .unwrap_or_default();
+
+        self.remove_triples_about_all_graphs(flag_iri_str)?;
+
+        self.insert_triple(
+            flag_iri_str,
+            RDF_TYPE,
+            picloud_term("FeatureFlag").into(),
+        )?;
+        self.insert_triple(
+            flag_iri_str,
+            &format!("{PICLOUD_NS}flagName"),
+            Literal::new_simple_literal(flag_name).into(),
+        )?;
+        self.insert_triple(
+            flag_iri_str,
+            &format!("{PICLOUD_NS}flagEnabled"),
+            Literal::new_simple_literal(if enabled { "true" } else { "false" }).into(),
+        )?;
+        self.insert_triple(
+            flag_iri_str,
+            &format!("{PICLOUD_NS}flagVersion"),
+            Literal::new_simple_literal(version_expr).into(),
+        )?;
+        if !description.is_empty() {
+            self.insert_triple(
+                flag_iri_str,
+                &format!("{PICLOUD_NS}flagDescription"),
+                Literal::new_simple_literal(description).into(),
+            )?;
+        }
+
+        if let Some(product_name) = product {
+            let graph_iri = self.iri_builder.product_graph(product_name);
+            self.insert_triple_in_graph(
+                flag_iri_str,
+                RDF_TYPE,
+                picloud_term("FeatureFlag").into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                flag_iri_str,
+                &format!("{PICLOUD_NS}flagName"),
+                Literal::new_simple_literal(flag_name).into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                flag_iri_str,
+                &format!("{PICLOUD_NS}flagEnabled"),
+                Literal::new_simple_literal(if enabled { "true" } else { "false" }).into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                flag_iri_str,
+                &format!("{PICLOUD_NS}flagVersion"),
+                Literal::new_simple_literal(version_expr).into(),
+                graph_iri.as_str(),
+            )?;
+            if !description.is_empty() {
+                self.insert_triple_in_graph(
+                    flag_iri_str,
+                    &format!("{PICLOUD_NS}flagDescription"),
+                    Literal::new_simple_literal(description).into(),
+                    graph_iri.as_str(),
+                )?;
+            }
+        }
+
+        debug!(flag_iri = flag_iri_str, name = flag_name, "projected FeatureFlagChanged (set)");
+        Ok(())
+    }
+
     /// Replace the status literal for a resource in the default graph
     /// (and optionally a product graph).
     fn update_status(
@@ -757,6 +1219,11 @@ impl StateProjector for OxigraphProjector {
             "IdentityCreated" => self.project_identity_created(event),
             "ProductDeployed" => self.project_product_deployed(event),
             "ProductDeleted" => self.project_product_deleted(event),
+            "MetricRecorded" => self.project_metric_recorded(event),
+            "TagAdded" => self.project_tag_added(event),
+            "TagRemoved" => self.project_tag_removed(event),
+            "ConfigChanged" => self.project_config_changed(event),
+            "FeatureFlagChanged" => self.project_feature_flag_changed(event),
             other => {
                 debug!(event_type = other, "unhandled event type — skipping projection");
                 Ok(())
@@ -1188,5 +1655,341 @@ mod tests {
             .await
             .unwrap();
         assert!(result.bindings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_project_metric_recorded() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let node_iri = iri_builder.node("pi-node-01");
+
+        // First, join the node so it exists in the graph
+        let join_event = make_node_joined_event(&iri_builder);
+        projector.project(&join_event).await.unwrap();
+
+        // Emit a MetricRecorded event
+        let metric_event = EventEnvelope::new(
+            iri_builder.event_schema("MetricRecorded", 1),
+            "MetricRecorded",
+            node_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "node_iri": node_iri.as_str(),
+                "metrics": [
+                    { "name": "cpu_usage_percent", "value": 42.3, "unit": "percent" },
+                    { "name": "memory_used_mb", "value": 8192.0, "unit": "mb" },
+                    { "name": "memory_total_mb", "value": 16384.0, "unit": "mb" },
+                    { "name": "disk_used_gb", "value": 312.0, "unit": "gb" },
+                    { "name": "disk_total_gb", "value": 1000.0, "unit": "gb" },
+                    { "name": "cpu_temp_celsius", "value": 58.1, "unit": "celsius" },
+                ],
+            }),
+        );
+        projector.project(&metric_event).await.unwrap();
+
+        // Query for CPU usage
+        let result = projector
+            .query(&format!(
+                "SELECT ?cpu WHERE {{ <{}> <{}cpuUsagePercent> ?cpu }}",
+                node_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["cpu"]["value"].as_str().unwrap(), "42.3");
+
+        // Query for memory
+        let result = projector
+            .query(&format!(
+                "SELECT ?mem WHERE {{ <{}> <{}memoryUsedMb> ?mem }}",
+                node_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["mem"]["value"].as_str().unwrap(), "8192");
+
+        // Query for temperature
+        let result = projector
+            .query(&format!(
+                "SELECT ?temp WHERE {{ <{}> <{}cpuTempCelsius> ?temp }}",
+                node_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["temp"]["value"].as_str().unwrap(), "58.1");
+
+        // Query for metricsUpdatedAt (should exist)
+        let result = projector
+            .query(&format!(
+                "SELECT ?ts WHERE {{ <{}> <{}metricsUpdatedAt> ?ts }}",
+                node_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_metric_recorded_upserts_values() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let node_iri = iri_builder.node("pi-node-02");
+
+        // Emit first metric event
+        let event1 = EventEnvelope::new(
+            iri_builder.event_schema("MetricRecorded", 1),
+            "MetricRecorded",
+            node_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "node_iri": node_iri.as_str(),
+                "metrics": [
+                    { "name": "cpu_usage_percent", "value": 42.3, "unit": "percent" },
+                ],
+            }),
+        );
+        projector.project(&event1).await.unwrap();
+
+        // Emit second metric event with updated value
+        let event2 = EventEnvelope::new(
+            iri_builder.event_schema("MetricRecorded", 1),
+            "MetricRecorded",
+            node_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "node_iri": node_iri.as_str(),
+                "metrics": [
+                    { "name": "cpu_usage_percent", "value": 85.7, "unit": "percent" },
+                ],
+            }),
+        );
+        projector.project(&event2).await.unwrap();
+
+        // Should have exactly one triple, with the updated value
+        let result = projector
+            .query(&format!(
+                "SELECT ?cpu WHERE {{ <{}> <{}cpuUsagePercent> ?cpu }}",
+                node_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1, "should upsert, not append");
+        assert_eq!(
+            result.bindings[0]["cpu"]["value"].as_str().unwrap(),
+            "85.7",
+            "should reflect latest value"
+        );
+
+        // metricsUpdatedAt should also be exactly one triple
+        let result = projector
+            .query(&format!(
+                "SELECT ?ts WHERE {{ <{}> <{}metricsUpdatedAt> ?ts }}",
+                node_iri.as_str(),
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1, "timestamp should upsert");
+    }
+
+    #[tokio::test]
+    async fn test_project_tag_added() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let resource_iri = iri_builder.resource("photo-app", "containers", "api-server");
+
+        let event = EventEnvelope::new(
+            iri_builder.event_schema("TagAdded", 1),
+            "TagAdded",
+            resource_iri.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": resource_iri.as_str(),
+                "key": "team",
+                "value": "backend",
+            }),
+        );
+
+        projector.project(&event).await.unwrap();
+
+        // Query for tags on the resource
+        let result = projector
+            .query(&format!(
+                "SELECT ?key ?value WHERE {{ <{}> <{}tag> ?tag . ?tag <{}tagKey> ?key . ?tag <{}tagValue> ?value }}",
+                resource_iri.as_str(), PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["key"]["value"].as_str().unwrap(), "team");
+        assert_eq!(result.bindings[0]["value"]["value"].as_str().unwrap(), "backend");
+    }
+
+    #[tokio::test]
+    async fn test_project_tag_added_multiple() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let resource_iri = iri_builder.resource("photo-app", "containers", "api-server");
+
+        // Add two tags
+        for (key, value) in [("team", "backend"), ("environment", "production")] {
+            let event = EventEnvelope::new(
+                iri_builder.event_schema("TagAdded", 1),
+                "TagAdded",
+                resource_iri.clone(),
+                Some("photo-app".to_string()),
+                Uuid::new_v4(),
+                serde_json::json!({
+                    "resource_iri": resource_iri.as_str(),
+                    "key": key,
+                    "value": value,
+                }),
+            );
+            projector.project(&event).await.unwrap();
+        }
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?key ?value WHERE {{ <{}> <{}tag> ?tag . ?tag <{}tagKey> ?key . ?tag <{}tagValue> ?value }} ORDER BY ?key",
+                resource_iri.as_str(), PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(result.bindings.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_project_tag_removed() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let resource_iri = iri_builder.resource("photo-app", "containers", "api-server");
+
+        // Add a tag
+        let add_event = EventEnvelope::new(
+            iri_builder.event_schema("TagAdded", 1),
+            "TagAdded",
+            resource_iri.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": resource_iri.as_str(),
+                "key": "team",
+                "value": "backend",
+            }),
+        );
+        projector.project(&add_event).await.unwrap();
+
+        // Verify it was added
+        let result = projector
+            .query(&format!(
+                "SELECT ?key WHERE {{ <{}> <{}tag> ?tag . ?tag <{}tagKey> ?key }}",
+                resource_iri.as_str(), PICLOUD_NS, PICLOUD_NS
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+
+        // Remove the tag
+        let remove_event = EventEnvelope::new(
+            iri_builder.event_schema("TagRemoved", 1),
+            "TagRemoved",
+            resource_iri.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": resource_iri.as_str(),
+                "key": "team",
+                "value": "backend",
+            }),
+        );
+        projector.project(&remove_event).await.unwrap();
+
+        // Verify it was removed
+        let result = projector
+            .query(&format!(
+                "SELECT ?key WHERE {{ <{}> <{}tag> ?tag . ?tag <{}tagKey> ?key }}",
+                resource_iri.as_str(), PICLOUD_NS, PICLOUD_NS
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_find_resources_by_tag() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        // Tag two resources with "environment=production"
+        let res1 = iri_builder.resource("photo-app", "containers", "api-server");
+        let res2 = iri_builder.resource("photo-app", "containers", "worker");
+
+        for resource_iri in [&res1, &res2] {
+            let event = EventEnvelope::new(
+                iri_builder.event_schema("TagAdded", 1),
+                "TagAdded",
+                resource_iri.clone(),
+                Some("photo-app".to_string()),
+                Uuid::new_v4(),
+                serde_json::json!({
+                    "resource_iri": resource_iri.as_str(),
+                    "key": "environment",
+                    "value": "production",
+                }),
+            );
+            projector.project(&event).await.unwrap();
+        }
+
+        // Tag only res1 with "tier=api"
+        let event = EventEnvelope::new(
+            iri_builder.event_schema("TagAdded", 1),
+            "TagAdded",
+            res1.clone(),
+            Some("photo-app".to_string()),
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": res1.as_str(),
+                "key": "tier",
+                "value": "api",
+            }),
+        );
+        projector.project(&event).await.unwrap();
+
+        // Find all resources with environment=production
+        let result = projector
+            .query(&format!(
+                "SELECT ?resource WHERE {{ ?resource <{}tag> ?tag . ?tag <{}tagKey> \"environment\" . ?tag <{}tagValue> \"production\" }}",
+                PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 2);
+
+        // Find resources with tier=api
+        let result = projector
+            .query(&format!(
+                "SELECT ?resource WHERE {{ ?resource <{}tag> ?tag . ?tag <{}tagKey> \"tier\" . ?tag <{}tagValue> \"api\" }}",
+                PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(
+            result.bindings[0]["resource"]["value"].as_str().unwrap(),
+            res1.as_str()
+        );
     }
 }

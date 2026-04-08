@@ -74,6 +74,11 @@ enum Commands {
         #[command(subcommand)]
         command: SdkCommands,
     },
+    /// Tag management (ADR-036)
+    Tag {
+        #[command(subcommand)]
+        command: TagCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -209,6 +214,34 @@ enum SdkCommands {
         /// Output directory for generated SDKs
         #[arg(long, default_value = "./generated-sdks")]
         output: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TagCommands {
+    /// Add a tag to a resource
+    Add {
+        /// Resource path (e.g. photo-app/containers/api-server)
+        resource: String,
+        /// Tag in key=value format
+        tag: String,
+    },
+    /// Remove a tag from a resource
+    Remove {
+        /// Resource path (e.g. photo-app/containers/api-server)
+        resource: String,
+        /// Tag in key=value format
+        tag: String,
+    },
+    /// List all tags on a resource
+    List {
+        /// Resource path (e.g. photo-app/containers/api-server)
+        resource: String,
+    },
+    /// Find all resources with a specific tag
+    Find {
+        /// Tag in key=value format
+        tag: String,
     },
 }
 
@@ -1082,6 +1115,167 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         Err(e) => eprintln!("Failed to publish {} SDK: {}", lang_str, e),
                     }
+                }
+            }
+        },
+        Commands::Tag { command } => match command {
+            TagCommands::Add { resource, tag } => {
+                let (key, value) = match tag.split_once('=') {
+                    Some((k, v)) => (k.to_string(), v.to_string()),
+                    None => {
+                        eprintln!("Tag must be in key=value format");
+                        std::process::exit(1);
+                    }
+                };
+
+                // Resolve resource path to IRI
+                let resource_iri = if resource.starts_with("http://") || resource.starts_with("https://") {
+                    resource.clone()
+                } else {
+                    // Parse as product/resource_type/name
+                    let parts: Vec<&str> = resource.split('/').collect();
+                    if parts.len() == 3 {
+                        format!("https://{}/products/{}/{}/{}", cli.domain, parts[0], parts[1], parts[2])
+                    } else if parts.len() == 1 {
+                        format!("https://{}/products/{}", cli.domain, parts[0])
+                    } else {
+                        eprintln!("Resource path must be product/type/name or a full IRI");
+                        std::process::exit(1);
+                    }
+                };
+
+                let payload = json!({
+                    "resource_iri": resource_iri,
+                    "key": key,
+                    "value": value,
+                });
+
+                let mut request = client
+                    .client
+                    .post(format!("{}/api/tags/add", client.base_url))
+                    .json(&payload);
+                if let Some(ref token) = client.token {
+                    request = request.header("Authorization", format!("Bearer {}", token));
+                }
+
+                match request.send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        println!("Tag added: {}={} on {}", key, value, resource);
+                    }
+                    Ok(resp) => {
+                        let text = resp.text().await.unwrap_or_default();
+                        eprintln!("Failed to add tag: {}", text);
+                    }
+                    Err(e) => eprintln!("Failed to add tag: {}", e),
+                }
+            }
+            TagCommands::Remove { resource, tag } => {
+                let (key, value) = match tag.split_once('=') {
+                    Some((k, v)) => (k.to_string(), v.to_string()),
+                    None => {
+                        eprintln!("Tag must be in key=value format");
+                        std::process::exit(1);
+                    }
+                };
+
+                let resource_iri = if resource.starts_with("http://") || resource.starts_with("https://") {
+                    resource.clone()
+                } else {
+                    let parts: Vec<&str> = resource.split('/').collect();
+                    if parts.len() == 3 {
+                        format!("https://{}/products/{}/{}/{}", cli.domain, parts[0], parts[1], parts[2])
+                    } else if parts.len() == 1 {
+                        format!("https://{}/products/{}", cli.domain, parts[0])
+                    } else {
+                        eprintln!("Resource path must be product/type/name or a full IRI");
+                        std::process::exit(1);
+                    }
+                };
+
+                let payload = json!({
+                    "resource_iri": resource_iri,
+                    "key": key,
+                    "value": value,
+                });
+
+                let mut request = client
+                    .client
+                    .post(format!("{}/api/tags/remove", client.base_url))
+                    .json(&payload);
+                if let Some(ref token) = client.token {
+                    request = request.header("Authorization", format!("Bearer {}", token));
+                }
+
+                match request.send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        println!("Tag removed: {}={} from {}", key, value, resource);
+                    }
+                    Ok(resp) => {
+                        let text = resp.text().await.unwrap_or_default();
+                        eprintln!("Failed to remove tag: {}", text);
+                    }
+                    Err(e) => eprintln!("Failed to remove tag: {}", e),
+                }
+            }
+            TagCommands::List { resource } => {
+                let resource_iri = if resource.starts_with("http://") || resource.starts_with("https://") {
+                    resource.clone()
+                } else {
+                    let parts: Vec<&str> = resource.split('/').collect();
+                    if parts.len() == 3 {
+                        format!("https://{}/products/{}/{}/{}", cli.domain, parts[0], parts[1], parts[2])
+                    } else if parts.len() == 1 {
+                        format!("https://{}/products/{}", cli.domain, parts[0])
+                    } else {
+                        eprintln!("Resource path must be product/type/name or a full IRI");
+                        std::process::exit(1);
+                    }
+                };
+
+                let path = format!("/api/tags?resource={}", urlencoding(&resource_iri));
+                match client.get(&path).await {
+                    Ok(body) => {
+                        if let Some(tags) = body.get("tags").and_then(|v| v.as_array()) {
+                            if tags.is_empty() {
+                                println!("No tags on {}", resource);
+                            } else {
+                                println!("Tags on {}:", resource);
+                                for tag in tags {
+                                    let k = tag.get("key").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let v = tag.get("value").and_then(|v| v.as_str()).unwrap_or("?");
+                                    println!("  {}={}", k, v);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to list tags: {}", e),
+                }
+            }
+            TagCommands::Find { tag } => {
+                let (key, value) = match tag.split_once('=') {
+                    Some((k, v)) => (k.to_string(), v.to_string()),
+                    None => {
+                        eprintln!("Tag must be in key=value format");
+                        std::process::exit(1);
+                    }
+                };
+
+                let path = format!("/api/tags/find?key={}&value={}", urlencoding(&key), urlencoding(&value));
+                match client.get(&path).await {
+                    Ok(body) => {
+                        if let Some(resources) = body.get("resources").and_then(|v| v.as_array()) {
+                            if resources.is_empty() {
+                                println!("No resources found with tag {}={}", key, value);
+                            } else {
+                                println!("Resources with tag {}={}:", key, value);
+                                for res in resources {
+                                    let iri = res.get("@id").and_then(|v| v.as_str()).unwrap_or("?");
+                                    println!("  {}", iri);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to find resources: {}", e),
                 }
             }
         },

@@ -128,6 +128,38 @@ impl IriBuilder {
         ))
     }
 
+    /// IRI for a product's config store: /products/{name}/config
+    pub fn product_config(&self, product_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/config",
+            self.domain.0, product_name
+        ))
+    }
+
+    /// IRI for a single config entry: /products/{name}/config/{key}
+    pub fn config_entry(&self, product_name: &str, key: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/config/{}",
+            self.domain.0, product_name, key
+        ))
+    }
+
+    /// IRI for a product's flags collection: /products/{name}/flags
+    pub fn product_flags(&self, product_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/flags",
+            self.domain.0, product_name
+        ))
+    }
+
+    /// IRI for a single feature flag: /products/{name}/flags/{flag}
+    pub fn feature_flag(&self, product_name: &str, flag_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/flags/{}",
+            self.domain.0, product_name, flag_name
+        ))
+    }
+
     pub fn aggregate_stream(
         &self,
         product_name: &str,

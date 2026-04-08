@@ -46,6 +46,9 @@ pub enum ResourceDeclaration {
     Ingress(IngressDecl),
     Secret(SecretDecl),
     Role(RoleDecl),
+    Config(ConfigDecl),
+    #[serde(rename = "feature-flag")]
+    FeatureFlag(FeatureFlagDecl),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +57,9 @@ pub struct ProductDecl {
     pub version: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +72,9 @@ pub struct VolumeDecl {
     pub durability: Option<String>,
     #[serde(default)]
     pub performance: Option<String>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 fn default_size_gb() -> u64 {
@@ -89,6 +98,9 @@ pub struct ContainerDecl {
     pub env: HashMap<String, serde_json::Value>,
     #[serde(default)]
     pub ports: Vec<u16>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 fn default_identity() -> String {
@@ -120,6 +132,9 @@ pub struct BinaryDecl {
     pub mounts: Vec<MountDecl>,
     #[serde(default)]
     pub env: HashMap<String, serde_json::Value>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +144,9 @@ pub struct EventSubscriptionDecl {
     pub source: String,
     pub event: String,
     pub handler: String,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +158,9 @@ pub struct IngressDecl {
     pub path: String,
     #[serde(default = "default_true")]
     pub tls: bool,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +169,9 @@ pub struct SecretDecl {
     pub product: String,
     /// The plaintext value (will be encrypted by the platform on apply)
     pub value: String,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +181,50 @@ pub struct RoleDecl {
     #[serde(default)]
     pub product: Option<String>,
     pub permissions: Vec<String>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+/// A config entry declaration for parsing (ADR-043)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEntryDecl {
+    pub key: String,
+    pub value: String,
+    #[serde(default = "default_config_type")]
+    pub config_type: String,
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+fn default_config_type() -> String {
+    "string".to_string()
+}
+
+/// A config store declaration (ADR-043)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigDecl {
+    pub name: String,
+    pub product: String,
+    pub entries: Vec<ConfigEntryDecl>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+/// A feature flag declaration (ADR-044)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureFlagDecl {
+    pub name: String,
+    pub product: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub version: String,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -332,6 +400,26 @@ impl ResourceDeclaration {
                 }
                 Ok(())
             }
+            ResourceDeclaration::Config(c) => {
+                if c.name.is_empty() || c.product.is_empty() {
+                    return Err(validation_err("config", "name and product cannot be empty"));
+                }
+                for entry in &c.entries {
+                    if entry.key.is_empty() {
+                        return Err(validation_err(&c.name, "config entry key cannot be empty"));
+                    }
+                }
+                Ok(())
+            }
+            ResourceDeclaration::FeatureFlag(f) => {
+                if f.name.is_empty() || f.product.is_empty() || f.version.is_empty() {
+                    return Err(validation_err("feature-flag", "name, product, and version cannot be empty"));
+                }
+                if crate::resources::VersionOp::parse(&f.version).is_none() {
+                    return Err(validation_err(&f.name, &format!("invalid version expression: '{}'", f.version)));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -346,6 +434,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Ingress(i) => Some(&i.product),
             ResourceDeclaration::Secret(s) => Some(&s.product),
             ResourceDeclaration::Role(r) => r.product.as_deref(),
+            ResourceDeclaration::Config(c) => Some(&c.product),
+            ResourceDeclaration::FeatureFlag(f) => Some(&f.product),
         }
     }
 
@@ -360,6 +450,24 @@ impl ResourceDeclaration {
             ResourceDeclaration::Ingress(i) => &i.name,
             ResourceDeclaration::Secret(s) => &s.name,
             ResourceDeclaration::Role(r) => &r.name,
+            ResourceDeclaration::Config(c) => &c.name,
+            ResourceDeclaration::FeatureFlag(f) => &f.name,
+        }
+    }
+
+    /// Get the tags for this resource (ADR-036).
+    pub fn tags(&self) -> &HashMap<String, String> {
+        match self {
+            ResourceDeclaration::Product(p) => &p.tags,
+            ResourceDeclaration::Volume(v) => &v.tags,
+            ResourceDeclaration::Container(c) => &c.tags,
+            ResourceDeclaration::Binary(b) => &b.tags,
+            ResourceDeclaration::EventSubscription(e) => &e.tags,
+            ResourceDeclaration::Ingress(i) => &i.tags,
+            ResourceDeclaration::Secret(s) => &s.tags,
+            ResourceDeclaration::Role(r) => &r.tags,
+            ResourceDeclaration::Config(c) => &c.tags,
+            ResourceDeclaration::FeatureFlag(f) => &f.tags,
         }
     }
 
@@ -374,6 +482,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Ingress(_) => "ingress",
             ResourceDeclaration::Secret(_) => "secret",
             ResourceDeclaration::Role(_) => "role",
+            ResourceDeclaration::Config(_) => "config",
+            ResourceDeclaration::FeatureFlag(_) => "feature-flag",
         }
     }
 }
@@ -701,6 +811,7 @@ fn parse_bicep_declaration(
                 name: name.to_string(),
                 version: get_string_required(&kv, "version", name)?,
                 description: get_string_optional(&kv, "description"),
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "volume" => {
@@ -710,6 +821,7 @@ fn parse_bicep_declaration(
                 size_gb: get_u64_or_default(&kv, "size_gb", 10),
                 durability: get_string_optional(&kv, "durability"),
                 performance: get_string_optional(&kv, "performance"),
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "container" => {
@@ -726,6 +838,7 @@ fn parse_bicep_declaration(
                 mounts,
                 env,
                 ports,
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "binary" => {
@@ -742,6 +855,7 @@ fn parse_bicep_declaration(
                 memory: get_string_optional(&kv, "memory"),
                 mounts,
                 env,
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "event-subscription" => {
@@ -751,6 +865,7 @@ fn parse_bicep_declaration(
                 source: get_string_required(&kv, "source", name)?,
                 event: get_string_required(&kv, "event", name)?,
                 handler: get_string_required(&kv, "handler", name)?,
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "ingress" => {
@@ -761,6 +876,7 @@ fn parse_bicep_declaration(
                 port: get_u64_or_default(&kv, "port", 0) as u16,
                 path: get_string_required(&kv, "path", name)?,
                 tls: get_bool_or_default(&kv, "tls", true),
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "secret" => {
@@ -768,6 +884,7 @@ fn parse_bicep_declaration(
                 name: name.to_string(),
                 product: get_string_required(&kv, "product", name)?,
                 value: get_string_required(&kv, "value", name)?,
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         "role" => {
@@ -776,6 +893,26 @@ fn parse_bicep_declaration(
                 name: name.to_string(),
                 product: get_string_optional(&kv, "product"),
                 permissions,
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "config" => {
+            let entries = get_config_entries(&kv, "entries")?;
+            Ok(ResourceDeclaration::Config(ConfigDecl {
+                name: name.to_string(),
+                product: get_string_required(&kv, "product", name)?,
+                entries,
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "feature-flag" => {
+            Ok(ResourceDeclaration::FeatureFlag(FeatureFlagDecl {
+                name: name.to_string(),
+                product: get_string_required(&kv, "product", name)?,
+                description: get_string_optional(&kv, "description"),
+                enabled: get_bool_or_default(&kv, "enabled", true),
+                version: get_string_required(&kv, "version", name)?,
+                tags: get_tags_map(&kv, "tags"),
             }))
         }
         _ => Err(PiCloudError::ResourceValidationFailed {
@@ -812,12 +949,16 @@ fn parse_bicep_kv(body: &str) -> Result<Vec<(String, BicepValue)>> {
             continue;
         }
 
-        // Read key
-        let key_start = pos;
-        while pos < body.len() && bytes[pos] != b':' && !bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-        let key = body[key_start..pos].trim().to_string();
+        // Read key — may be quoted ('key' or "key") or bare (key)
+        let key = if pos < body.len() && (bytes[pos] == b'\'' || bytes[pos] == b'"') {
+            read_quoted_string(body, &mut pos)?
+        } else {
+            let key_start = pos;
+            while pos < body.len() && bytes[pos] != b':' && !bytes[pos].is_ascii_whitespace() {
+                pos += 1;
+            }
+            body[key_start..pos].trim().to_string()
+        };
         if key.is_empty() {
             break;
         }
@@ -866,7 +1007,7 @@ fn skip_ws_inline(input: &str, pos: &mut usize) {
 
 fn parse_bicep_value(input: &str, pos: &mut usize) -> Result<BicepValue> {
     let bytes = input.as_bytes();
-    skip_ws_inline(input, pos);
+    skip_ws_and_comments(input, pos);
     if *pos >= input.len() {
         return Err(PiCloudError::ResourceValidationFailed {
             reason: "unexpected end of input while parsing value".to_string(),
@@ -1083,6 +1224,61 @@ fn get_env_map(kv: &[(String, BicepValue)], key: &str) -> Result<HashMap<String,
         }
     }
     Ok(HashMap::new())
+}
+
+/// Extract a `HashMap<String, String>` from a Bicep key-value block (for tags).
+///
+/// In Bicep syntax, keys inside object blocks may be quoted (`'team': 'backend'`),
+/// so we strip surrounding quotes from the key names.
+fn get_tags_map(kv: &[(String, BicepValue)], key: &str) -> HashMap<String, String> {
+    for (k, v) in kv {
+        if k == key {
+            if let BicepValue::Object(obj) = v {
+                let mut map = HashMap::new();
+                for (tk, tv) in obj {
+                    let clean_key = tk
+                        .trim_start_matches('\'')
+                        .trim_end_matches('\'')
+                        .trim_start_matches('"')
+                        .trim_end_matches('"')
+                        .to_string();
+                    if let BicepValue::Str(s) = tv {
+                        map.insert(clean_key, s.clone());
+                    }
+                }
+                return map;
+            }
+        }
+    }
+    HashMap::new()
+}
+
+fn get_config_entries(kv: &[(String, BicepValue)], key: &str) -> Result<Vec<ConfigEntryDecl>> {
+    for (k, v) in kv {
+        if k == key {
+            return match v {
+                BicepValue::Array(items) => {
+                    items.iter().map(|item| match item {
+                        BicepValue::Object(obj) => {
+                            Ok(ConfigEntryDecl {
+                                key: get_string_required(obj, "key", "config-entry")?,
+                                value: get_string_required(obj, "value", "config-entry")?,
+                                config_type: get_string_optional(obj, "type").unwrap_or_else(|| "string".to_string()),
+                                tags: get_tags_map(obj, "tags"),
+                            })
+                        }
+                        _ => Err(PiCloudError::ResourceValidationFailed {
+                            reason: "expected object in entries array".to_string(),
+                        }),
+                    }).collect()
+                }
+                _ => Err(PiCloudError::ResourceValidationFailed {
+                    reason: "expected array for 'entries'".to_string(),
+                }),
+            };
+        }
+    }
+    Ok(Vec::new())
 }
 
 fn bicep_value_to_json(v: &BicepValue) -> serde_json::Value {
@@ -1594,5 +1790,325 @@ event-subscription 'on-upload' = {
             }
             _ => panic!("expected EventSubscription"),
         }
+    }
+
+    #[test]
+    fn parse_json_with_tags() {
+        let json = r#"{
+            "resources": [
+                {
+                    "type": "product",
+                    "name": "photo-app",
+                    "version": "1.0.0",
+                    "tags": { "team": "backend", "environment": "production" }
+                },
+                {
+                    "type": "container",
+                    "name": "api-server",
+                    "product": "photo-app",
+                    "image": "photo-api:1.0.0",
+                    "tags": { "tier": "api" }
+                }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        file.validate().unwrap();
+
+        match &file.resources[0] {
+            ResourceDeclaration::Product(p) => {
+                assert_eq!(p.tags.len(), 2);
+                assert_eq!(p.tags.get("team").unwrap(), "backend");
+                assert_eq!(p.tags.get("environment").unwrap(), "production");
+            }
+            _ => panic!("expected Product"),
+        }
+
+        match &file.resources[1] {
+            ResourceDeclaration::Container(c) => {
+                assert_eq!(c.tags.len(), 1);
+                assert_eq!(c.tags.get("tier").unwrap(), "api");
+            }
+            _ => panic!("expected Container"),
+        }
+    }
+
+    #[test]
+    fn parse_json_without_tags_defaults_empty() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "my-app", "version": "1.0.0" }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        match &file.resources[0] {
+            ResourceDeclaration::Product(p) => {
+                assert!(p.tags.is_empty());
+            }
+            _ => panic!("expected Product"),
+        }
+    }
+
+    #[test]
+    fn bicep_parse_with_tags() {
+        let input = r#"
+            product 'photo-app' = {
+                version: '1.0.0'
+                tags: {
+                    'team': 'backend'
+                    'environment': 'production'
+                }
+            }
+        "#;
+        let file = ResourceFile::parse(input).unwrap();
+        file.validate().unwrap();
+
+        match &file.resources[0] {
+            ResourceDeclaration::Product(p) => {
+                assert_eq!(p.tags.len(), 2);
+                assert_eq!(p.tags.get("team").unwrap(), "backend");
+                assert_eq!(p.tags.get("environment").unwrap(), "production");
+            }
+            _ => panic!("expected Product"),
+        }
+    }
+
+    #[test]
+    fn resource_declaration_tags_accessor() {
+        let json = r#"{
+            "resources": [
+                {
+                    "type": "volume",
+                    "name": "data",
+                    "product": "my-app",
+                    "size_gb": 50,
+                    "tags": { "tier": "storage" }
+                },
+                {
+                    "type": "product",
+                    "name": "my-app",
+                    "version": "1.0.0"
+                }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+
+        let tags = file.resources[0].tags();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags.get("tier").unwrap(), "storage");
+
+        let tags = file.resources[1].tags();
+        assert!(tags.is_empty());
+    }
+
+    // ---- Config store tests (ADR-043) ----
+
+    #[test]
+    fn parse_config_json() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "photo-app", "version": "1.0.0" },
+                { "type": "config", "name": "app-config", "product": "photo-app",
+                  "entries": [
+                    { "key": "cache.ttl", "value": "300", "config_type": "int", "tags": { "tier": "cache" } },
+                    { "key": "api.url", "value": "https://api.local", "config_type": "string" }
+                  ] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        file.validate().unwrap();
+        assert_eq!(file.resources.len(), 2);
+        match &file.resources[1] {
+            ResourceDeclaration::Config(c) => {
+                assert_eq!(c.name, "app-config");
+                assert_eq!(c.product, "photo-app");
+                assert_eq!(c.entries.len(), 2);
+                assert_eq!(c.entries[0].key, "cache.ttl");
+                assert_eq!(c.entries[0].value, "300");
+                assert_eq!(c.entries[0].config_type, "int");
+                assert_eq!(c.entries[0].tags.get("tier").unwrap(), "cache");
+                assert_eq!(c.entries[1].key, "api.url");
+                assert_eq!(c.entries[1].config_type, "string");
+            }
+            _ => panic!("expected Config"),
+        }
+    }
+
+    #[test]
+    fn parse_config_bicep() {
+        let input = r#"
+product 'photo-app' = {
+  version: '1.0.0'
+}
+
+config 'app-config' = {
+  product: 'photo-app'
+  entries: [
+    { key: 'cache.ttl', value: '300', type: 'int' }
+    { key: 'api.url', value: 'https://api.local', type: 'string' }
+  ]
+}
+"#;
+        let file = ResourceFile::parse(input).unwrap();
+        file.validate().unwrap();
+        assert_eq!(file.resources.len(), 2);
+        match &file.resources[1] {
+            ResourceDeclaration::Config(c) => {
+                assert_eq!(c.name, "app-config");
+                assert_eq!(c.entries.len(), 2);
+                assert_eq!(c.entries[0].key, "cache.ttl");
+                assert_eq!(c.entries[0].value, "300");
+                assert_eq!(c.entries[0].config_type, "int");
+            }
+            _ => panic!("expected Config"),
+        }
+    }
+
+    #[test]
+    fn config_validation_rejects_empty_name() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "config", "name": "", "product": "app", "entries": [] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn config_validation_rejects_empty_entry_key() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "config", "name": "cfg", "product": "app",
+                  "entries": [{ "key": "", "value": "x", "config_type": "string" }] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert!(file.validate().is_err());
+    }
+
+    // ---- Feature flag tests (ADR-044) ----
+
+    #[test]
+    fn parse_feature_flag_json() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "photo-app", "version": "2.0.0" },
+                { "type": "feature-flag", "name": "new-upload-flow", "product": "photo-app",
+                  "description": "Enables the redesigned upload flow",
+                  "enabled": true, "version": "= 2" }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        file.validate().unwrap();
+        match &file.resources[1] {
+            ResourceDeclaration::FeatureFlag(f) => {
+                assert_eq!(f.name, "new-upload-flow");
+                assert_eq!(f.product, "photo-app");
+                assert_eq!(f.description, Some("Enables the redesigned upload flow".to_string()));
+                assert!(f.enabled);
+                assert_eq!(f.version, "= 2");
+            }
+            _ => panic!("expected FeatureFlag"),
+        }
+    }
+
+    #[test]
+    fn parse_feature_flag_bicep() {
+        let input = r#"
+product 'photo-app' = {
+  version: '2.0.0'
+}
+
+feature-flag 'new-upload-flow' = {
+  product: 'photo-app'
+  description: 'Enables the redesigned upload flow'
+  enabled: true
+  version: '= 2'
+}
+
+feature-flag 'dark-mode' = {
+  product: 'photo-app'
+  description: 'Dark mode UI'
+  enabled: true
+  version: '>= 2'
+}
+"#;
+        let file = ResourceFile::parse(input).unwrap();
+        file.validate().unwrap();
+        assert_eq!(file.resources.len(), 3);
+
+        match &file.resources[1] {
+            ResourceDeclaration::FeatureFlag(f) => {
+                assert_eq!(f.name, "new-upload-flow");
+                assert!(f.enabled);
+                assert_eq!(f.version, "= 2");
+            }
+            _ => panic!("expected FeatureFlag"),
+        }
+
+        match &file.resources[2] {
+            ResourceDeclaration::FeatureFlag(f) => {
+                assert_eq!(f.name, "dark-mode");
+                assert_eq!(f.version, ">= 2");
+            }
+            _ => panic!("expected FeatureFlag"),
+        }
+    }
+
+    #[test]
+    fn feature_flag_validation_rejects_invalid_version_expr() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "feature-flag", "name": "f1", "product": "app",
+                  "enabled": true, "version": "not-a-version" }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn feature_flag_validation_rejects_empty_version() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "feature-flag", "name": "f1", "product": "app",
+                  "enabled": true, "version": "" }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn feature_flag_resource_type_name() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "feature-flag", "name": "f1", "product": "app",
+                  "enabled": true, "version": "= 1" }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert_eq!(file.resources[1].resource_type(), "feature-flag");
+        assert_eq!(file.resources[1].resource_name(), "f1");
+        assert_eq!(file.resources[1].product_name(), Some("app"));
+    }
+
+    #[test]
+    fn config_resource_type_name() {
+        let json = r#"{
+            "resources": [
+                { "type": "product", "name": "app", "version": "1.0.0" },
+                { "type": "config", "name": "cfg", "product": "app", "entries": [] }
+            ]
+        }"#;
+        let file = ResourceFile::parse(json).unwrap();
+        assert_eq!(file.resources[1].resource_type(), "config");
+        assert_eq!(file.resources[1].resource_name(), "cfg");
+        assert_eq!(file.resources[1].product_name(), Some("app"));
     }
 }

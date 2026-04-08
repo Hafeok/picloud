@@ -26,7 +26,7 @@ use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
 use picloud_workload::ProcessScheduler;
-use picloud_http::{PiCloudHttpServer, Provisioner};
+use picloud_http::{MetricsAgent, PiCloudHttpServer, Provisioner};
 
 /// Server configuration, loaded from env or defaults
 struct ServerConfig {
@@ -356,6 +356,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         event_log_trait.append(node_joined).await?;
         info!("NodeJoined event emitted");
+    }
+
+    // 10b. Start metrics agent (ADR-040)
+    {
+        let metrics_interval_secs: u64 = std::env::var("PICLOUD_METRICS_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(15);
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let agent = MetricsAgent::new(
+            event_log_trait.clone(),
+            iri_builder,
+            node_iri.clone(),
+        );
+        agent.start(metrics_interval_secs);
+        info!(
+            interval_secs = metrics_interval_secs,
+            "Metrics agent started"
+        );
     }
 
     // 11. Create shared ingress routing table

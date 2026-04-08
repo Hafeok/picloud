@@ -90,6 +90,19 @@ pub enum PlatformEvent {
     ProductUpgradeCompleted(ProductUpgradeCompletedPayload),
     ProductUpgradeAborted(ProductUpgradeAbortedPayload),
     ProductDeleted(ProductDeletedPayload),
+
+    // --- Tag events (ADR-036) ---
+    TagAdded(TagAddedPayload),
+    TagRemoved(TagRemovedPayload),
+
+    // --- Metrics events (ADR-040) ---
+    MetricRecorded(MetricRecordedPayload),
+
+    // --- Configuration events (ADR-043) ---
+    ConfigChanged(ConfigChangedPayload),
+
+    // --- Feature flag events (ADR-044) ---
+    FeatureFlagChanged(FeatureFlagChangedPayload),
 }
 
 // --- Payload types ---
@@ -211,6 +224,71 @@ pub struct ProductUpgradeAbortedPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductDeletedPayload {
     pub product_iri: ResourceIri,
+}
+
+// --- Metrics payloads (ADR-040) ---
+
+/// A single metric data point.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricEntry {
+    /// Metric name, e.g. "cpu_usage_percent", "memory_used_mb".
+    pub name: String,
+    /// Numeric value of the metric.
+    pub value: f64,
+    /// Unit of the metric, e.g. "percent", "mb", "gb", "celsius".
+    pub unit: String,
+}
+
+/// Payload for hardware metrics recorded by the platform metrics agent.
+/// Emitted every collection interval (default 15s) per node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricRecordedPayload {
+    pub node_iri: ResourceIri,
+    pub metrics: Vec<MetricEntry>,
+}
+
+/// Payload for TagAdded event (ADR-036).
+/// Emitted when a tag is added to a resource.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagAddedPayload {
+    pub resource_iri: ResourceIri,
+    pub key: String,
+    pub value: String,
+}
+
+/// Payload for TagRemoved event (ADR-036).
+/// Emitted when a tag is removed from a resource.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagRemovedPayload {
+    pub resource_iri: ResourceIri,
+    pub key: String,
+    pub value: String,
+}
+
+/// Payload for ConfigChanged event (ADR-043).
+/// Emitted when a configuration entry is created, updated, or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigChangedPayload {
+    pub config_iri: ResourceIri,
+    pub product: String,
+    pub key: String,
+    pub value: Option<String>,
+    pub config_type: Option<String>,
+    /// "set" or "deleted"
+    pub action: String,
+}
+
+/// Payload for FeatureFlagChanged event (ADR-044).
+/// Emitted when a feature flag is created, updated, or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureFlagChangedPayload {
+    pub flag_iri: ResourceIri,
+    pub product: String,
+    pub flag_name: String,
+    pub enabled: Option<bool>,
+    pub version_expr: Option<String>,
+    /// "set" or "deleted"
+    pub action: String,
 }
 
 #[cfg(test)]

@@ -11,6 +11,17 @@ use crate::iri::ResourceIri;
 use crate::storage::StorageIntent;
 use crate::workload::{ContainerSpec, BinarySpec};
 
+/// A tag — a key:value label attached to any resource (ADR-036).
+///
+/// Tags are the universal labelling mechanism for the platform.
+/// They travel through the event log as TagAdded / TagRemoved events
+/// and are projected into the RDF graph for SPARQL querying.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Tag {
+    pub key: String,
+    pub value: String,
+}
+
 /// The lifecycle state of any resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,6 +43,9 @@ pub struct ResourceMeta {
     pub status: ResourceStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: Vec<Tag>,
 }
 
 /// A Product — the top-level deployment unit (ADR-016)
@@ -168,6 +182,138 @@ pub struct Role {
     pub permissions: Vec<String>,
 }
 
+/// The type of a configuration value (ADR-043)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigType {
+    String,
+    Int,
+    Float,
+    Bool,
+    Json,
+}
+
+/// A single configuration entry — typed key-value pair with tags (ADR-043)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEntry {
+    pub key: String,
+    pub value: String,
+    pub config_type: ConfigType,
+    #[serde(default)]
+    pub tags: std::collections::HashMap<String, String>,
+}
+
+/// A managed configuration store for a Product (ADR-043)
+///
+/// Central key-value store for runtime configuration. Workloads can
+/// declare overrides that merge over the product config (workload wins).
+/// Changes emit `ConfigChanged` events for live reload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigStore {
+    pub meta: ResourceMeta,
+    pub entries: Vec<ConfigEntry>,
+}
+
+/// Version expression operator for feature flags (ADR-044)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VersionOp {
+    Eq(u64),
+    Gt(u64),
+    Gte(u64),
+    Lt(u64),
+    Lte(u64),
+    Range(u64, u64),
+}
+
+impl VersionOp {
+    /// Parse a version expression string like "= 2", ">= 3", "2..4"
+    pub fn parse(expr: &str) -> Option<Self> {
+        let expr = expr.trim();
+        if let Some(range) = expr.split_once("..") {
+            let lo = range.0.trim().parse::<u64>().ok()?;
+            let hi = range.1.trim().parse::<u64>().ok()?;
+            return Some(VersionOp::Range(lo, hi));
+        }
+        if let Some(n) = expr.strip_prefix(">=") {
+            return Some(VersionOp::Gte(n.trim().parse().ok()?));
+        }
+        if let Some(n) = expr.strip_prefix(">") {
+            return Some(VersionOp::Gt(n.trim().parse().ok()?));
+        }
+        if let Some(n) = expr.strip_prefix("<=") {
+            return Some(VersionOp::Lte(n.trim().parse().ok()?));
+        }
+        if let Some(n) = expr.strip_prefix("<") {
+            return Some(VersionOp::Lt(n.trim().parse().ok()?));
+        }
+        if let Some(n) = expr.strip_prefix("=") {
+            return Some(VersionOp::Eq(n.trim().parse().ok()?));
+        }
+        // bare number = exact match
+        expr.parse::<u64>().ok().map(VersionOp::Eq)
+    }
+
+    /// Evaluate the version expression against a major version number.
+    pub fn matches(&self, major: u64) -> bool {
+        match self {
+            VersionOp::Eq(v) => major == *v,
+            VersionOp::Gt(v) => major > *v,
+            VersionOp::Gte(v) => major >= *v,
+            VersionOp::Lt(v) => major < *v,
+            VersionOp::Lte(v) => major <= *v,
+            VersionOp::Range(lo, hi) => major >= *lo && major <= *hi,
+        }
+    }
+}
+
+impl std::fmt::Display for VersionOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VersionOp::Eq(v) => write!(f, "= {v}"),
+            VersionOp::Gt(v) => write!(f, "> {v}"),
+            VersionOp::Gte(v) => write!(f, ">= {v}"),
+            VersionOp::Lt(v) => write!(f, "< {v}"),
+            VersionOp::Lte(v) => write!(f, "<= {v}"),
+            VersionOp::Range(lo, hi) => write!(f, "{lo}..{hi}"),
+        }
+    }
+}
+
+/// Extract the major version from a semver-like string.
+/// "2.1.0" -> 2, "3" -> 3
+pub fn parse_major_version(version: &str) -> Option<u64> {
+    version.split('.').next()?.parse().ok()
+}
+
+/// A feature flag bound to a Product version (ADR-044)
+///
+/// Flags are evaluated against the running Product version. A flag
+/// is active when `enabled` is true AND the version expression matches.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureFlag {
+    pub meta: ResourceMeta,
+    pub description: Option<String>,
+    pub enabled: bool,
+    /// Version expression string, e.g. "= 2", ">= 3", "2..4"
+    pub version_expr: String,
+}
+
+impl FeatureFlag {
+    /// Evaluate whether this flag is active for a given product version string.
+    pub fn is_active(&self, product_version: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let Some(major) = parse_major_version(product_version) else {
+            return false;
+        };
+        let Some(op) = VersionOp::parse(&self.version_expr) else {
+            return false;
+        };
+        op.matches(major)
+    }
+}
+
 /// A Node — a cluster member
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -245,5 +391,215 @@ mod tests {
         let json = serde_json::to_string(&OntologyFormat::Turtle).unwrap();
         let back: OntologyFormat = serde_json::from_str(&json).unwrap();
         assert!(matches!(back, OntologyFormat::Turtle));
+    }
+
+    #[test]
+    fn config_type_serde_round_trip() {
+        let types = vec![
+            ConfigType::String,
+            ConfigType::Int,
+            ConfigType::Float,
+            ConfigType::Bool,
+            ConfigType::Json,
+        ];
+        for ct in types {
+            let json = serde_json::to_string(&ct).unwrap();
+            let back: ConfigType = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, ct);
+        }
+    }
+
+    #[test]
+    fn config_entry_serde() {
+        let entry = ConfigEntry {
+            key: "cache.ttl".to_string(),
+            value: "300".to_string(),
+            config_type: ConfigType::Int,
+            tags: [("tier".to_string(), "cache".to_string())].into(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: ConfigEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.key, "cache.ttl");
+        assert_eq!(back.config_type, ConfigType::Int);
+        assert_eq!(back.tags.get("tier").unwrap(), "cache");
+    }
+
+    #[test]
+    fn version_op_parse_exact() {
+        assert_eq!(VersionOp::parse("= 2"), Some(VersionOp::Eq(2)));
+    }
+
+    #[test]
+    fn version_op_parse_gte() {
+        assert_eq!(VersionOp::parse(">= 3"), Some(VersionOp::Gte(3)));
+    }
+
+    #[test]
+    fn version_op_parse_gt() {
+        assert_eq!(VersionOp::parse("> 1"), Some(VersionOp::Gt(1)));
+    }
+
+    #[test]
+    fn version_op_parse_lt() {
+        assert_eq!(VersionOp::parse("< 5"), Some(VersionOp::Lt(5)));
+    }
+
+    #[test]
+    fn version_op_parse_lte() {
+        assert_eq!(VersionOp::parse("<= 4"), Some(VersionOp::Lte(4)));
+    }
+
+    #[test]
+    fn version_op_parse_range() {
+        assert_eq!(VersionOp::parse("2..4"), Some(VersionOp::Range(2, 4)));
+    }
+
+    #[test]
+    fn version_op_parse_bare_number() {
+        assert_eq!(VersionOp::parse("7"), Some(VersionOp::Eq(7)));
+    }
+
+    #[test]
+    fn version_op_parse_invalid() {
+        assert!(VersionOp::parse("abc").is_none());
+    }
+
+    #[test]
+    fn version_op_matches_exact() {
+        assert!(VersionOp::Eq(2).matches(2));
+        assert!(!VersionOp::Eq(2).matches(3));
+    }
+
+    #[test]
+    fn version_op_matches_range_inclusive() {
+        let op = VersionOp::Range(2, 4);
+        assert!(!op.matches(1));
+        assert!(op.matches(2));
+        assert!(op.matches(3));
+        assert!(op.matches(4));
+        assert!(!op.matches(5));
+    }
+
+    #[test]
+    fn version_op_matches_gte() {
+        assert!(VersionOp::Gte(2).matches(2));
+        assert!(VersionOp::Gte(2).matches(3));
+        assert!(!VersionOp::Gte(2).matches(1));
+    }
+
+    #[test]
+    fn version_op_matches_lt() {
+        assert!(VersionOp::Lt(2).matches(1));
+        assert!(!VersionOp::Lt(2).matches(2));
+    }
+
+    #[test]
+    fn parse_major_version_semver() {
+        assert_eq!(parse_major_version("2.1.0"), Some(2));
+        assert_eq!(parse_major_version("10.0.1"), Some(10));
+        assert_eq!(parse_major_version("3"), Some(3));
+    }
+
+    #[test]
+    fn feature_flag_is_active_exact_match() {
+        let flag = FeatureFlag {
+            meta: ResourceMeta {
+                iri: ResourceIri("https://picloud.local/products/app/flags/f1".to_string()),
+                resource_type: "FeatureFlag".to_string(),
+                name: "f1".to_string(),
+                product: Some("app".to_string()),
+                status: ResourceStatus::Ready,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                tags: Vec::new(),
+            },
+            description: Some("test".to_string()),
+            enabled: true,
+            version_expr: "= 2".to_string(),
+        };
+        assert!(flag.is_active("2.1.0"));
+        assert!(!flag.is_active("1.5.0"));
+        assert!(!flag.is_active("3.0.0"));
+    }
+
+    #[test]
+    fn feature_flag_disabled_never_active() {
+        let flag = FeatureFlag {
+            meta: ResourceMeta {
+                iri: ResourceIri("https://picloud.local/products/app/flags/f2".to_string()),
+                resource_type: "FeatureFlag".to_string(),
+                name: "f2".to_string(),
+                product: Some("app".to_string()),
+                status: ResourceStatus::Ready,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                tags: Vec::new(),
+            },
+            description: None,
+            enabled: false,
+            version_expr: ">= 1".to_string(),
+        };
+        assert!(!flag.is_active("5.0.0"));
+    }
+
+    #[test]
+    fn version_op_display() {
+        assert_eq!(VersionOp::Eq(2).to_string(), "= 2");
+        assert_eq!(VersionOp::Gte(3).to_string(), ">= 3");
+        assert_eq!(VersionOp::Range(2, 4).to_string(), "2..4");
+    }
+
+    #[test]
+    fn tag_serde_round_trip() {
+        let tag = Tag {
+            key: "team".to_string(),
+            value: "backend".to_string(),
+        };
+        let json = serde_json::to_string(&tag).unwrap();
+        let back: Tag = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.key, "team");
+        assert_eq!(back.value, "backend");
+    }
+
+    #[test]
+    fn tag_equality() {
+        let a = Tag { key: "env".to_string(), value: "prod".to_string() };
+        let b = Tag { key: "env".to_string(), value: "prod".to_string() };
+        let c = Tag { key: "env".to_string(), value: "dev".to_string() };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn resource_meta_tags_default_empty() {
+        let json = r#"{
+            "iri": "https://picloud.local/products/test",
+            "resource_type": "product",
+            "name": "test",
+            "product": null,
+            "status": "declared",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let meta: ResourceMeta = serde_json::from_str(json).unwrap();
+        assert!(meta.tags.is_empty());
+    }
+
+    #[test]
+    fn resource_meta_tags_deserialize() {
+        let json = r#"{
+            "iri": "https://picloud.local/products/test",
+            "resource_type": "product",
+            "name": "test",
+            "product": null,
+            "status": "declared",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "tags": [{"key": "team", "value": "backend"}]
+        }"#;
+        let meta: ResourceMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.tags.len(), 1);
+        assert_eq!(meta.tags[0].key, "team");
+        assert_eq!(meta.tags[0].value, "backend");
     }
 }

@@ -227,9 +227,23 @@ impl PiCloudHttpServer {
                 "/products/:name/event-store/:store/:aggregate_type/:aggregate_id/events",
                 get(handle_event_store_read).post(handle_event_store_append),
             )
+            // --- Config store routes (ADR-043) ---
+            .route("/products/:name/config", get(handle_config_list).post(handle_config_set))
+            .route("/products/:name/config/:key", get(handle_config_get).delete(handle_config_delete))
+            .route(
+                "/products/:name/containers/:cname/config",
+                get(handle_config_effective),
+            )
+            // --- Feature flag routes (ADR-044) ---
+            .route("/products/:name/flags", get(handle_flags_list))
+            .route("/products/:name/flags/:flag", get(handle_flag_get))
             .route("/api/commands", post(handle_command))
             .route("/api/apply", post(handle_apply))
             .route("/api/delete", post(handle_delete))
+            .route("/api/tags/add", post(handle_tag_add))
+            .route("/api/tags/remove", post(handle_tag_remove))
+            .route("/api/tags", get(handle_tag_list))
+            .route("/api/tags/find", get(handle_tag_find))
             .route(
                 "/schemas/events/:event_type/v:version",
                 get(handle_event_schema),
@@ -891,6 +905,38 @@ async fn handle_apply(
                 });
                 (iri, "ResourceDeclared", r.product.clone(), payload)
             }
+            ResourceDeclaration::Config(c) => {
+                let iri = iri_builder.product_config(&c.product);
+                let entries: Vec<serde_json::Value> = c.entries.iter().map(|e| {
+                    serde_json::json!({
+                        "key": e.key,
+                        "value": e.value,
+                        "type": e.config_type,
+                        "tags": e.tags,
+                    })
+                }).collect();
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "ConfigStore",
+                    "product": c.product,
+                    "name": c.name,
+                    "entries": entries,
+                });
+                (iri, "ResourceDeclared", Some(c.product.clone()), payload)
+            }
+            ResourceDeclaration::FeatureFlag(f) => {
+                let iri = iri_builder.feature_flag(&f.product, &f.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "FeatureFlag",
+                    "product": f.product,
+                    "name": f.name,
+                    "description": f.description,
+                    "enabled": f.enabled,
+                    "version": f.version,
+                });
+                (iri, "ResourceDeclared", Some(f.product.clone()), payload)
+            }
         };
 
         let schema = iri_builder.event_schema(event_type, 1);
@@ -917,6 +963,43 @@ async fn handle_apply(
                     "type": decl.resource_type(),
                     "status": "declared",
                 }));
+
+                // Emit TagAdded events for each tag on the resource (ADR-036)
+                let resource_iri_str = match decl {
+                    ResourceDeclaration::Product(p) => iri_builder.product(&p.name).as_str().to_string(),
+                    ResourceDeclaration::Volume(v) => iri_builder.resource(&v.product, "volumes", &v.name).as_str().to_string(),
+                    ResourceDeclaration::Container(c) => iri_builder.resource(&c.product, "containers", &c.name).as_str().to_string(),
+                    ResourceDeclaration::Binary(b) => iri_builder.resource(&b.product, "binaries", &b.name).as_str().to_string(),
+                    ResourceDeclaration::EventSubscription(e) => iri_builder.resource(&e.product, "event-subscriptions", &e.name).as_str().to_string(),
+                    ResourceDeclaration::Ingress(i) => iri_builder.resource(&i.product, "ingresses", &i.name).as_str().to_string(),
+                    ResourceDeclaration::Secret(s) => iri_builder.resource(&s.product, "secrets", &s.name).as_str().to_string(),
+                    ResourceDeclaration::Role(r) => {
+                        let p = r.product.as_deref().unwrap_or("platform");
+                        iri_builder.resource(p, "roles", &r.name).as_str().to_string()
+                    }
+                    ResourceDeclaration::Config(c) => iri_builder.product_config(&c.product).as_str().to_string(),
+                    ResourceDeclaration::FeatureFlag(f) => iri_builder.feature_flag(&f.product, &f.name).as_str().to_string(),
+                };
+
+                for (tag_key, tag_value) in decl.tags() {
+                    let tag_schema = iri_builder.event_schema("TagAdded", 1);
+                    let tag_source = ResourceIri(resource_iri_str.clone());
+                    let tag_envelope = EventEnvelope::new(
+                        tag_schema,
+                        "TagAdded",
+                        tag_source,
+                        decl.product_name().map(String::from),
+                        correlation_id,
+                        serde_json::json!({
+                            "resource_iri": resource_iri_str,
+                            "key": tag_key,
+                            "value": tag_value,
+                        }),
+                    );
+                    if let Err(e) = event_log.append(tag_envelope).await {
+                        warn!(error = %e, key = %tag_key, "Failed to append TagAdded event");
+                    }
+                }
             }
             Err(e) => {
                 results.push(serde_json::json!({
@@ -990,6 +1073,239 @@ async fn handle_delete(
                 Json(serde_json::json!({ "error": e.to_string() })),
             )
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tag endpoints (ADR-036)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct TagAddPayload {
+    resource_iri: String,
+    key: String,
+    value: String,
+    /// Product scope (optional)
+    product: Option<String>,
+}
+
+/// POST /api/tags/add — add a tag to a resource
+async fn handle_tag_add(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<TagAddPayload>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let correlation_id = Uuid::new_v4();
+
+    let source = match ResourceIri::new(&payload.resource_iri) {
+        Ok(iri) => iri,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid resource IRI: {e}") })),
+            );
+        }
+    };
+
+    let schema = iri_builder.event_schema("TagAdded", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "TagAdded",
+        source,
+        payload.product,
+        correlation_id,
+        serde_json::json!({
+            "resource_iri": payload.resource_iri,
+            "key": payload.key,
+            "value": payload.value,
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append TagAdded event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct TagRemovePayload {
+    resource_iri: String,
+    key: String,
+    value: String,
+    product: Option<String>,
+}
+
+/// POST /api/tags/remove — remove a tag from a resource
+async fn handle_tag_remove(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<TagRemovePayload>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let correlation_id = Uuid::new_v4();
+
+    let source = match ResourceIri::new(&payload.resource_iri) {
+        Ok(iri) => iri,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid resource IRI: {e}") })),
+            );
+        }
+    };
+
+    let schema = iri_builder.event_schema("TagRemoved", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "TagRemoved",
+        source,
+        payload.product,
+        correlation_id,
+        serde_json::json!({
+            "resource_iri": payload.resource_iri,
+            "key": payload.key,
+            "value": payload.value,
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append TagRemoved event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct TagListQuery {
+    resource: String,
+}
+
+/// GET /api/tags?resource=<iri> — list all tags on a resource
+async fn handle_tag_list(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Query(params): Query<TagListQuery>,
+) -> impl IntoResponse {
+    let Some(ref projector) = state.projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "projector not available" })),
+        );
+    };
+
+    let sparql = format!(
+        "SELECT ?key ?value WHERE {{ <{}> <https://picloud.local/ontology#tag> ?tag . ?tag <https://picloud.local/ontology#tagKey> ?key . ?tag <https://picloud.local/ontology#tagValue> ?value }}",
+        params.resource
+    );
+
+    match projector.query(&sparql).await {
+        Ok(result) => {
+            let tags: Vec<serde_json::Value> = result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "key": row["key"]["value"],
+                        "value": row["value"]["value"],
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "resource": params.resource,
+                    "tags": tags,
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct TagFindQuery {
+    key: String,
+    value: String,
+}
+
+/// GET /api/tags/find?key=<k>&value=<v> — find all resources with a specific tag
+async fn handle_tag_find(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Query(params): Query<TagFindQuery>,
+) -> impl IntoResponse {
+    let Some(ref projector) = state.projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "projector not available" })),
+        );
+    };
+
+    let sparql = format!(
+        "SELECT ?resource WHERE {{ ?resource <https://picloud.local/ontology#tag> ?tag . ?tag <https://picloud.local/ontology#tagKey> \"{}\" . ?tag <https://picloud.local/ontology#tagValue> \"{}\" }}",
+        params.key, params.value
+    );
+
+    match projector.query(&sparql).await {
+        Ok(result) => {
+            let resources: Vec<serde_json::Value> = result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "@id": row["resource"]["value"],
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "tag": format!("{}={}", params.key, params.value),
+                    "resources": resources,
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
     }
 }
 
@@ -1895,6 +2211,423 @@ async fn handle_device_poll(
         )
             .into_response(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Config store handlers (ADR-043)
+// ---------------------------------------------------------------------------
+
+/// GET /products/:name/config — list all config entries
+async fn handle_config_list(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let config_iri = iri_builder.product_config(&name);
+
+    // Query config entries from RDF graph
+    let entries = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?key ?value ?type WHERE {{ ?entry <{PICLOUD_NS}configKey> ?key . ?entry <{PICLOUD_NS}configValue> ?value . ?entry <{PICLOUD_NS}configType> ?type . FILTER(STRSTARTS(STR(?entry), \"{}/\")) }}",
+            config_iri.as_str(),
+            PICLOUD_NS = "https://picloud.local/ontology#",
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "key": row.get("key").and_then(|v| v.get("value")),
+                        "value": row.get("value").and_then(|v| v.get("value")),
+                        "type": row.get("type").and_then(|v| v.get("value")),
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
+    resource_response(
+        serde_json::json!({
+            "@id": config_iri.as_str(),
+            "type": "ConfigStore",
+            "product": name,
+            "entries": entries,
+        }),
+        ct,
+    )
+}
+
+/// GET /products/:name/config/:key — get a single config entry
+async fn handle_config_get(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, key)): Path<(String, String)>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let entry_iri = iri_builder.config_entry(&name, &key);
+
+    // Query specific config entry from RDF graph
+    let entry = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?value ?type WHERE {{ <{}> <https://picloud.local/ontology#configValue> ?value . <{}> <https://picloud.local/ontology#configType> ?type }}",
+            entry_iri.as_str(), entry_iri.as_str()
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result.bindings.first().map(|row| {
+                serde_json::json!({
+                    "@id": entry_iri.as_str(),
+                    "key": key,
+                    "value": row.get("value").and_then(|v| v.get("value")),
+                    "type": row.get("type").and_then(|v| v.get("value")),
+                })
+            }),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    match entry {
+        Some(data) => resource_response(data, ct),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("config key '{}' not found", key) })),
+        )
+            .into_response(),
+    }
+}
+
+/// Request payload for setting a config entry.
+#[derive(Deserialize)]
+struct ConfigSetPayload {
+    key: String,
+    value: String,
+    #[serde(default = "default_config_type_str")]
+    config_type: String,
+    #[serde(default)]
+    tags: std::collections::HashMap<String, String>,
+}
+
+fn default_config_type_str() -> String {
+    "string".to_string()
+}
+
+/// POST /products/:name/config — set a config entry (emits ConfigChanged)
+async fn handle_config_set(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+    Json(payload): Json<ConfigSetPayload>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let config_iri = iri_builder.config_entry(&name, &payload.key);
+    let correlation_id = Uuid::new_v4();
+
+    let schema = iri_builder.event_schema("ConfigChanged", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "ConfigChanged",
+        config_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "config_iri": config_iri.as_str(),
+            "product": name,
+            "key": payload.key,
+            "value": payload.value,
+            "config_type": payload.config_type,
+            "tags": payload.tags,
+            "action": "set",
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "key": payload.key,
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append ConfigChanged event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+/// DELETE /products/:name/config/:key — delete a config entry
+async fn handle_config_delete(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, key)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let config_iri = iri_builder.config_entry(&name, &key);
+    let correlation_id = Uuid::new_v4();
+
+    let schema = iri_builder.event_schema("ConfigChanged", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "ConfigChanged",
+        config_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "config_iri": config_iri.as_str(),
+            "product": name,
+            "key": key,
+            "value": null,
+            "action": "deleted",
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "key": key,
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append ConfigChanged (delete) event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+/// GET /products/:name/containers/:cname/config — effective merged config
+///
+/// Returns the product-level config merged with any container-level overrides.
+/// Container values win on key collision.
+async fn handle_config_effective(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, cname)): Path<(String, String)>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let config_iri = iri_builder.product_config(&name);
+    let container_iri = iri_builder.resource(&name, "containers", &cname);
+
+    // In a full implementation we would:
+    // 1. Load all product-level config entries
+    // 2. Load container-level config overrides
+    // 3. Merge with container values winning
+    // For now, return product config with the container context
+    let entries = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?key ?value ?type WHERE {{ ?entry <https://picloud.local/ontology#configKey> ?key . ?entry <https://picloud.local/ontology#configValue> ?value . ?entry <https://picloud.local/ontology#configType> ?type . FILTER(STRSTARTS(STR(?entry), \"{}/\")) }}",
+            config_iri.as_str(),
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "key": row.get("key").and_then(|v| v.get("value")),
+                        "value": row.get("value").and_then(|v| v.get("value")),
+                        "type": row.get("type").and_then(|v| v.get("value")),
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
+    resource_response(
+        serde_json::json!({
+            "@id": container_iri.as_str(),
+            "type": "EffectiveConfig",
+            "product": name,
+            "container": cname,
+            "entries": entries,
+        }),
+        ct,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Feature flag handlers (ADR-044)
+// ---------------------------------------------------------------------------
+
+/// GET /products/:name/flags — list all flags (evaluated against running version)
+async fn handle_flags_list(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let flags_iri = iri_builder.product_flags(&name);
+
+    // Get the product version from RDF to evaluate flags
+    let product_version = get_product_version(&state, &name).await;
+
+    // Query all flags from RDF graph
+    let flags = if let Some(ref projector) = state.projector {
+        let product_iri = iri_builder.product(&name);
+        let sparql = format!(
+            "SELECT ?flag ?fname ?enabled ?ver ?desc WHERE {{ ?flag <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://picloud.local/ontology#FeatureFlag> . ?flag <https://picloud.local/ontology#flagName> ?fname . ?flag <https://picloud.local/ontology#flagEnabled> ?enabled . ?flag <https://picloud.local/ontology#flagVersion> ?ver . OPTIONAL {{ ?flag <https://picloud.local/ontology#flagDescription> ?desc }} . FILTER(STRSTARTS(STR(?flag), \"{}/flags/\")) }}",
+            product_iri.as_str()
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result
+                .bindings
+                .iter()
+                .map(|row| {
+                    let flag_name = row.get("fname").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+                    let enabled_str = row.get("enabled").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("false");
+                    let enabled = enabled_str == "true";
+                    let version_expr = row.get("ver").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+                    let description = row.get("desc").and_then(|v| v.get("value")).and_then(|v| v.as_str());
+
+                    let active = if enabled {
+                        product_version.as_ref().map_or(false, |pv| {
+                            picloud_domain::resources::parse_major_version(pv)
+                                .and_then(|major| picloud_domain::resources::VersionOp::parse(version_expr).map(|op| op.matches(major)))
+                                .unwrap_or(false)
+                        })
+                    } else {
+                        false
+                    };
+
+                    serde_json::json!({
+                        "name": flag_name,
+                        "active": active,
+                        "enabled": enabled,
+                        "version": version_expr,
+                        "description": description,
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
+    resource_response(
+        serde_json::json!({
+            "@id": flags_iri.as_str(),
+            "type": "FeatureFlagList",
+            "product": name,
+            "productVersion": product_version,
+            "flags": flags,
+        }),
+        ct,
+    )
+}
+
+/// GET /products/:name/flags/:flag — single flag evaluation
+async fn handle_flag_get(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, flag_name)): Path<(String, String)>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let flag_iri = iri_builder.feature_flag(&name, &flag_name);
+
+    let product_version = get_product_version(&state, &name).await;
+
+    let flag_data = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?enabled ?ver ?desc WHERE {{ <{}> <https://picloud.local/ontology#flagEnabled> ?enabled . <{}> <https://picloud.local/ontology#flagVersion> ?ver . OPTIONAL {{ <{}> <https://picloud.local/ontology#flagDescription> ?desc }} }}",
+            flag_iri.as_str(), flag_iri.as_str(), flag_iri.as_str()
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result.bindings.first().map(|row| {
+                let enabled_str = row.get("enabled").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("false");
+                let enabled = enabled_str == "true";
+                let version_expr = row.get("ver").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("");
+                let description = row.get("desc").and_then(|v| v.get("value")).and_then(|v| v.as_str());
+
+                let active = if enabled {
+                    product_version.as_ref().map_or(false, |pv| {
+                        picloud_domain::resources::parse_major_version(pv)
+                            .and_then(|major| picloud_domain::resources::VersionOp::parse(version_expr).map(|op| op.matches(major)))
+                            .unwrap_or(false)
+                    })
+                } else {
+                    false
+                };
+
+                serde_json::json!({
+                    "@id": flag_iri.as_str(),
+                    "name": flag_name,
+                    "active": active,
+                    "enabled": enabled,
+                    "version": version_expr,
+                    "description": description,
+                })
+            }),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    match flag_data {
+        Some(data) => resource_response(data, ct),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("flag '{}' not found", flag_name) })),
+        )
+            .into_response(),
+    }
+}
+
+/// Helper to get a product's version from the RDF graph.
+async fn get_product_version(state: &AppState, product_name: &str) -> Option<String> {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let product_iri = iri_builder.product(product_name);
+
+    if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?version WHERE {{ <{}> <https://picloud.local/ontology#version> ?version }}",
+            product_iri.as_str()
+        );
+        if let Ok(result) = projector.query(&sparql).await {
+            return result.bindings.first()
+                .and_then(|row| row.get("version"))
+                .and_then(|v| v.get("value"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
