@@ -4,6 +4,10 @@
 /// All commands emit events to the cluster and subscribe to the result stream.
 /// The CLI never imports slice internals — it only talks HTTP to the cluster.
 
+#[cfg(feature = "fido2")]
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+#[cfg(feature = "fido2")]
+use base64::Engine;
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
 use serde_json::json;
@@ -122,7 +126,26 @@ enum IdentityCommands {
         identity: String,
     },
     /// Get a CLI token for the current user (device flow or FIDO2 direct)
-    Token,
+    Token {
+        /// Use a physical FIDO2 security key (YubiKey) for authentication
+        #[arg(long)]
+        fido2: bool,
+        /// Identity IRI (required for --fido2)
+        #[arg(long)]
+        identity: Option<String>,
+    },
+    /// Register a new passkey for an identity
+    Register {
+        /// Use a physical FIDO2 security key (YubiKey) for registration
+        #[arg(long)]
+        fido2: bool,
+        /// Identity IRI
+        #[arg(long)]
+        identity: String,
+        /// Display name for the passkey
+        #[arg(long)]
+        display_name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -727,117 +750,177 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => eprintln!("Passkey reset failed: {}", e),
                 }
             }
-            IdentityCommands::Token => {
-                println!("Initiating device authentication flow...");
+            IdentityCommands::Token { fido2, identity } => {
+                if fido2 {
+                    #[cfg(feature = "fido2")]
+                    {
+                        // FIDO2 direct authentication — talk to a physical YubiKey via CTAP2
+                        let identity_iri = match identity {
+                            Some(ref iri) => iri.clone(),
+                            None => {
+                                eprintln!("--identity is required with --fido2");
+                                eprintln!("Usage: picloud identity token --fido2 --identity <IRI>");
+                                std::process::exit(1);
+                            }
+                        };
 
-                // Step 1: Begin device flow
-                let begin_url = format!("http://{}:{}/auth/device/begin", cli.domain, cli.port);
-                match reqwest::Client::new()
-                    .post(&begin_url)
-                    .header("Content-Type", "application/json")
-                    .body("{}")
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        if !resp.status().is_success() {
-                            eprintln!("Failed to start device flow: HTTP {}", resp.status());
-                            return Ok(());
+                        match fido2_authenticate(&client, &cli.domain, cli.port, &identity_iri).await {
+                            Ok(token) => {
+                                println!("Authentication successful.");
+                                println!();
+                                println!("Access token:");
+                                println!("  {}", token);
+                                println!();
+                                println!("Set this token for future CLI calls:");
+                                println!("  export PICLOUD_TOKEN={}", token);
+                            }
+                            Err(e) => eprintln!("FIDO2 authentication failed: {}", e),
                         }
-                        match resp.json::<serde_json::Value>().await {
-                            Ok(flow) => {
-                                let device_code = flow["device_code"]
-                                    .as_str()
-                                    .unwrap_or_default()
-                                    .to_string();
-                                let verification_url = flow["verification_url"]
-                                    .as_str()
-                                    .unwrap_or_default()
-                                    .to_string();
-                                let interval = flow["interval_secs"].as_u64().unwrap_or(5);
-                                let expires_in = flow["expires_in_secs"].as_u64().unwrap_or(600);
+                    }
+                    #[cfg(not(feature = "fido2"))]
+                    {
+                        let _ = identity;
+                        eprintln!("FIDO2 support is not enabled in this build.");
+                        eprintln!("Rebuild with: cargo build -p picloud-cli --features fido2");
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Device flow — browser-based authentication
+                    println!("Initiating device authentication flow...");
 
-                                println!();
-                                println!("Open the following URL in your browser to authenticate:");
-                                println!("  {}", verification_url);
-                                println!();
-                                println!("Waiting for authentication (expires in {}s)...", expires_in);
+                    let begin_url = format!("http://{}:{}/auth/device/begin", cli.domain, cli.port);
+                    match reqwest::Client::new()
+                        .post(&begin_url)
+                        .header("Content-Type", "application/json")
+                        .body("{}")
+                        .send()
+                        .await
+                    {
+                        Ok(resp) => {
+                            if !resp.status().is_success() {
+                                eprintln!("Failed to start device flow: HTTP {}", resp.status());
+                                return Ok(());
+                            }
+                            match resp.json::<serde_json::Value>().await {
+                                Ok(flow) => {
+                                    let device_code = flow["device_code"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    let verification_url = flow["verification_url"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    let interval = flow["interval_secs"].as_u64().unwrap_or(5);
+                                    let expires_in = flow["expires_in_secs"].as_u64().unwrap_or(600);
 
-                                // Step 2: Poll for completion
-                                let poll_url = format!(
-                                    "http://{}:{}/auth/device/poll",
-                                    cli.domain, cli.port
-                                );
-                                let mut attempts = expires_in / interval;
-                                loop {
-                                    tokio::time::sleep(
-                                        std::time::Duration::from_secs(interval),
-                                    )
-                                    .await;
-                                    attempts = attempts.saturating_sub(1);
-                                    if attempts == 0 {
-                                        eprintln!("Device flow expired.");
-                                        break;
-                                    }
+                                    println!();
+                                    println!("Open the following URL in your browser to authenticate:");
+                                    println!("  {}", verification_url);
+                                    println!();
+                                    println!("Waiting for authentication (expires in {}s)...", expires_in);
 
-                                    let poll_body =
-                                        json!({ "device_code": device_code });
-                                    match reqwest::Client::new()
-                                        .post(&poll_url)
-                                        .json(&poll_body)
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(poll_resp) => {
-                                            if let Ok(result) =
-                                                poll_resp.json::<serde_json::Value>().await
-                                            {
-                                                match result["status"].as_str() {
-                                                    Some("complete") => {
-                                                        let token = result["access_token"]
-                                                            .as_str()
-                                                            .unwrap_or_default();
-                                                        println!("Authentication successful.");
-                                                        println!();
-                                                        println!("Access token:");
-                                                        println!("  {}", token);
-                                                        println!();
-                                                        println!("Set this token for future CLI calls:");
-                                                        println!(
-                                                            "  export PICLOUD_TOKEN={}",
-                                                            token
-                                                        );
-                                                        break;
-                                                    }
-                                                    Some("expired") => {
-                                                        eprintln!("Device flow expired.");
-                                                        break;
-                                                    }
-                                                    Some("pending") => {
-                                                        // Still waiting
-                                                        eprint!(".");
-                                                    }
-                                                    _ => {
-                                                        eprintln!(
-                                                            "Unexpected poll response: {}",
-                                                            result
-                                                        );
-                                                        break;
+                                    let poll_url = format!(
+                                        "http://{}:{}/auth/device/poll",
+                                        cli.domain, cli.port
+                                    );
+                                    let mut attempts = expires_in / interval;
+                                    loop {
+                                        tokio::time::sleep(
+                                            std::time::Duration::from_secs(interval),
+                                        )
+                                        .await;
+                                        attempts = attempts.saturating_sub(1);
+                                        if attempts == 0 {
+                                            eprintln!("Device flow expired.");
+                                            break;
+                                        }
+
+                                        let poll_body =
+                                            json!({ "device_code": device_code });
+                                        match reqwest::Client::new()
+                                            .post(&poll_url)
+                                            .json(&poll_body)
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(poll_resp) => {
+                                                if let Ok(result) =
+                                                    poll_resp.json::<serde_json::Value>().await
+                                                {
+                                                    match result["status"].as_str() {
+                                                        Some("complete") => {
+                                                            let token = result["access_token"]
+                                                                .as_str()
+                                                                .unwrap_or_default();
+                                                            println!("Authentication successful.");
+                                                            println!();
+                                                            println!("Access token:");
+                                                            println!("  {}", token);
+                                                            println!();
+                                                            println!("Set this token for future CLI calls:");
+                                                            println!(
+                                                                "  export PICLOUD_TOKEN={}",
+                                                                token
+                                                            );
+                                                            break;
+                                                        }
+                                                        Some("expired") => {
+                                                            eprintln!("Device flow expired.");
+                                                            break;
+                                                        }
+                                                        Some("pending") => {
+                                                            eprint!(".");
+                                                        }
+                                                        _ => {
+                                                            eprintln!(
+                                                                "Unexpected poll response: {}",
+                                                                result
+                                                            );
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Poll failed: {}", e);
-                                            break;
+                                            Err(e) => {
+                                                eprintln!("Poll failed: {}", e);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
+                                Err(e) => eprintln!("Failed to parse device flow response: {}", e),
                             }
-                            Err(e) => eprintln!("Failed to parse device flow response: {}", e),
+                        }
+                        Err(e) => eprintln!("Failed to start device flow: {}", e),
+                    }
+                }
+            }
+            IdentityCommands::Register {
+                fido2,
+                identity,
+                display_name,
+            } => {
+                if fido2 {
+                    #[cfg(feature = "fido2")]
+                    {
+                        match fido2_register(&client, &cli.domain, cli.port, &identity, display_name)
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(e) => eprintln!("FIDO2 registration failed: {}", e),
                         }
                     }
-                    Err(e) => eprintln!("Failed to start device flow: {}", e),
+                    #[cfg(not(feature = "fido2"))]
+                    {
+                        let _ = (identity, display_name);
+                        eprintln!("FIDO2 support is not enabled in this build.");
+                        eprintln!("Rebuild with: cargo build -p picloud-cli --features fido2");
+                        std::process::exit(1);
+                    }
+                } else {
+                    eprintln!("Passkey registration from the CLI currently requires --fido2.");
+                    eprintln!("Usage: picloud identity register --fido2 --identity <IRI>");
                 }
             }
         },
@@ -1003,6 +1086,314 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// FIDO2 direct authentication — CTAP2 HID with a physical security key
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "fido2")]
+/// Authenticate using a physical FIDO2 security key (YubiKey, etc.).
+///
+/// Flow:
+///   1. POST /auth/login/begin  -> get challenge + allowed credential IDs
+///   2. CTAP2 get_assertion()   -> YubiKey signs the challenge (user touch)
+///   3. POST /auth/login/complete -> server verifies ECDSA, returns token
+async fn fido2_authenticate(
+    _client: &ClusterClient,
+    domain: &str,
+    port: u16,
+    identity_iri: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use ctap_hid_fido2::fidokey::GetAssertionArgsBuilder;
+
+    println!("FIDO2 Authentication");
+    println!("====================");
+    println!("Identity: {}", identity_iri);
+    println!();
+
+    // Step 1: Begin authentication — get challenge from server
+    let begin_url = format!("http://{}:{}/auth/login/begin", domain, port);
+    let begin_body = json!({ "identity_iri": identity_iri });
+    let resp = reqwest::Client::new()
+        .post(&begin_url)
+        .json(&begin_body)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Server rejected login begin: {}", text).into());
+    }
+
+    let begin_resp: serde_json::Value = resp.json().await?;
+    let challenge_id = begin_resp["challenge_id"]
+        .as_str()
+        .ok_or("missing challenge_id in response")?
+        .to_string();
+    let challenge_b64 = begin_resp["options"]["challenge"]
+        .as_str()
+        .or_else(|| begin_resp["challenge"].as_str())
+        .ok_or("missing challenge in response")?;
+    let rp_id = begin_resp["options"]["rp_id"]
+        .as_str()
+        .or_else(|| begin_resp["rp_id"].as_str())
+        .unwrap_or("picloud.local");
+
+    let challenge_bytes = URL_SAFE_NO_PAD.decode(challenge_b64)?;
+
+    // Collect allowed credential IDs
+    let allow_credentials: Vec<Vec<u8>> = begin_resp["allow_credentials"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter_map(|s| URL_SAFE_NO_PAD.decode(s).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Step 2: Talk to the physical FIDO2 device via CTAP2 HID
+    println!("Looking for FIDO2 security keys...");
+    let devices = ctap_hid_fido2::get_fidokey_devices();
+    if devices.is_empty() {
+        return Err(
+            "No FIDO2 security keys found.\n\
+             Make sure your YubiKey is plugged in.\n\
+             On Linux, you may need udev rules for HID access:\n\n\
+             Create /etc/udev/rules.d/70-fido2.rules with:\n  \
+               KERNEL==\"hidraw*\", SUBSYSTEM==\"hidraw\", \
+               ATTRS{idVendor}==\"1050\", MODE=\"0660\", GROUP=\"plugdev\"\n\n\
+             Then run: sudo udevadm control --reload-rules && sudo udevadm trigger"
+                .into(),
+        );
+    }
+
+    let device_info = &devices[0];
+    println!("  Found: {}", device_info.product_string);
+    println!();
+
+    // Build client data JSON (WebAuthn spec)
+    let client_data_json = serde_json::to_vec(&json!({
+        "type": "webauthn.get",
+        "challenge": challenge_b64,
+        "origin": format!("https://{}", rp_id),
+        "crossOrigin": false,
+    }))?;
+
+    println!("Touch your security key to authenticate...");
+
+    let device = ctap_hid_fido2::FidoKeyHid::new(
+        &[device_info.param.clone()],
+        &ctap_hid_fido2::Cfg::init(),
+    )
+    .map_err(|e| format!("Failed to open FIDO2 device: {e}"))?;
+
+    let mut args_builder = GetAssertionArgsBuilder::new(rp_id, &challenge_bytes);
+
+    // Add allowed credential IDs
+    for cred_id in &allow_credentials {
+        args_builder = args_builder.add_credential_id(cred_id);
+    }
+
+    let args = args_builder.build();
+    let assertions = device
+        .get_assertion_with_args(&args)
+        .map_err(|e| {
+            format!(
+                "FIDO2 get_assertion failed: {e}\n\
+                 Make sure the correct key is connected and has a credential for this identity."
+            )
+        })?;
+
+    if assertions.is_empty() {
+        return Err("No assertions returned from security key.".into());
+    }
+
+    let assertion = &assertions[0];
+
+    // Step 3: Send the authenticator response to the server
+    let complete_url = format!("http://{}:{}/auth/login/complete", domain, port);
+    let complete_body = json!({
+        "challenge_id": challenge_id,
+        "credential_id": URL_SAFE_NO_PAD.encode(&assertion.credential_id),
+        "signature": URL_SAFE_NO_PAD.encode(&assertion.signature),
+        "authenticator_data": URL_SAFE_NO_PAD.encode(&assertion.auth_data),
+        "client_data_json": URL_SAFE_NO_PAD.encode(&client_data_json),
+        "signature_format": "webauthn",
+    });
+
+    let resp = reqwest::Client::new()
+        .post(&complete_url)
+        .json(&complete_body)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Server rejected authentication: {}", text).into());
+    }
+
+    let result: serde_json::Value = resp.json().await?;
+    let token = result["access_token"]
+        .as_str()
+        .ok_or("missing access_token in response")?
+        .to_string();
+
+    Ok(token)
+}
+
+#[cfg(feature = "fido2")]
+/// Register a new FIDO2 passkey on a physical security key.
+///
+/// Flow:
+///   1. POST /auth/register/begin    -> get challenge + RP info
+///   2. CTAP2 make_credential()      -> YubiKey creates credential (user touch)
+///   3. POST /auth/register/complete  -> server stores the public key
+async fn fido2_register(
+    _client: &ClusterClient,
+    domain: &str,
+    port: u16,
+    identity_iri: &str,
+    display_name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use ctap_hid_fido2::fidokey::MakeCredentialArgsBuilder;
+
+    println!("FIDO2 Passkey Registration");
+    println!("==========================");
+    println!("Identity: {}", identity_iri);
+    println!();
+
+    // Step 1: Begin registration — get challenge from server
+    let begin_url = format!("http://{}:{}/auth/register/begin", domain, port);
+    let begin_body = json!({ "identity_iri": identity_iri });
+    let resp = reqwest::Client::new()
+        .post(&begin_url)
+        .json(&begin_body)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Server rejected registration begin: {}", text).into());
+    }
+
+    let begin_resp: serde_json::Value = resp.json().await?;
+    let challenge_id = begin_resp["challenge_id"]
+        .as_str()
+        .ok_or("missing challenge_id in response")?
+        .to_string();
+    let challenge_b64 = begin_resp["options"]["challenge"]
+        .as_str()
+        .or_else(|| begin_resp["challenge"].as_str())
+        .ok_or("missing challenge in response")?;
+    let rp_id = begin_resp["options"]["rp_id"]
+        .as_str()
+        .or_else(|| begin_resp["rp_id"].as_str())
+        .unwrap_or("picloud.local");
+
+    let challenge_bytes = URL_SAFE_NO_PAD.decode(challenge_b64)?;
+
+    // Step 2: Talk to the physical FIDO2 device
+    println!("Looking for FIDO2 security keys...");
+    let devices = ctap_hid_fido2::get_fidokey_devices();
+    if devices.is_empty() {
+        return Err(
+            "No FIDO2 security keys found.\n\
+             Make sure your YubiKey is plugged in.\n\
+             On Linux, you may need udev rules for HID access:\n\n\
+             Create /etc/udev/rules.d/70-fido2.rules with:\n  \
+               KERNEL==\"hidraw*\", SUBSYSTEM==\"hidraw\", \
+               ATTRS{idVendor}==\"1050\", MODE=\"0660\", GROUP=\"plugdev\"\n\n\
+             Then run: sudo udevadm control --reload-rules && sudo udevadm trigger"
+                .into(),
+        );
+    }
+
+    let device_info = &devices[0];
+    println!("  Found: {}", device_info.product_string);
+    println!();
+    println!("Touch your security key to create a new credential...");
+
+    let device = ctap_hid_fido2::FidoKeyHid::new(
+        &[device_info.param.clone()],
+        &ctap_hid_fido2::Cfg::init(),
+    )
+    .map_err(|e| format!("Failed to open FIDO2 device: {e}"))?;
+
+    let args = MakeCredentialArgsBuilder::new(rp_id, &challenge_bytes).build();
+
+    let attestation = device.make_credential_with_args(&args).map_err(|e| {
+        format!(
+            "FIDO2 make_credential failed: {e}\n\
+             Make sure the correct key is connected and supports FIDO2."
+        )
+    })?;
+
+    println!("Credential created on security key.");
+
+    // Extract the credential ID and public key from the attestation.
+    let credential_id = &attestation.credential_descriptor.id;
+    let credential_id_b64 = URL_SAFE_NO_PAD.encode(credential_id);
+
+    // The public key is available as DER-encoded SubjectPublicKeyInfo.
+    // For P-256, the DER contains the 65-byte uncompressed EC point (0x04 || x || y)
+    // as the last 65 bytes of the encoding.
+    let der = &attestation.credential_publickey.der;
+    let public_key_bytes = if der.len() >= 65 {
+        // Extract the trailing uncompressed point from the SubjectPublicKeyInfo DER
+        let offset = der.len() - 65;
+        if der[offset] == 0x04 {
+            der[offset..].to_vec()
+        } else {
+            // Fall back to using the full DER
+            der.clone()
+        }
+    } else {
+        der.clone()
+    };
+
+    let public_key_b64 = URL_SAFE_NO_PAD.encode(&public_key_bytes);
+
+    // Extract AAGUID if available
+    let aaguid_str = if !attestation.aaguid.is_empty() {
+        Some(URL_SAFE_NO_PAD.encode(&attestation.aaguid))
+    } else {
+        None
+    };
+
+    // Step 3: Send the credential to the server
+    let complete_url = format!("http://{}:{}/auth/register/complete", domain, port);
+    let complete_body = json!({
+        "challenge_id": challenge_id,
+        "credential_id": credential_id_b64,
+        "public_key": public_key_b64,
+        "aaguid": aaguid_str,
+        "display_name": display_name.as_deref().unwrap_or("FIDO2 Security Key"),
+    });
+
+    let resp = reqwest::Client::new()
+        .post(&complete_url)
+        .json(&complete_body)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Server rejected registration: {}", text).into());
+    }
+
+    println!();
+    println!("Passkey registered successfully.");
+    println!("  Credential ID: {}", credential_id_b64);
+    if let Some(ref name) = display_name {
+        println!("  Display name:  {}", name);
+    }
+    println!();
+    println!("You can now authenticate with:");
+    println!("  picloud identity token --fido2 --identity {}", identity_iri);
 
     Ok(())
 }

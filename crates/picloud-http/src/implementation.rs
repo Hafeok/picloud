@@ -1746,6 +1746,12 @@ struct LoginCompleteRequest {
     signature: String,
     authenticator_data: Option<String>,
     client_data_json: Option<String>,
+    #[serde(default = "default_hmac_format")]
+    signature_format: String,
+}
+
+fn default_hmac_format() -> String {
+    "hmac".to_string()
 }
 
 async fn handle_login_complete(
@@ -1765,6 +1771,7 @@ async fn handle_login_complete(
         signature: req.signature,
         authenticator_data: req.authenticator_data,
         client_data_json: req.client_data_json,
+        signature_format: req.signature_format,
     };
 
     match iam.complete_authentication(&req.challenge_id, response).await {

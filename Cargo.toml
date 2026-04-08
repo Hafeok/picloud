@@ -72,6 +72,10 @@ ring         = "0.17"
 base64       = "0.22"
 sha2         = "0.10"
 rand         = "0.8"
+p256         = { version = "0.13", features = ["ecdsa"] }
+
+# FIDO2 / CTAP2
+ctap-hid-fido2 = "3.5"
 
 # Observability
 tracing            = "0.1"

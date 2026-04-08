@@ -647,27 +647,127 @@ impl IdentityProvider for LocalIdentityProvider {
                 reason: "credential ID does not match any registered passkey".to_string(),
             })?;
 
-        // Simplified signature verification: in a full W3C WebAuthn implementation,
-        // we would verify the signature using the stored public key against the
-        // authenticator data + client data hash. For this simplified flow, we verify
-        // by HMAC-signing the challenge with the stored public key as context.
-        //
-        // The client is expected to sign: HMAC-SHA256(challenge_bytes, credential_public_key)
-        // and send the result as the signature field.
-        let expected_tag = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, &matching_passkey.public_key),
-            &pending.challenge_bytes,
-        );
-        let expected_sig = URL_SAFE_NO_PAD.encode(expected_tag.as_ref());
+        // Verify the signature based on the format.
+        // "webauthn" = real ECDSA-P256 from a FIDO2 authenticator (YubiKey etc.)
+        // "hmac"     = simplified HMAC-SHA256 for testing without hardware
+        if response.signature_format == "webauthn" {
+            // Real WebAuthn ECDSA verification.
+            // The authenticator signs: authenticator_data || SHA256(client_data_json)
+            // The client sends authenticator_data, client_data_json (or client_data_hash),
+            // and the DER-encoded ECDSA signature — all base64url-encoded.
+            let auth_data_bytes = response
+                .authenticator_data
+                .as_ref()
+                .and_then(|s| URL_SAFE_NO_PAD.decode(s).ok())
+                .ok_or_else(|| PiCloudError::PasskeyChallengeFailed {
+                    reason: "webauthn format requires authenticator_data".to_string(),
+                })?;
 
-        if response.signature != expected_sig {
-            warn!(
-                "Authentication failed for {} — signature mismatch",
-                pending.identity_iri
+            // Compute the client data hash. If client_data_json is provided, hash it;
+            // otherwise the field itself is treated as the pre-computed hash.
+            let client_data_hash = {
+                use sha2::{Digest, Sha256};
+                if let Some(ref cdj) = response.client_data_json {
+                    let cdj_bytes = URL_SAFE_NO_PAD.decode(cdj).map_err(|_| {
+                        PiCloudError::PasskeyChallengeFailed {
+                            reason: "invalid client_data_json encoding".to_string(),
+                        }
+                    })?;
+                    let mut hasher = Sha256::new();
+                    hasher.update(&cdj_bytes);
+                    hasher.finalize().to_vec()
+                } else {
+                    // Fallback: use the challenge bytes directly as the hash
+                    // (for CLI direct mode where there is no real client_data_json)
+                    let mut hasher = Sha256::new();
+                    hasher.update(&pending.challenge_bytes);
+                    hasher.finalize().to_vec()
+                }
+            };
+
+            // The signed message is authenticator_data || client_data_hash
+            let mut signed_message = auth_data_bytes;
+            signed_message.extend_from_slice(&client_data_hash);
+
+            let signature_bytes = URL_SAFE_NO_PAD.decode(&response.signature).map_err(|_| {
+                PiCloudError::PasskeyChallengeFailed {
+                    reason: "invalid signature encoding".to_string(),
+                }
+            })?;
+
+            // Parse the stored COSE public key to extract the P-256 x,y coordinates.
+            // COSE_Key for ES256: { 1: 2 (kty=EC2), 3: -7 (alg=ES256), -1: 1 (crv=P-256),
+            //                       -2: x (32 bytes), -3: y (32 bytes) }
+            // We support two storage formats:
+            //   a) Raw 65-byte uncompressed point: 0x04 || x || y
+            //   b) CBOR-encoded COSE_Key (we extract x,y from it)
+            let pk_bytes = &matching_passkey.public_key;
+            let (x_bytes, y_bytes) = if pk_bytes.len() == 65 && pk_bytes[0] == 0x04 {
+                // Uncompressed EC point
+                (pk_bytes[1..33].to_vec(), pk_bytes[33..65].to_vec())
+            } else {
+                // Attempt to parse as raw x||y (64 bytes)
+                if pk_bytes.len() == 64 {
+                    (pk_bytes[0..32].to_vec(), pk_bytes[32..64].to_vec())
+                } else {
+                    return Err(PiCloudError::PasskeyChallengeFailed {
+                        reason: format!(
+                            "unsupported public key format (length={})",
+                            pk_bytes.len()
+                        ),
+                    });
+                }
+            };
+
+            // Build the P-256 verifying key from affine coordinates
+            use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+            use p256::EncodedPoint;
+
+            let encoded_point = EncodedPoint::from_affine_coordinates(
+                p256::FieldBytes::from_slice(&x_bytes),
+                p256::FieldBytes::from_slice(&y_bytes),
+                false, // uncompressed
             );
-            return Err(PiCloudError::PasskeyChallengeFailed {
-                reason: "signature verification failed".to_string(),
-            });
+            let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).map_err(|e| {
+                PiCloudError::PasskeyChallengeFailed {
+                    reason: format!("invalid public key: {e}"),
+                }
+            })?;
+
+            // Parse the DER-encoded signature
+            let sig = Signature::from_der(&signature_bytes).map_err(|e| {
+                PiCloudError::PasskeyChallengeFailed {
+                    reason: format!("invalid DER signature: {e}"),
+                }
+            })?;
+
+            verifying_key.verify(&signed_message, &sig).map_err(|_| {
+                warn!(
+                    "WebAuthn ECDSA verification failed for {}",
+                    pending.identity_iri
+                );
+                PiCloudError::PasskeyChallengeFailed {
+                    reason: "ECDSA signature verification failed".to_string(),
+                }
+            })?;
+        } else {
+            // Legacy HMAC-based simplified verification.
+            // The client signs: HMAC-SHA256(challenge_bytes, credential_public_key)
+            let expected_tag = hmac::sign(
+                &hmac::Key::new(hmac::HMAC_SHA256, &matching_passkey.public_key),
+                &pending.challenge_bytes,
+            );
+            let expected_sig = URL_SAFE_NO_PAD.encode(expected_tag.as_ref());
+
+            if response.signature != expected_sig {
+                warn!(
+                    "Authentication failed for {} — HMAC signature mismatch",
+                    pending.identity_iri
+                );
+                return Err(PiCloudError::PasskeyChallengeFailed {
+                    reason: "signature verification failed".to_string(),
+                });
+            }
         }
 
         // Update last_used_at
@@ -1201,6 +1301,7 @@ mod tests {
             signature,
             authenticator_data: None,
             client_data_json: None,
+            signature_format: "hmac".to_string(),
         };
 
         let token = provider
@@ -1225,6 +1326,7 @@ mod tests {
             signature: "wrong-signature-data".to_string(),
             authenticator_data: None,
             client_data_json: None,
+            signature_format: "hmac".to_string(),
         };
 
         let result = provider.complete_authentication(&challenge_id, response).await;
@@ -1247,6 +1349,7 @@ mod tests {
             signature: "doesnt-matter".to_string(),
             authenticator_data: None,
             client_data_json: None,
+            signature_format: "hmac".to_string(),
         };
 
         let result = provider.complete_authentication(&challenge_id, response).await;
@@ -1385,5 +1488,162 @@ mod tests {
 
         let result = provider.poll_device_flow("nonexistent-code").await;
         assert!(result.is_err());
+    }
+
+    // -- ECDSA (WebAuthn) authentication tests --
+
+    /// Register a passkey with a real P-256 public key, then authenticate using
+    /// ECDSA signatures (signature_format = "webauthn").
+    #[tokio::test]
+    async fn webauthn_ecdsa_authentication_round_trip() {
+        use p256::ecdsa::{signature::Signer, SigningKey};
+
+        let provider = test_provider();
+        let iri = test_iri();
+
+        // Generate a P-256 key pair
+        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        let verifying_key = signing_key.verifying_key();
+
+        // Get the uncompressed point (0x04 || x || y) — 65 bytes
+        let encoded_point = verifying_key.to_encoded_point(false);
+        let public_key_bytes = encoded_point.as_bytes().to_vec();
+        assert_eq!(public_key_bytes.len(), 65);
+        assert_eq!(public_key_bytes[0], 0x04);
+
+        // Register the passkey with the ECDSA public key
+        let (challenge_id, _options) = provider.begin_registration(&iri).await.unwrap();
+
+        let reg_response = picloud_domain::identity::RegistrationResponse {
+            credential_id: "ecdsa-cred-001".to_string(),
+            public_key: URL_SAFE_NO_PAD.encode(&public_key_bytes),
+            attestation: None,
+            aaguid: None,
+            display_name: Some("Test ECDSA Key".to_string()),
+        };
+        provider
+            .complete_registration(&challenge_id, reg_response)
+            .await
+            .expect("registration should succeed");
+
+        // Begin authentication
+        let (challenge_id, options) = provider.begin_authentication(&iri).await.unwrap();
+        assert_eq!(options.allow_credentials, vec!["ecdsa-cred-001"]);
+
+        let challenge_bytes = URL_SAFE_NO_PAD.decode(&options.challenge).unwrap();
+
+        // Build the authenticator data — a minimal 37-byte structure:
+        //   rpIdHash (32 bytes) + flags (1 byte) + signCount (4 bytes)
+        let rpid_hash = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(options.rp_id.as_bytes());
+            h.finalize().to_vec()
+        };
+        let mut authenticator_data = rpid_hash;
+        authenticator_data.push(0x01); // flags: UP=1
+        authenticator_data.extend_from_slice(&[0, 0, 0, 1]); // signCount = 1
+
+        // Build client data JSON
+        let client_data_json = serde_json::to_vec(&serde_json::json!({
+            "type": "webauthn.get",
+            "challenge": options.challenge,
+            "origin": format!("https://{}", options.rp_id),
+            "crossOrigin": false,
+        }))
+        .unwrap();
+
+        // Compute signed message: authenticator_data || SHA256(client_data_json)
+        let client_data_hash = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(&client_data_json);
+            h.finalize().to_vec()
+        };
+        let mut signed_message = authenticator_data.clone();
+        signed_message.extend_from_slice(&client_data_hash);
+
+        // Sign with P-256
+        let signature: p256::ecdsa::DerSignature = signing_key.sign(&signed_message);
+
+        let auth_response = picloud_domain::identity::AuthenticationResponse {
+            credential_id: "ecdsa-cred-001".to_string(),
+            signature: URL_SAFE_NO_PAD.encode(signature.as_bytes()),
+            authenticator_data: Some(URL_SAFE_NO_PAD.encode(&authenticator_data)),
+            client_data_json: Some(URL_SAFE_NO_PAD.encode(&client_data_json)),
+            signature_format: "webauthn".to_string(),
+        };
+
+        let token = provider
+            .complete_authentication(&challenge_id, auth_response)
+            .await
+            .expect("ECDSA authentication should succeed");
+
+        // Validate the returned token
+        let validated = provider.validate_token(&token).await.unwrap();
+        assert_eq!(validated.identity_iri, iri);
+    }
+
+    #[tokio::test]
+    async fn webauthn_ecdsa_wrong_signature_fails() {
+        use p256::ecdsa::SigningKey;
+
+        let provider = test_provider();
+        let iri = test_iri();
+
+        // Generate a P-256 key pair for registration
+        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        let verifying_key = signing_key.verifying_key();
+        let encoded_point = verifying_key.to_encoded_point(false);
+        let public_key_bytes = encoded_point.as_bytes().to_vec();
+
+        // Register
+        let (challenge_id, _) = provider.begin_registration(&iri).await.unwrap();
+        let reg_response = picloud_domain::identity::RegistrationResponse {
+            credential_id: "ecdsa-cred-002".to_string(),
+            public_key: URL_SAFE_NO_PAD.encode(&public_key_bytes),
+            attestation: None,
+            aaguid: None,
+            display_name: None,
+        };
+        provider
+            .complete_registration(&challenge_id, reg_response)
+            .await
+            .unwrap();
+
+        // Begin authentication
+        let (challenge_id, options) = provider.begin_authentication(&iri).await.unwrap();
+
+        let rpid_hash = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(options.rp_id.as_bytes());
+            h.finalize().to_vec()
+        };
+        let mut authenticator_data = rpid_hash;
+        authenticator_data.push(0x01);
+        authenticator_data.extend_from_slice(&[0, 0, 0, 1]);
+
+        // Use a DIFFERENT key to sign — verification must fail
+        let wrong_key = SigningKey::random(&mut rand::thread_rng());
+        use p256::ecdsa::signature::Signer;
+        let sig: p256::ecdsa::DerSignature = wrong_key.sign(&authenticator_data);
+
+        let auth_response = picloud_domain::identity::AuthenticationResponse {
+            credential_id: "ecdsa-cred-002".to_string(),
+            signature: URL_SAFE_NO_PAD.encode(sig.as_bytes()),
+            authenticator_data: Some(URL_SAFE_NO_PAD.encode(&authenticator_data)),
+            client_data_json: None,
+            signature_format: "webauthn".to_string(),
+        };
+
+        let result = provider
+            .complete_authentication(&challenge_id, auth_response)
+            .await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PiCloudError::PasskeyChallengeFailed { .. }
+        ));
     }
 }

@@ -21,3 +21,4 @@ rand    = { workspace = true }
 uuid    = { workspace = true }
 chrono  = { workspace = true }
 rcgen   = { workspace = true }
+p256    = { workspace = true }

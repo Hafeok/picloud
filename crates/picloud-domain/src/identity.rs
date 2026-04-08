@@ -215,6 +215,14 @@ pub struct AuthenticationResponse {
     pub authenticator_data: Option<String>,
     /// The client data JSON (base64url-encoded).
     pub client_data_json: Option<String>,
+    /// Signature format: "webauthn" for real ECDSA from a FIDO2 authenticator,
+    /// "hmac" for the simplified HMAC-based flow (default for backward compat).
+    #[serde(default = "default_signature_format")]
+    pub signature_format: String,
+}
+
+fn default_signature_format() -> String {
+    "hmac".to_string()
 }
 
 /// Device flow — the CLI requests a device code and polls for completion.
