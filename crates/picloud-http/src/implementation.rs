@@ -865,6 +865,15 @@ async fn handle_apply(
             ResourceDeclaration::Container(c) => {
                 let iri = iri_builder.resource(&c.product, "containers", &c.name);
                 let spec = c.to_spec();
+                let ports: Vec<serde_json::Value> = spec.ports.iter().map(|p| {
+                    serde_json::json!({"port": p.port, "protocol": p.protocol})
+                }).collect();
+                let mounts: Vec<serde_json::Value> = spec.mounts.iter().map(|m| {
+                    serde_json::json!({"volume": m.volume, "path": m.path, "read_only": m.read_only})
+                }).collect();
+                let env: serde_json::Map<String, serde_json::Value> = spec.env.iter().map(|(k, v)| {
+                    (k.clone(), serde_json::to_value(v).unwrap_or_default())
+                }).collect();
                 let payload = serde_json::json!({
                     "resource_iri": iri.as_str(),
                     "resource_type": "Container",
@@ -872,6 +881,11 @@ async fn handle_apply(
                     "name": c.name,
                     "image": spec.image,
                     "identity": spec.identity,
+                    "ports": ports,
+                    "mounts": mounts,
+                    "env": env,
+                    "cpu_millicores": spec.resources.cpu_millicores,
+                    "memory_mb": spec.resources.memory_mb,
                 });
                 (iri, "ResourceDeclared", Some(c.product.clone()), payload)
             }

@@ -42,6 +42,8 @@ struct WorkloadEntry {
     restart_count: u32,
     /// Whether the workload was explicitly stopped (should not be restarted).
     explicitly_stopped: bool,
+    /// Whether this workload is a container (for docker stop on cleanup).
+    is_container: bool,
 }
 
 /// A workload scheduler that spawns real processes.
@@ -547,6 +549,7 @@ impl WorkloadScheduler for ProcessScheduler {
             "Scheduled workload"
         );
 
+        let is_container = matches!(spec, WorkloadSpec::Container(_));
         let entry = WorkloadEntry {
             workload_iri: key.clone(),
             spec: spec.clone(),
@@ -557,6 +560,7 @@ impl WorkloadScheduler for ProcessScheduler {
             child,
             restart_count: 0,
             explicitly_stopped: false,
+            is_container,
         };
 
         workloads.insert(key, entry);
@@ -576,21 +580,68 @@ impl WorkloadScheduler for ProcessScheduler {
             .get_mut(&key)
             .ok_or_else(|| PiCloudError::ResourceNotFound { iri: key.clone() })?;
 
-        // Send SIGTERM to the real process if we have a PID
-        if let Some(pid) = entry.pid {
-            if entry.child.is_some() {
-                if Self::send_sigterm(pid) {
-                    tracing::info!(
-                        workload_iri = %workload_iri,
-                        pid = pid,
-                        "Sent SIGTERM to workload process"
-                    );
-                } else {
-                    tracing::warn!(
-                        workload_iri = %workload_iri,
-                        pid = pid,
-                        "Failed to send SIGTERM — process may have already exited"
-                    );
+        // For container workloads, use docker/podman stop
+        if entry.is_container {
+            let container_name = workload_iri
+                .as_str()
+                .rsplit('/')
+                .next()
+                .unwrap_or("workload");
+            let runtime = match &self.container_runtime {
+                ContainerRuntime::Docker => "docker",
+                ContainerRuntime::Podman => "podman",
+                ContainerRuntime::None => "",
+            };
+            if !runtime.is_empty() {
+                match Command::new(runtime)
+                    .args(["stop", container_name])
+                    .output()
+                    .await
+                {
+                    Ok(output) => {
+                        if output.status.success() {
+                            tracing::info!(
+                                workload_iri = %workload_iri,
+                                container = container_name,
+                                "Stopped container via {}", runtime
+                            );
+                        } else {
+                            tracing::warn!(
+                                workload_iri = %workload_iri,
+                                container = container_name,
+                                stderr = %String::from_utf8_lossy(&output.stderr),
+                                "Failed to stop container"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            workload_iri = %workload_iri,
+                            error = %e,
+                            "Failed to run {} stop", runtime
+                        );
+                    }
+                }
+            }
+        }
+
+        // Send SIGTERM to the real process if we have a PID (for binary workloads)
+        if !entry.is_container {
+            if let Some(pid) = entry.pid {
+                if entry.child.is_some() {
+                    if Self::send_sigterm(pid) {
+                        tracing::info!(
+                            workload_iri = %workload_iri,
+                            pid = pid,
+                            "Sent SIGTERM to workload process"
+                        );
+                    } else {
+                        tracing::warn!(
+                            workload_iri = %workload_iri,
+                            pid = pid,
+                            "Failed to send SIGTERM — process may have already exited"
+                        );
+                    }
                 }
             }
         }
