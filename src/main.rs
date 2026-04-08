@@ -167,16 +167,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let raft_node_id = picloud_cluster::node_id_from_uuid(&config.node_id);
     let raft_addr = format!("{}:{}", config.bind_addr, config.http_port);
-    let mut initial_members = std::collections::BTreeMap::new();
-    initial_members.insert(
-        raft_node_id,
-        openraft::BasicNode::new(&raft_addr),
-    );
+
+    // Check if there are already peers discovered via mDNS.
+    // If no peers exist, this is the first node — bootstrap a single-node Raft cluster.
+    // If peers exist, start without initial members and wait to be added by the leader.
+    let peers = cluster.peers().all();
+    let initial_members = if peers.is_empty() {
+        info!("No peers discovered — bootstrapping as single-node Raft cluster");
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(raft_node_id, openraft::BasicNode::new(&raft_addr));
+        Some(members)
+    } else {
+        info!(
+            peer_count = peers.len(),
+            "Peers already discovered — starting Raft without bootstrap (will be added by leader)"
+        );
+        None
+    };
+
     let raft = picloud_cluster::create_raft_node(
         raft_node_id,
         &raft_addr,
         Some(apply_cb),
-        Some(initial_members),
+        initial_members,
     )
     .await
     .expect("failed to create Raft node");
@@ -184,6 +197,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cluster.set_raft(Arc::clone(&raft));
     let raft_router = picloud_cluster::raft_rpc_router(Arc::clone(&raft));
     info!(raft_node_id, "Raft consensus node started");
+
+    // 2b-ii. Watch for new peers discovered via mDNS and add them to Raft membership.
+    {
+        let raft_for_membership = Arc::clone(&raft);
+        let peers_for_membership = cluster.peers().clone();
+        tokio::spawn(async move {
+            // Check for new peers every 5 seconds
+            let mut known_raft_members = std::collections::HashSet::new();
+            known_raft_members.insert(raft_node_id);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let current_peers = peers_for_membership.all();
+                for peer in &current_peers {
+                    let peer_raft_id = picloud_cluster::node_id_from_uuid(&peer.node_id);
+                    if known_raft_members.contains(&peer_raft_id) {
+                        continue;
+                    }
+                    let peer_node = openraft::BasicNode::new(&peer.address);
+                    info!(
+                        peer_raft_id,
+                        peer_name = %peer.node_name,
+                        peer_addr = %peer.address,
+                        "Adding discovered peer to Raft cluster"
+                    );
+                    match raft_for_membership
+                        .add_learner(peer_raft_id, peer_node, true)
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(peer_raft_id, "Peer added as Raft learner");
+                            known_raft_members.insert(peer_raft_id);
+                            // Promote to voter
+                            let members: std::collections::BTreeSet<u64> =
+                                known_raft_members.iter().copied().collect();
+                            if let Err(e) = raft_for_membership
+                                .change_membership(members, false)
+                                .await
+                            {
+                                warn!(
+                                    peer_raft_id,
+                                    error = %e,
+                                    "Failed to promote peer to Raft voter"
+                                );
+                            } else {
+                                info!(peer_raft_id, "Peer promoted to Raft voter");
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                peer_raft_id,
+                                error = %e,
+                                "Failed to add peer as Raft learner — will retry"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     // 2c. Create the write-through event log that routes all appends through Raft.
     //
