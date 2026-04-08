@@ -1907,4 +1907,194 @@ mod tests {
         assert_eq!(json["type"], "SparqlEndpoint");
         assert_eq!(json["error"], "projector not available");
     }
+
+    // -- Product Event Store tests --
+
+    fn test_server_with_event_log() -> PiCloudHttpServer {
+        use picloud_events::InMemoryEventLog;
+        let mut server = test_server();
+        server.event_log = Some(Arc::new(InMemoryEventLog::new()));
+        server
+    }
+
+    #[tokio::test]
+    async fn event_store_append_returns_202() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/photo-app/event-store/main/Order/order-123/events")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"schema":"https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v1","type":"OrderPlaced","payload":{"amount":42}}"#,
+            ))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "accepted");
+        assert!(json["eventId"].is_string());
+        assert!(json["correlationId"].is_string());
+    }
+
+    #[tokio::test]
+    async fn event_store_append_invalid_schema_returns_400() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/photo-app/event-store/main/Order/order-123/events")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"schema":"not a valid iri","type":"OrderPlaced","payload":{}}"#,
+            ))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn event_store_read_returns_empty_initially() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .uri("/products/photo-app/event-store/main/Order/order-123/events")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["events"].as_array().unwrap().len(), 0);
+        assert_eq!(json["product"], "photo-app");
+        assert_eq!(json["store"], "main");
+        assert_eq!(json["aggregateType"], "Order");
+        assert_eq!(json["aggregateId"], "order-123");
+    }
+
+    #[tokio::test]
+    async fn event_store_append_then_read_round_trip() {
+        use picloud_events::InMemoryEventLog;
+        let event_log = Arc::new(InMemoryEventLog::new());
+        let mut server = test_server();
+        server.event_log = Some(event_log.clone() as Arc<dyn EventLog>);
+        let app = server.build_router();
+
+        // Append an event
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/photo-app/event-store/main/Order/order-42/events")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"schema":"https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v1","type":"OrderPlaced","payload":{"amount":100}}"#,
+            ))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        // Read events back
+        let req = Request::builder()
+            .uri("/products/photo-app/event-store/main/Order/order-42/events")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "OrderPlaced");
+        assert_eq!(events[0]["payload"]["amount"], 100);
+    }
+
+    #[tokio::test]
+    async fn event_store_read_filters_by_aggregate() {
+        use picloud_events::InMemoryEventLog;
+        let event_log = Arc::new(InMemoryEventLog::new());
+        let mut server = test_server();
+        server.event_log = Some(event_log.clone() as Arc<dyn EventLog>);
+        let app = server.build_router();
+
+        // Append event to order-1
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/photo-app/event-store/main/Order/order-1/events")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"schema":"https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v1","type":"OrderPlaced","payload":{"id":"order-1"}}"#,
+            ))
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap();
+
+        // Append event to order-2
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/photo-app/event-store/main/Order/order-2/events")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"schema":"https://picloud.local/products/photo-app/schemas/events/OrderPlaced/v1","type":"OrderPlaced","payload":{"id":"order-2"}}"#,
+            ))
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap();
+
+        // Read only order-1 events
+        let req = Request::builder()
+            .uri("/products/photo-app/event-store/main/Order/order-1/events")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["payload"]["id"], "order-1");
+
+        // Read only order-2 events
+        let req = Request::builder()
+            .uri("/products/photo-app/event-store/main/Order/order-2/events")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let events = json["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["payload"]["id"], "order-2");
+    }
+
+    #[tokio::test]
+    async fn event_store_returns_503_without_event_log() {
+        let app = test_server().build_router();
+
+        // POST
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/photo-app/event-store/main/Order/order-1/events")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"schema":"https://picloud.local/schemas/events/X/v1","type":"X","payload":{}}"#,
+            ))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // GET
+        let req = Request::builder()
+            .uri("/products/photo-app/event-store/main/Order/order-1/events")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

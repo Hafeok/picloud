@@ -923,4 +923,154 @@ mod tests {
         log.append(make_event("NodeJoined", None, Uuid::new_v4())).await.unwrap();
         assert!(path.exists());
     }
+
+    // ---- Compaction tests ----
+
+    #[tokio::test]
+    async fn compaction_reduces_file_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        // Append 100 events.
+        for i in 0..100 {
+            log.append(make_event(&format!("Event{i}"), None, cid))
+                .await
+                .unwrap();
+        }
+
+        let size_before = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(log.len().await, 100);
+
+        // Compact away the first 80 events, keeping the last 20.
+        log.compact(80).await.unwrap();
+
+        let size_after = std::fs::metadata(&path).unwrap().len();
+        assert!(
+            size_after < size_before,
+            "file should be smaller after compaction: {size_after} >= {size_before}"
+        );
+
+        // The file should now have exactly 20 lines.
+        let content = std::fs::read_to_string(&path).unwrap();
+        let line_count = content.lines().count();
+        assert_eq!(line_count, 20);
+    }
+
+    #[tokio::test]
+    async fn compaction_events_still_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        for i in 0..50 {
+            log.append(make_event(&format!("Event{i}"), None, cid))
+                .await
+                .unwrap();
+        }
+
+        // Compact away the first 30 events.
+        log.compact(30).await.unwrap();
+
+        // In-memory log should have 20 events.
+        assert_eq!(log.len().await, 20);
+
+        // events_since with logical offset 30 should return 20 events (physical offset 0).
+        let events = log.events_since(30).await;
+        assert_eq!(events.len(), 20);
+        assert_eq!(events[0].event_type, "Event30");
+        assert_eq!(events[19].event_type, "Event49");
+
+        // events_since with logical offset 40 should return 10 events.
+        let events = log.events_since(40).await;
+        assert_eq!(events.len(), 10);
+        assert_eq!(events[0].event_type, "Event40");
+
+        // events_since with logical offset 0 (below snapshot) returns all remaining.
+        let events = log.events_since(0).await;
+        assert_eq!(events.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn compaction_event_count_correct() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        for i in 0..60 {
+            log.append(make_event(&format!("Event{i}"), None, cid))
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(log.total_event_count().await, 60);
+        assert_eq!(log.snapshot_offset().await, 0);
+
+        log.compact(40).await.unwrap();
+
+        // In-memory count is 20, but total logical count is still 60.
+        assert_eq!(log.len().await, 20);
+        assert_eq!(log.snapshot_offset().await, 40);
+        assert_eq!(log.total_event_count().await, 60);
+
+        // Append a new event after compaction.
+        log.append(make_event("Event60", None, cid)).await.unwrap();
+        assert_eq!(log.len().await, 21);
+        assert_eq!(log.total_event_count().await, 61);
+    }
+
+    #[tokio::test]
+    async fn compaction_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        // Write 50 events and compact.
+        {
+            let log = PersistentEventLog::open(&path).unwrap();
+            for i in 0..50 {
+                log.append(make_event(&format!("Event{i}"), None, cid))
+                    .await
+                    .unwrap();
+            }
+            log.compact(30).await.unwrap();
+            assert_eq!(log.len().await, 20);
+            assert_eq!(log.snapshot_offset().await, 30);
+        }
+
+        // Re-open and verify state is correct.
+        {
+            let log = PersistentEventLog::open(&path).unwrap();
+            assert_eq!(log.len().await, 20);
+            assert_eq!(log.snapshot_offset().await, 30);
+            assert_eq!(log.total_event_count().await, 50);
+
+            let events = log.events_since(30).await;
+            assert_eq!(events.len(), 20);
+            assert_eq!(events[0].event_type, "Event30");
+        }
+    }
+
+    #[tokio::test]
+    async fn compaction_invalid_discard_count_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let cid = Uuid::new_v4();
+
+        let log = PersistentEventLog::open(&path).unwrap();
+        for i in 0..10 {
+            log.append(make_event(&format!("Event{i}"), None, cid))
+                .await
+                .unwrap();
+        }
+
+        // Discarding 0 should fail.
+        assert!(log.compact(0).await.is_err());
+
+        // Discarding more than available should fail.
+        assert!(log.compact(11).await.is_err());
+    }
 }
