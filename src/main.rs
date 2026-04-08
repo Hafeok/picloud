@@ -27,7 +27,7 @@ use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
 use picloud_workload::ProcessScheduler;
-use picloud_http::{InferenceEngine, MetricsAgent, PiCloudHttpServer, Provisioner};
+use picloud_http::{InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner};
 
 /// Server configuration, loaded from env or defaults
 struct ServerConfig {
@@ -481,6 +481,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // 12c. Start OTel stream and telemetry store (ADR-045, ADR-046)
+    let otel_stream = Arc::new(OtelStream::new(4096));
+    let telemetry_path = std::env::var("PICLOUD_TELEMETRY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/telemetry"));
+    let telemetry_retention_hours: u64 = std::env::var("PICLOUD_TELEMETRY_RETENTION_HOURS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(168); // 7 days
+    let telemetry_store = Arc::new(
+        JsonlTelemetryStore::new(&telemetry_path)
+            .with_retention_hours(telemetry_retention_hours),
+    );
+    let telemetry_store_trait: Arc<dyn picloud_domain::traits::TelemetryStore> =
+        telemetry_store.clone();
+
+    // Start telemetry retention cleanup
+    telemetry_store.start_retention_cleanup();
+
+    // Start OTel aggregator (emits TelemetryAggregated events every 15s)
+    {
+        let otel_aggregation_interval: u64 = std::env::var("PICLOUD_OTEL_AGGREGATION_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(15);
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let aggregator = OtelAggregator::new(
+            otel_stream.clone(),
+            event_log_trait.clone(),
+            telemetry_store_trait.clone(),
+            iri_builder,
+            node_iri.clone(),
+        );
+        aggregator.start(otel_aggregation_interval);
+        info!(
+            interval_secs = otel_aggregation_interval,
+            telemetry_path = %telemetry_path.display(),
+            retention_hours = telemetry_retention_hours,
+            "OTel stream and telemetry store started (ADR-045, ADR-046)"
+        );
+    }
+
     // 13. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
     let mut http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
@@ -493,7 +535,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             scheduler.clone(),
         )
         .with_ingress_table(ingress_table)
-        .with_extra_router(raft_router);
+        .with_extra_router(raft_router)
+        .with_otel(otel_stream.clone(), telemetry_store_trait.clone());
     if let Some(tls) = tls_config {
         http_server = http_server.with_tls_config(tls);
     }

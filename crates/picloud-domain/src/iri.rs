@@ -189,10 +189,34 @@ impl IriBuilder {
         ))
     }
 
+    /// IRI for a replay shadow graph: /replay/{replay_id} (ADR-035)
+    pub fn replay_graph(&self, replay_id: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/replay/{}",
+            self.domain.0, replay_id
+        ))
+    }
+
     /// IRI for the cluster identity resource: /cluster/identity
     pub fn cluster_identity(&self) -> ResourceIri {
         ResourceIri(format!(
             "https://{}/cluster/identity",
+            self.domain.0
+        ))
+    }
+
+    /// IRI for the OTel telemetry endpoint: /otel (ADR-045)
+    pub fn otel_endpoint(&self) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/otel",
+            self.domain.0
+        ))
+    }
+
+    /// IRI for the telemetry store: /telemetry (ADR-046)
+    pub fn telemetry(&self) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/telemetry",
             self.domain.0
         ))
     }

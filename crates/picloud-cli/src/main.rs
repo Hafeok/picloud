@@ -84,6 +84,11 @@ enum Commands {
         #[command(subcommand)]
         command: AlertCommands,
     },
+    /// Telemetry queries (ADR-045, ADR-046)
+    Telemetry {
+        #[command(subcommand)]
+        command: TelemetryCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -101,6 +106,15 @@ enum ClusterCommands {
     Recover,
     /// Show cluster status
     Status,
+    /// Replay platform events to rebuild the cluster RDF graph (ADR-035)
+    Replay {
+        /// Start of the replay time range (RFC 3339)
+        #[arg(long)]
+        from: String,
+        /// End of the replay time range (RFC 3339, default: now)
+        #[arg(long)]
+        to: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -118,6 +132,23 @@ enum ResourceCommands {
     Status {
         /// Product name or resource IRI
         target: String,
+    },
+    /// Replay product events to rebuild the product's RDF graph (ADR-035)
+    Replay {
+        /// Product name
+        product: String,
+        /// Start of the replay time range (RFC 3339)
+        #[arg(long)]
+        from: String,
+        /// End of the replay time range (RFC 3339, default: now)
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter to a specific aggregate type
+        #[arg(long)]
+        aggregate: Option<String>,
+        /// Filter to a specific aggregate ID
+        #[arg(long)]
+        id: Option<String>,
     },
 }
 
@@ -260,6 +291,28 @@ enum AlertCommands {
         /// Filter by resource IRI or path
         #[arg(long)]
         resource: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TelemetryCommands {
+    /// Query telemetry data (traces or metrics)
+    Query {
+        /// Signal type: "traces" or "metrics"
+        #[arg(long, default_value = "traces")]
+        signal: String,
+        /// Start time (RFC 3339, e.g. "2026-04-07T00:00:00Z")
+        #[arg(long)]
+        from: Option<String>,
+        /// End time (RFC 3339, defaults to now)
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter by service name
+        #[arg(long)]
+        service: Option<String>,
+        /// SQL query (future: parsed server-side; for now, ignored)
+        #[arg(long)]
+        sql: Option<String>,
     },
 }
 
@@ -601,6 +654,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => eprintln!("Failed to get node list: {}", e),
                 }
             }
+            ClusterCommands::Replay { from, to } => {
+                println!("Platform Replay (ADR-035)");
+                println!("========================");
+                println!();
+                println!("  From: {}", from);
+                if let Some(ref t) = to {
+                    println!("  To:   {}", t);
+                } else {
+                    println!("  To:   (present)");
+                }
+                println!();
+
+                let mut payload = json!({ "from": from });
+                if let Some(ref t) = to {
+                    payload["to"] = json!(t);
+                }
+
+                match client
+                    .client
+                    .post(format!("{}/api/replay", client.base_url))
+                    .json(&payload)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(body) => {
+                                if status.is_success() {
+                                    let replay_id = body
+                                        .get("replay_id")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+                                    println!("Replay started (replay_id: {})", replay_id);
+                                    println!("Subscribe to the event stream to monitor progress.");
+                                } else {
+                                    eprintln!(
+                                        "Replay failed: {}",
+                                        body.get("error")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown error")
+                                    );
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to parse response: {}", e),
+                        }
+                    }
+                    Err(e) => eprintln!("Replay request failed: {}", e),
+                }
+            }
         },
         Commands::Resource { command } => match command {
             ResourceCommands::Apply { path } => {
@@ -789,6 +892,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Err(e) => eprintln!("Failed to get status: {}", e),
+                }
+            }
+            ResourceCommands::Replay {
+                product,
+                from,
+                to,
+                aggregate,
+                id,
+            } => {
+                println!("Product Replay (ADR-035)");
+                println!("========================");
+                println!();
+                println!("  Product: {}", product);
+                println!("  From:    {}", from);
+                if let Some(ref t) = to {
+                    println!("  To:      {}", t);
+                } else {
+                    println!("  To:      (present)");
+                }
+                if let Some(ref agg) = aggregate {
+                    println!("  Aggregate type: {}", agg);
+                }
+                if let Some(ref aid) = id {
+                    println!("  Aggregate ID:   {}", aid);
+                }
+                println!();
+
+                let mut payload = json!({ "from": from });
+                if let Some(ref t) = to {
+                    payload["to"] = json!(t);
+                }
+                if let Some(ref agg) = aggregate {
+                    payload["aggregate_type"] = json!(agg);
+                }
+                if let Some(ref aid) = id {
+                    payload["aggregate_ids"] = json!([aid]);
+                }
+
+                // Use "default" as the store name for product-level replay
+                let store = "default";
+                let url = format!(
+                    "{}/products/{}/event-store/{}/replay",
+                    client.base_url, product, store
+                );
+                match client.client.post(&url).json(&payload).send().await {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(body) => {
+                                if status.is_success() {
+                                    let replay_id = body
+                                        .get("replay_id")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+                                    println!("Replay started (replay_id: {})", replay_id);
+                                    println!(
+                                        "Subscribe to the event stream to monitor progress."
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "Replay failed: {}",
+                                        body.get("error")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown error")
+                                    );
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to parse response: {}", e),
+                        }
+                    }
+                    Err(e) => eprintln!("Replay request failed: {}", e),
                 }
             }
         },
@@ -1320,6 +1494,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Err(e) => eprintln!("Failed to find resources: {}", e),
+                }
+            }
+        },
+        Commands::Telemetry { command } => match command {
+            TelemetryCommands::Query {
+                signal,
+                from,
+                to,
+                service,
+                sql,
+            } => {
+                if sql.is_some() {
+                    println!("Note: SQL parsing is not yet implemented. Returning all matching records.");
+                }
+
+                let endpoint = match signal.as_str() {
+                    "traces" | "spans" => "/telemetry/spans",
+                    "metrics" => "/telemetry/metrics",
+                    _ => {
+                        eprintln!("Unknown signal type: {}. Use 'traces' or 'metrics'.", signal);
+                        std::process::exit(1);
+                    }
+                };
+
+                let mut params = Vec::new();
+                if let Some(ref f) = from {
+                    params.push(format!("from={}", urlencoding(f)));
+                }
+                if let Some(ref t) = to {
+                    params.push(format!("to={}", urlencoding(t)));
+                }
+                if let Some(ref s) = service {
+                    params.push(format!("service={}", urlencoding(s)));
+                }
+
+                let path = if params.is_empty() {
+                    endpoint.to_string()
+                } else {
+                    format!("{}?{}", endpoint, params.join("&"))
+                };
+
+                match client.get(&path).await {
+                    Ok(body) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&body).unwrap_or_default()
+                        );
+                    }
+                    Err(e) => eprintln!("Telemetry query failed: {}", e),
                 }
             }
         },

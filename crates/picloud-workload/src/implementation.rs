@@ -208,6 +208,36 @@ impl ProcessScheduler {
         }
     }
 
+    /// Build the OTEL_* environment variables to inject into workload processes (ADR-045).
+    fn otel_env_vars(&self, workload_iri: &ResourceIri) -> Vec<(String, String)> {
+        let service_name = workload_iri
+            .as_str()
+            .rsplit('/')
+            .next()
+            .unwrap_or("unknown");
+        let otel_endpoint = format!(
+            "https://{}/otel",
+            self.iri_builder.cluster_root().as_str().trim_end_matches('/')
+                .strip_prefix("https://")
+                .unwrap_or("picloud.local")
+        );
+        let product = Self::product_from_iri(workload_iri.as_str())
+            .unwrap_or("platform");
+
+        vec![
+            ("OTEL_SERVICE_NAME".to_string(), service_name.to_string()),
+            ("OTEL_EXPORTER_OTLP_ENDPOINT".to_string(), otel_endpoint),
+            (
+                "OTEL_RESOURCE_ATTRIBUTES".to_string(),
+                format!(
+                    "picloud.product={},picloud.workload_iri={}",
+                    product,
+                    workload_iri.as_str()
+                ),
+            ),
+        ]
+    }
+
     /// Spawn a binary workload as a child process.
     async fn spawn_binary(&self, spec: &BinarySpec, workload_iri: &ResourceIri) -> Result<(Child, u32)> {
         let mut cmd = Command::new(&spec.executable);
@@ -219,6 +249,11 @@ impl ProcessScheduler {
         for (key, value) in &spec.env {
             let val = self.resolve_env_value(value, product).await;
             cmd.env(key, val);
+        }
+
+        // Inject OTEL_* env vars (ADR-045)
+        for (key, value) in self.otel_env_vars(workload_iri) {
+            cmd.env(key, value);
         }
 
         // Configure stdio to avoid blocking
@@ -277,6 +312,11 @@ impl ProcessScheduler {
         for (key, value) in &spec.env {
             let val = self.resolve_env_value(value, product).await;
             cmd.args(["-e", &format!("{}={}", key, val)]);
+        }
+
+        // Inject OTEL_* env vars (ADR-045)
+        for (key, value) in self.otel_env_vars(workload_iri) {
+            cmd.args(["-e", &format!("{}={}", key, value)]);
         }
 
         // Port mappings

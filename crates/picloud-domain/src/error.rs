@@ -70,6 +70,13 @@ pub enum PiCloudError {
     #[error("Cluster already initialized (cluster_id: {cluster_id})")]
     ClusterAlreadyInitialized { cluster_id: String },
 
+    // --- Telemetry errors (ADR-045, ADR-046) ---
+    #[error("Telemetry write failed: {reason}")]
+    TelemetryWriteFailed { reason: String },
+
+    #[error("Telemetry query failed: {reason}")]
+    TelemetryQueryFailed { reason: String },
+
     // --- Generic ---
     #[error("Internal error: {0}")]
     Internal(String),

@@ -118,6 +118,15 @@ pub enum PlatformEvent {
     // --- Inference events (ADR-038) ---
     InferenceRuleEvaluated(InferenceRuleEvaluatedPayload),
     ReconciliationCompleted(ReconciliationCompletedPayload),
+
+    // --- Replay events (ADR-035) ---
+    ReplayStarted(ReplayStartedPayload),
+    ReplayProgress(ReplayProgressPayload),
+    ReplayCompleted(ReplayCompletedPayload),
+    ReplayFailed(ReplayFailedPayload),
+
+    // --- Telemetry events (ADR-045) ---
+    TelemetryAggregated(TelemetryAggregatedPayload),
 }
 
 // --- Payload types ---
@@ -423,6 +432,136 @@ pub struct ReconciliationCompletedPayload {
     pub total_assertions: usize,
     /// Total triples retracted across all rules
     pub total_retractions: usize,
+}
+
+// --- Telemetry payloads (ADR-045) ---
+
+/// Payload for TelemetryAggregated event (ADR-045).
+/// Emitted by the OTel aggregator every 15s with summary metrics
+/// computed from the in-process OTel stream.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelemetryAggregatedPayload {
+    /// Node that produced the aggregation
+    pub node_iri: ResourceIri,
+    /// Number of spans received in this window
+    pub span_count: u64,
+    /// Number of metric data points received in this window
+    pub metric_count: u64,
+    /// Number of log records received in this window
+    pub log_count: u64,
+    /// Summary metric entries computed from OTel data
+    pub summaries: Vec<MetricEntry>,
+}
+
+// --- Telemetry record types (ADR-046) ---
+
+/// A single span record for telemetry storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpanRecord {
+    pub trace_id: String,
+    pub span_id: String,
+    pub parent_span_id: Option<String>,
+    pub operation_name: String,
+    pub service_name: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub duration_ms: u64,
+    pub status: String,
+    pub attributes: serde_json::Value,
+}
+
+/// A single metric record for telemetry storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricRecord {
+    pub name: String,
+    pub value: f64,
+    pub unit: String,
+    pub metric_type: String,
+    pub service_name: String,
+    pub timestamp: DateTime<Utc>,
+    pub attributes: serde_json::Value,
+}
+
+/// Filter for querying telemetry data.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TelemetryFilter {
+    /// Filter by service name
+    pub service_name: Option<String>,
+    /// Filter by operation name (spans only)
+    pub operation_name: Option<String>,
+    /// Filter by metric name (metrics only)
+    pub metric_name: Option<String>,
+    /// Minimum duration in ms (spans only)
+    pub min_duration_ms: Option<u64>,
+}
+
+// --- Replay payloads (ADR-035) ---
+
+/// Metadata attached to replayed events to distinguish them from live events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayMetadata {
+    /// Whether this event is a replay (always true when present).
+    pub is_replay: bool,
+    /// The replay operation ID grouping all replayed events.
+    pub replay_id: Uuid,
+    /// The original timestamp when the event was first written.
+    pub original_timestamp: DateTime<Utc>,
+    /// When this event was re-emitted during replay.
+    pub replayed_at: DateTime<Utc>,
+}
+
+/// Payload for ReplayStarted event (ADR-035).
+/// Emitted when a replay operation begins building a shadow projection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayStartedPayload {
+    /// Unique identifier for this replay operation.
+    pub replay_id: Uuid,
+    /// Product scope (None for platform-level replay).
+    pub product: Option<String>,
+    /// Start of the replay time range.
+    pub from: DateTime<Utc>,
+    /// End of the replay time range (None = replay to present).
+    pub to: Option<DateTime<Utc>>,
+    /// Optional aggregate type filter.
+    pub aggregate_type: Option<String>,
+    /// Optional aggregate ID filter.
+    pub aggregate_ids: Vec<String>,
+}
+
+/// Payload for ReplayProgress event (ADR-035).
+/// Emitted periodically during replay to report progress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayProgressPayload {
+    /// The replay operation ID.
+    pub replay_id: Uuid,
+    /// Number of events processed so far.
+    pub events_processed: usize,
+    /// Total number of events to replay (if known).
+    pub events_total: Option<usize>,
+}
+
+/// Payload for ReplayCompleted event (ADR-035).
+/// Emitted when the shadow graph is atomically swapped with the live graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayCompletedPayload {
+    /// The replay operation ID.
+    pub replay_id: Uuid,
+    /// Total events replayed.
+    pub events_replayed: usize,
+    /// IRI of the shadow graph that was swapped in.
+    pub shadow_graph_iri: String,
+}
+
+/// Payload for ReplayFailed event (ADR-035).
+/// Emitted when a replay operation fails; the live graph is unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayFailedPayload {
+    /// The replay operation ID.
+    pub replay_id: Uuid,
+    /// Human-readable reason for failure.
+    pub reason: String,
+    /// Number of events processed before failure.
+    pub events_processed: usize,
 }
 
 #[cfg(test)]

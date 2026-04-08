@@ -144,6 +144,8 @@ pub struct PiCloudHttpServer {
     pub ingress_routes: IngressTable,
     pub tls_config: Option<rustls::ServerConfig>,
     pub extra_router: Option<Router>,
+    pub otel_stream: Option<Arc<crate::otel::OtelStream>>,
+    pub telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
 }
 
 impl PiCloudHttpServer {
@@ -160,6 +162,8 @@ impl PiCloudHttpServer {
             ingress_routes: new_ingress_table(),
             tls_config: None,
             extra_router: None,
+            otel_stream: None,
+            telemetry_store: None,
         }
     }
 
@@ -200,6 +204,17 @@ impl PiCloudHttpServer {
         self
     }
 
+    /// Inject the OTel stream and telemetry store for the /otel and /telemetry endpoints (ADR-045, ADR-046).
+    pub fn with_otel(
+        mut self,
+        otel_stream: Arc<crate::otel::OtelStream>,
+        telemetry_store: Arc<dyn picloud_domain::traits::TelemetryStore>,
+    ) -> Self {
+        self.otel_stream = Some(otel_stream);
+        self.telemetry_store = Some(telemetry_store);
+        self
+    }
+
     /// Build the axum [`Router`] with all platform routes.
     pub fn build_router(&self) -> Router {
         let iri_builder = IriBuilder::new(self.cluster_domain.clone());
@@ -227,6 +242,12 @@ impl PiCloudHttpServer {
                 "/products/:name/event-store/:store/:aggregate_type/:aggregate_id/events",
                 get(handle_event_store_read).post(handle_event_store_append),
             )
+            // --- Replay routes (ADR-035) ---
+            .route(
+                "/products/:name/event-store/:store/replay",
+                post(handle_replay),
+            )
+            .route("/api/replay", post(handle_platform_replay))
             // --- Config store routes (ADR-043) ---
             .route("/products/:name/config", get(handle_config_list).post(handle_config_set))
             .route("/products/:name/config/:key", get(handle_config_get).delete(handle_config_delete))
@@ -268,6 +289,10 @@ impl PiCloudHttpServer {
             .route("/auth/enroll", post(handle_enroll))
             .route("/auth/device/begin", post(handle_device_begin))
             .route("/auth/device/poll", post(handle_device_poll))
+            // --- OTel / Telemetry routes (ADR-045, ADR-046) ---
+            .route("/otel", post(handle_otel_ingest))
+            .route("/telemetry/spans", get(handle_telemetry_spans))
+            .route("/telemetry/metrics", get(handle_telemetry_metrics))
             .fallback(handle_ingress_proxy)
             .with_state(AppState {
                 cluster_root_iri,
@@ -277,6 +302,8 @@ impl PiCloudHttpServer {
                 cluster: self.cluster.clone(),
                 iam: self.iam.clone(),
                 ingress_routes: self.ingress_routes.clone(),
+                otel_stream: self.otel_stream.clone(),
+                telemetry_store: self.telemetry_store.clone(),
             });
 
         // Merge any extra routes (e.g. Raft RPC endpoints from picloud-cluster)
@@ -337,6 +364,8 @@ struct AppState {
     cluster: Option<Arc<dyn ClusterMembership>>,
     iam: Option<Arc<dyn IdentityProvider>>,
     ingress_routes: IngressTable,
+    otel_stream: Option<Arc<crate::otel::OtelStream>>,
+    telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1795,6 +1824,193 @@ async fn handle_event_store_read(
 }
 
 // ---------------------------------------------------------------------------
+// Replay Handlers (ADR-035)
+// ---------------------------------------------------------------------------
+
+/// Request body for POST /products/:name/event-store/:store/replay
+#[derive(Deserialize)]
+struct ReplayRequestBody {
+    from: String,
+    to: Option<String>,
+    aggregate_type: Option<String>,
+    aggregate_ids: Option<Vec<String>>,
+}
+
+/// POST /products/:name/event-store/:store/replay
+///
+/// Trigger a replay of events from a product's event store.
+/// Accepts from/to timestamps, optional aggregate_type and aggregate_ids.
+/// Returns a replay_id and emits ReplayStarted event.
+async fn handle_replay(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((product, store)): Path<(String, String)>,
+    Json(body): Json<ReplayRequestBody>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    // Parse timestamps
+    let from = match body.from.parse::<chrono::DateTime<chrono::Utc>>() {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid 'from' timestamp: {e}") })),
+            );
+        }
+    };
+    let to = match body.to {
+        Some(ref s) => match s.parse::<chrono::DateTime<chrono::Utc>>() {
+            Ok(t) => Some(t),
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": format!("invalid 'to' timestamp: {e}") })),
+                );
+            }
+        },
+        None => None,
+    };
+
+    let replay_id = Uuid::new_v4();
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let aggregate_ids = body.aggregate_ids.unwrap_or_default();
+
+    // Emit ReplayStarted event
+    let source = iri_builder.product(&product);
+    let schema = iri_builder.event_schema("ReplayStarted", 1);
+    let payload = serde_json::json!({
+        "replay_id": replay_id.to_string(),
+        "product": product,
+        "store": store,
+        "from": from.to_rfc3339(),
+        "to": to.map(|t| t.to_rfc3339()),
+        "aggregate_type": body.aggregate_type,
+        "aggregate_ids": aggregate_ids,
+    });
+
+    let envelope = EventEnvelope::new(
+        schema,
+        "ReplayStarted",
+        source,
+        Some(product.clone()),
+        Uuid::new_v4(),
+        payload,
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "replay_id": replay_id.to_string(),
+                "status": "started",
+                "product": product,
+                "store": store,
+                "from": from.to_rfc3339(),
+                "to": to.map(|t| t.to_rfc3339()),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to start replay");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+/// Request body for POST /api/replay (platform-level replay)
+#[derive(Deserialize)]
+struct PlatformReplayRequestBody {
+    from: String,
+    to: Option<String>,
+}
+
+/// POST /api/replay
+///
+/// Trigger a platform-level replay (cluster events).
+async fn handle_platform_replay(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<PlatformReplayRequestBody>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let from = match body.from.parse::<chrono::DateTime<chrono::Utc>>() {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid 'from' timestamp: {e}") })),
+            );
+        }
+    };
+    let to = match body.to {
+        Some(ref s) => match s.parse::<chrono::DateTime<chrono::Utc>>() {
+            Ok(t) => Some(t),
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": format!("invalid 'to' timestamp: {e}") })),
+                );
+            }
+        },
+        None => None,
+    };
+
+    let replay_id = Uuid::new_v4();
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+
+    let source = iri_builder.cluster_root();
+    let schema = iri_builder.event_schema("ReplayStarted", 1);
+    let payload = serde_json::json!({
+        "replay_id": replay_id.to_string(),
+        "product": null,
+        "from": from.to_rfc3339(),
+        "to": to.map(|t| t.to_rfc3339()),
+        "aggregate_type": null,
+        "aggregate_ids": [],
+    });
+
+    let envelope = EventEnvelope::new(
+        schema,
+        "ReplayStarted",
+        source,
+        None,
+        Uuid::new_v4(),
+        payload,
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "replay_id": replay_id.to_string(),
+                "status": "started",
+                "from": from.to_rfc3339(),
+                "to": to.map(|t| t.to_rfc3339()),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to start platform replay");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // OIDC Handlers
 // ---------------------------------------------------------------------------
 
@@ -2817,6 +3033,161 @@ async fn get_product_version(state: &AppState, product_name: &str) -> Option<Str
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// OTel / Telemetry Handlers (ADR-045, ADR-046)
+// ---------------------------------------------------------------------------
+
+/// POST /otel — Accept OTLP JSON traces/metrics/logs and publish to OTel stream
+async fn handle_otel_ingest(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let Some(ref otel_stream) = state.otel_stream else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "otel_not_configured",
+                "message": "OpenTelemetry stream is not configured"
+            })),
+        )
+            .into_response();
+    };
+
+    let data = crate::otel::parse_otlp_json(&body);
+    let count = data.len();
+
+    for datum in data {
+        otel_stream.publish(datum);
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "accepted": count,
+        })),
+    )
+        .into_response()
+}
+
+/// Query parameters for telemetry queries.
+#[derive(Deserialize)]
+struct TelemetryQueryParams {
+    /// Start time (RFC 3339)
+    from: Option<String>,
+    /// End time (RFC 3339)
+    to: Option<String>,
+    /// Filter by service name
+    service: Option<String>,
+    /// Filter by operation name (spans)
+    operation: Option<String>,
+    /// Filter by metric name (metrics)
+    metric_name: Option<String>,
+    /// Minimum duration in ms (spans)
+    min_duration_ms: Option<u64>,
+}
+
+/// GET /telemetry/spans — Query stored spans
+async fn handle_telemetry_spans(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Query(params): Query<TelemetryQueryParams>,
+) -> Response {
+    let Some(ref store) = state.telemetry_store else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "telemetry_not_configured",
+                "message": "Telemetry store is not configured"
+            })),
+        )
+            .into_response();
+    };
+
+    let now = chrono::Utc::now();
+    let from = params
+        .from
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|| now - chrono::Duration::hours(1));
+    let to = params
+        .to
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or(now);
+
+    let filter = picloud_domain::events::TelemetryFilter {
+        service_name: params.service,
+        operation_name: params.operation,
+        metric_name: None,
+        min_duration_ms: params.min_duration_ms,
+    };
+
+    match store.query_spans(from, to, filter).await {
+        Ok(spans) => (StatusCode::OK, Json(serde_json::json!({ "spans": spans }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "query_failed",
+                "message": format!("{}", e),
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /telemetry/metrics — Query stored metrics
+async fn handle_telemetry_metrics(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Query(params): Query<TelemetryQueryParams>,
+) -> Response {
+    let Some(ref store) = state.telemetry_store else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "telemetry_not_configured",
+                "message": "Telemetry store is not configured"
+            })),
+        )
+            .into_response();
+    };
+
+    let now = chrono::Utc::now();
+    let from = params
+        .from
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|| now - chrono::Duration::hours(1));
+    let to = params
+        .to
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or(now);
+
+    let filter = picloud_domain::events::TelemetryFilter {
+        service_name: params.service,
+        operation_name: None,
+        metric_name: params.metric_name,
+        min_duration_ms: None,
+    };
+
+    match store.query_metrics(from, to, filter).await {
+        Ok(metrics) => {
+            (StatusCode::OK, Json(serde_json::json!({ "metrics": metrics }))).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "query_failed",
+                "message": format!("{}", e),
+            })),
+        )
+            .into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------

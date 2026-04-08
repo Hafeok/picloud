@@ -7,9 +7,10 @@
 /// This is how vertical slice architecture is enforced at the type level.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use crate::error::Result;
-use crate::events::EventEnvelope;
+use crate::events::{EventEnvelope, MetricRecord, SpanRecord, TelemetryFilter};
 use crate::iri::ResourceIri;
 
 // ---- Event Log ----
@@ -331,4 +332,74 @@ pub trait ClusterIdentityStore: Send + Sync {
         ca_fingerprint: &str,
         cluster_id: Uuid,
     ) -> Result<()>;
+}
+
+// ---- Event Replay (ADR-035) ----
+
+/// Request parameters for a replay operation.
+#[derive(Debug, Clone)]
+pub struct ReplayRequest {
+    /// Start of the replay time range.
+    pub from: DateTime<Utc>,
+    /// End of the replay time range (None = replay to present).
+    pub to: Option<DateTime<Utc>>,
+    /// Product scope (None for platform-level replay).
+    pub product: Option<String>,
+    /// Optional aggregate type filter.
+    pub aggregate_type: Option<String>,
+    /// Optional aggregate ID filter.
+    pub aggregate_ids: Vec<String>,
+}
+
+/// Result of a completed replay operation.
+#[derive(Debug, Clone)]
+pub struct ReplayResult {
+    /// The replay operation ID.
+    pub replay_id: Uuid,
+    /// Number of events replayed.
+    pub events_replayed: usize,
+    /// IRI of the shadow graph that was used.
+    pub shadow_graph_iri: String,
+}
+
+/// Replay engine — re-projects historical events through current projectors
+/// into a shadow graph, then atomically swaps with the live graph.
+/// Implemented by: picloud-rdf
+#[async_trait]
+pub trait ReplayEngine: Send + Sync {
+    /// Execute a replay operation.
+    /// Returns a replay_id immediately; progress and completion
+    /// are reported via ReplayStarted/Progress/Completed/Failed events.
+    async fn start_replay(&self, request: ReplayRequest) -> Result<Uuid>;
+}
+
+// ---- Telemetry Store (ADR-046) ----
+
+/// Store and query telemetry data (spans, metrics).
+/// The interface is designed for a future Parquet/DataFusion backend,
+/// but the initial implementation uses JSON-lines files with hourly partitioning.
+/// Implemented by: picloud-http (OtelTelemetryStore)
+#[async_trait]
+pub trait TelemetryStore: Send + Sync {
+    /// Write a batch of span records to the store.
+    async fn write_spans(&self, spans: Vec<SpanRecord>) -> Result<()>;
+
+    /// Write a batch of metric records to the store.
+    async fn write_metrics(&self, metrics: Vec<MetricRecord>) -> Result<()>;
+
+    /// Query span records within a time range, optionally filtered.
+    async fn query_spans(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        filter: TelemetryFilter,
+    ) -> Result<Vec<SpanRecord>>;
+
+    /// Query metric records within a time range, optionally filtered.
+    async fn query_metrics(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        filter: TelemetryFilter,
+    ) -> Result<Vec<MetricRecord>>;
 }
