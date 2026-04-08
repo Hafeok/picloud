@@ -22,6 +22,13 @@ pub enum ResourceStatus {
     Deleting,
 }
 
+/// A key-value tag attached to any resource (ADR-036)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Tag {
+    pub key: String,
+    pub value: String,
+}
+
 /// Common metadata carried by every resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceMeta {
@@ -32,6 +39,9 @@ pub struct ResourceMeta {
     pub status: ResourceStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Free-form key-value tags (ADR-036)
+    #[serde(default)]
+    pub tags: Vec<Tag>,
 }
 
 /// A Product — the top-level deployment unit (ADR-016)
@@ -168,6 +178,46 @@ pub struct Role {
     pub permissions: Vec<String>,
 }
 
+/// A Group — a collection of identities with shared permissions (ADR-036)
+///
+/// Groups can be platform-scoped or product-scoped. A user's effective
+/// permissions are the union of their direct permissions and all group
+/// permissions. Users can be added explicitly or automatically via
+/// GroupMembershipRules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Group {
+    pub meta: ResourceMeta,
+    pub description: Option<String>,
+    /// Product scope — None for platform-level groups
+    pub product: Option<String>,
+    /// Permission strings, same format as Role permissions
+    pub permissions: Vec<String>,
+}
+
+/// A tag condition used in group membership rules (ADR-036)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagCondition {
+    pub key: String,
+    /// If None, matches any value for the given key
+    pub value: Option<String>,
+}
+
+/// A GroupMembershipRule — tag-based automatic group membership (ADR-036)
+///
+/// When all tag conditions match an identity's tags, that identity is
+/// automatically added to the target group. The RDF projector materializes
+/// these inferred memberships as `picloud:memberOf` triples.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMembershipRule {
+    pub meta: ResourceMeta,
+    /// The group this rule adds members to
+    pub group_iri: ResourceIri,
+    pub description: Option<String>,
+    /// All conditions must match (AND logic). Multiple rules on the same
+    /// group provide OR logic.
+    pub tag_conditions: Vec<TagCondition>,
+}
+
 /// A Node — a cluster member
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -245,5 +295,55 @@ mod tests {
         let json = serde_json::to_string(&OntologyFormat::Turtle).unwrap();
         let back: OntologyFormat = serde_json::from_str(&json).unwrap();
         assert!(matches!(back, OntologyFormat::Turtle));
+    }
+
+    #[test]
+    fn tag_serde_round_trip() {
+        let tag = Tag {
+            key: "department".to_string(),
+            value: "engineering".to_string(),
+        };
+        let json = serde_json::to_string(&tag).unwrap();
+        let back: Tag = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, tag);
+    }
+
+    #[test]
+    fn resource_meta_tags_default_empty() {
+        let json = r#"{
+            "iri": "https://picloud.local/test",
+            "resource_type": "Test",
+            "name": "test",
+            "product": null,
+            "status": "ready",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let meta: ResourceMeta = serde_json::from_str(json).unwrap();
+        assert!(meta.tags.is_empty());
+    }
+
+    #[test]
+    fn tag_condition_with_value() {
+        let cond = TagCondition {
+            key: "env".to_string(),
+            value: Some("prod".to_string()),
+        };
+        let json = serde_json::to_string(&cond).unwrap();
+        let back: TagCondition = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.key, "env");
+        assert_eq!(back.value, Some("prod".to_string()));
+    }
+
+    #[test]
+    fn tag_condition_key_only() {
+        let cond = TagCondition {
+            key: "has-gpu".to_string(),
+            value: None,
+        };
+        let json = serde_json::to_string(&cond).unwrap();
+        let back: TagCondition = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.key, "has-gpu");
+        assert_eq!(back.value, None);
     }
 }

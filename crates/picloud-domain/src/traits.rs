@@ -204,6 +204,57 @@ pub struct NodeInfo {
     pub is_leader: bool,
 }
 
+// ---- Groups (ADR-036) ----
+
+/// Manage user groups, membership, and tag-based membership rules.
+/// Implemented by: picloud-iam
+#[async_trait]
+pub trait GroupManager: Send + Sync {
+    /// Create a group with the given permissions.
+    async fn create_group(
+        &self,
+        group_iri: &ResourceIri,
+        name: &str,
+        permissions: Vec<String>,
+        product: Option<&str>,
+    ) -> Result<()>;
+
+    /// Delete a group and remove all memberships.
+    async fn delete_group(&self, group_iri: &ResourceIri) -> Result<()>;
+
+    /// Explicitly add an identity to a group.
+    async fn add_member(
+        &self,
+        group_iri: &ResourceIri,
+        identity_iri: &ResourceIri,
+    ) -> Result<()>;
+
+    /// Remove an identity from a group.
+    async fn remove_member(
+        &self,
+        group_iri: &ResourceIri,
+        identity_iri: &ResourceIri,
+    ) -> Result<()>;
+
+    /// List all members of a group (explicit + inferred).
+    async fn list_members(
+        &self,
+        group_iri: &ResourceIri,
+    ) -> Result<Vec<ResourceIri>>;
+
+    /// List all groups an identity belongs to.
+    async fn groups_for_identity(
+        &self,
+        identity_iri: &ResourceIri,
+    ) -> Result<Vec<ResourceIri>>;
+
+    /// Get the effective permissions for an identity (direct + all groups).
+    async fn effective_permissions(
+        &self,
+        identity_iri: &ResourceIri,
+    ) -> Result<Vec<String>>;
+}
+
 // ---- Secrets ----
 
 /// Encrypt, store, retrieve, and delete secrets.

@@ -19,6 +19,9 @@ pub struct HumanIdentity {
     pub email: Option<String>,
     pub passkeys: Vec<RegisteredPasskey>,
     pub platform_roles: Vec<String>,
+    /// Groups this identity belongs to (explicit + inferred via rules) (ADR-036)
+    #[serde(default)]
+    pub groups: Vec<ResourceIri>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -206,6 +209,7 @@ mod tests {
             email: None,
             passkeys: (0..num_passkeys).map(|_| make_passkey()).collect(),
             platform_roles: vec![],
+            groups: vec![],
             created_at: now,
             updated_at: now,
         }

@@ -128,6 +128,51 @@ impl IriBuilder {
         ))
     }
 
+    /// Platform-level group IRI: `https://{domain}/groups/{name}`
+    pub fn group(&self, group_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/groups/{}",
+            self.domain.0, group_name
+        ))
+    }
+
+    /// Product-scoped group IRI: `https://{domain}/products/{product}/groups/{name}`
+    pub fn product_group(&self, product_name: &str, group_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/groups/{}",
+            self.domain.0, product_name, group_name
+        ))
+    }
+
+    /// Group membership rule IRI: `https://{domain}/groups/{group}/rules/{rule}`
+    pub fn group_rule(&self, group_name: &str, rule_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/groups/{}/rules/{}",
+            self.domain.0, group_name, rule_name
+        ))
+    }
+
+    /// Product-scoped group membership rule IRI
+    pub fn product_group_rule(
+        &self,
+        product_name: &str,
+        group_name: &str,
+        rule_name: &str,
+    ) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/groups/{}/rules/{}",
+            self.domain.0, product_name, group_name, rule_name
+        ))
+    }
+
+    /// Identity IRI: `https://{domain}/identities/{name}`
+    pub fn identity(&self, identity_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/identities/{}",
+            self.domain.0, identity_name
+        ))
+    }
+
     pub fn aggregate_stream(
         &self,
         product_name: &str,
@@ -235,6 +280,42 @@ mod tests {
     fn resource_iri_display() {
         let iri = ResourceIri("https://picloud.local/test".to_string());
         assert_eq!(format!("{}", iri), "https://picloud.local/test");
+    }
+
+    #[test]
+    fn group_iri() {
+        let iri = builder().group("engineering-team");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/groups/engineering-team"
+        );
+    }
+
+    #[test]
+    fn product_group_iri() {
+        let iri = builder().product_group("photo-app", "editors");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/products/photo-app/groups/editors"
+        );
+    }
+
+    #[test]
+    fn group_rule_iri() {
+        let iri = builder().group_rule("engineering-team", "dept-match");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/groups/engineering-team/rules/dept-match"
+        );
+    }
+
+    #[test]
+    fn identity_iri() {
+        let iri = builder().identity("alice");
+        assert_eq!(
+            iri.as_str(),
+            "https://picloud.local/identities/alice"
+        );
     }
 
     #[test]

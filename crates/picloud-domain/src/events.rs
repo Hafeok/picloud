@@ -84,6 +84,18 @@ pub enum PlatformEvent {
     PasskeyRevoked(PasskeyRevokedPayload),
     TokenIssued(TokenIssuedPayload),
 
+    // --- Group events (ADR-036) ---
+    GroupCreated(GroupCreatedPayload),
+    GroupDeleted(GroupDeletedPayload),
+    GroupMemberAdded(GroupMemberAddedPayload),
+    GroupMemberRemoved(GroupMemberRemovedPayload),
+    GroupMembershipRuleCreated(GroupMembershipRuleCreatedPayload),
+    GroupMembershipRuleDeleted(GroupMembershipRuleDeletedPayload),
+
+    // --- Tag events (ADR-036) ---
+    ResourceTagged(ResourceTaggedPayload),
+    ResourceUntagged(ResourceUntaggedPayload),
+
     // --- Product events ---
     ProductDeployed(ProductDeployedPayload),
     ProductUpgradeStarted(ProductUpgradeStartedPayload),
@@ -181,6 +193,73 @@ pub struct TokenIssuedPayload {
     pub product: Option<String>,
     pub expires_at: DateTime<Utc>,
 }
+
+// --- Group payloads (ADR-036) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupCreatedPayload {
+    pub group_iri: ResourceIri,
+    pub name: String,
+    pub description: Option<String>,
+    pub product: Option<String>,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupDeletedPayload {
+    pub group_iri: ResourceIri,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMemberAddedPayload {
+    pub group_iri: ResourceIri,
+    pub identity_iri: ResourceIri,
+    /// "explicit" for manual adds, "rule:<rule_iri>" for inferred membership
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMemberRemovedPayload {
+    pub group_iri: ResourceIri,
+    pub identity_iri: ResourceIri,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMembershipRuleCreatedPayload {
+    pub rule_iri: ResourceIri,
+    pub group_iri: ResourceIri,
+    pub description: Option<String>,
+    pub tag_conditions: Vec<TagConditionPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagConditionPayload {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMembershipRuleDeletedPayload {
+    pub rule_iri: ResourceIri,
+    pub group_iri: ResourceIri,
+}
+
+// --- Tag payloads (ADR-036) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceTaggedPayload {
+    pub resource_iri: ResourceIri,
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceUntaggedPayload {
+    pub resource_iri: ResourceIri,
+    pub key: String,
+}
+
+// --- Product payloads ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductDeployedPayload {

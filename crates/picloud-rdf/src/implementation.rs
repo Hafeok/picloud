@@ -514,6 +514,577 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    // ---- Group event projectors (ADR-036) ----
+
+    fn project_group_created(&self, event: &EventEnvelope) -> Result<()> {
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let name = event.payload["name"]
+            .as_str()
+            .unwrap_or_default();
+        let description = event.payload["description"]
+            .as_str();
+
+        self.insert_triple(
+            group_iri_str,
+            RDF_TYPE,
+            picloud_term("Group").into(),
+        )?;
+        self.insert_triple(
+            group_iri_str,
+            &format!("{PICLOUD_NS}name"),
+            Literal::new_simple_literal(name).into(),
+        )?;
+        self.insert_triple(
+            group_iri_str,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("active").into(),
+        )?;
+        if let Some(desc) = description {
+            self.insert_triple(
+                group_iri_str,
+                &format!("{PICLOUD_NS}description"),
+                Literal::new_simple_literal(desc).into(),
+            )?;
+        }
+
+        // Project each permission
+        if let Some(perms) = event.payload["permissions"].as_array() {
+            for perm in perms {
+                if let Some(perm_str) = perm.as_str() {
+                    self.insert_triple(
+                        group_iri_str,
+                        &format!("{PICLOUD_NS}permission"),
+                        Literal::new_simple_literal(perm_str).into(),
+                    )?;
+                }
+            }
+        }
+
+        // If product-scoped, also insert into the product's named graph
+        if let Some(product) = event.payload["product"].as_str() {
+            let graph_iri = self.iri_builder.product_graph(product);
+            self.insert_triple_in_graph(
+                group_iri_str,
+                RDF_TYPE,
+                picloud_term("Group").into(),
+                graph_iri.as_str(),
+            )?;
+            self.insert_triple_in_graph(
+                group_iri_str,
+                &format!("{PICLOUD_NS}name"),
+                Literal::new_simple_literal(name).into(),
+                graph_iri.as_str(),
+            )?;
+        }
+
+        debug!(group_iri = group_iri_str, "projected GroupCreated");
+        Ok(())
+    }
+
+    fn project_group_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        self.remove_triples_about_all_graphs(group_iri_str)?;
+        // Also remove all memberOf triples pointing to this group
+        self.remove_membership_triples_for_group(group_iri_str)?;
+        debug!(group_iri = group_iri_str, "projected GroupDeleted");
+        Ok(())
+    }
+
+    fn project_group_member_added(&self, event: &EventEnvelope) -> Result<()> {
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or_default();
+        let identity_iri_str = event.payload["identity_iri"]
+            .as_str()
+            .unwrap_or_default();
+
+        self.insert_triple(
+            identity_iri_str,
+            &format!("{PICLOUD_NS}memberOf"),
+            NamedNode::new(group_iri_str)
+                .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?
+                .into(),
+        )?;
+
+        debug!(
+            identity_iri = identity_iri_str,
+            group_iri = group_iri_str,
+            "projected GroupMemberAdded"
+        );
+        Ok(())
+    }
+
+    fn project_group_member_removed(&self, event: &EventEnvelope) -> Result<()> {
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or_default();
+        let identity_iri_str = event.payload["identity_iri"]
+            .as_str()
+            .unwrap_or_default();
+
+        let s = NamedNode::new(identity_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid identity IRI: {e}")))?;
+        let p_str = format!("{PICLOUD_NS}memberOf");
+        let p = NamedNodeRef::new(&p_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+        let o = NamedNode::new(group_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?;
+
+        // Remove the specific memberOf triple by pattern match
+        let quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                Some((&o).into()),
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        debug!(
+            identity_iri = identity_iri_str,
+            group_iri = group_iri_str,
+            "projected GroupMemberRemoved"
+        );
+        Ok(())
+    }
+
+    fn project_group_membership_rule_created(&self, event: &EventEnvelope) -> Result<()> {
+        let rule_iri_str = event.payload["rule_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or_default();
+
+        self.insert_triple(
+            rule_iri_str,
+            RDF_TYPE,
+            picloud_term("GroupMembershipRule").into(),
+        )?;
+        self.insert_triple(
+            rule_iri_str,
+            &format!("{PICLOUD_NS}targetGroup"),
+            NamedNode::new(group_iri_str)
+                .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?
+                .into(),
+        )?;
+
+        if let Some(desc) = event.payload["description"].as_str() {
+            self.insert_triple(
+                rule_iri_str,
+                &format!("{PICLOUD_NS}description"),
+                Literal::new_simple_literal(desc).into(),
+            )?;
+        }
+
+        // Project each tag condition
+        if let Some(conditions) = event.payload["tag_conditions"].as_array() {
+            for (i, cond) in conditions.iter().enumerate() {
+                let cond_iri = format!("{}#cond-{}", rule_iri_str, i);
+                self.insert_triple(
+                    rule_iri_str,
+                    &format!("{PICLOUD_NS}requiresTag"),
+                    NamedNode::new(&cond_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid cond IRI: {e}")))?
+                        .into(),
+                )?;
+                if let Some(key) = cond["key"].as_str() {
+                    self.insert_triple(
+                        &cond_iri,
+                        &format!("{PICLOUD_NS}tagKey"),
+                        Literal::new_simple_literal(key).into(),
+                    )?;
+                }
+                if let Some(value) = cond["value"].as_str() {
+                    self.insert_triple(
+                        &cond_iri,
+                        &format!("{PICLOUD_NS}tagValue"),
+                        Literal::new_simple_literal(value).into(),
+                    )?;
+                }
+            }
+        }
+
+        // Evaluate this rule against all existing identities and materialize memberships
+        self.evaluate_membership_rule(rule_iri_str, group_iri_str, event)?;
+
+        debug!(rule_iri = rule_iri_str, "projected GroupMembershipRuleCreated");
+        Ok(())
+    }
+
+    fn project_group_membership_rule_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let rule_iri_str = event.payload["rule_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or_default();
+
+        // Remove all triples about the rule (including condition sub-resources)
+        self.remove_triples_about_all_graphs(rule_iri_str)?;
+
+        // Remove condition node triples (they use rule_iri#cond-N pattern)
+        // We query for all condition IRIs first
+        let cond_query = format!(
+            "SELECT ?cond WHERE {{ <{}> <{}requiresTag> ?cond }}",
+            rule_iri_str, PICLOUD_NS
+        );
+        if let Ok(result) = self.execute_query(&cond_query) {
+            for binding in &result.bindings {
+                if let Some(cond_iri) = binding["cond"]["value"].as_str() {
+                    self.remove_triples_about(cond_iri)?;
+                }
+            }
+        }
+
+        // Re-evaluate all remaining rules for this group to clean up memberships
+        // that were only inferred by the deleted rule
+        self.reevaluate_group_memberships(group_iri_str)?;
+
+        debug!(rule_iri = rule_iri_str, "projected GroupMembershipRuleDeleted");
+        Ok(())
+    }
+
+    // ---- Tag event projectors (ADR-036) ----
+
+    fn project_resource_tagged(&self, event: &EventEnvelope) -> Result<()> {
+        let resource_iri_str = event.payload["resource_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let key = event.payload["key"]
+            .as_str()
+            .unwrap_or_default();
+        let value = event.payload["value"]
+            .as_str()
+            .unwrap_or_default();
+
+        // Tag IRI: resource#tag-{key}
+        let tag_iri = format!("{}#tag-{}", resource_iri_str, key);
+
+        // Remove any existing tag with same key (update semantics)
+        self.remove_triples_about(&tag_iri)?;
+
+        self.insert_triple(
+            resource_iri_str,
+            &format!("{PICLOUD_NS}hasTag"),
+            NamedNode::new(&tag_iri)
+                .map_err(|e| PiCloudError::Internal(format!("invalid tag IRI: {e}")))?
+                .into(),
+        )?;
+        self.insert_triple(
+            &tag_iri,
+            &format!("{PICLOUD_NS}tagKey"),
+            Literal::new_simple_literal(key).into(),
+        )?;
+        self.insert_triple(
+            &tag_iri,
+            &format!("{PICLOUD_NS}tagValue"),
+            Literal::new_simple_literal(value).into(),
+        )?;
+
+        // If this is an identity, re-evaluate all group membership rules
+        self.reevaluate_all_rules_for_identity(resource_iri_str)?;
+
+        debug!(resource_iri = resource_iri_str, key = key, "projected ResourceTagged");
+        Ok(())
+    }
+
+    fn project_resource_untagged(&self, event: &EventEnvelope) -> Result<()> {
+        let resource_iri_str = event.payload["resource_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let key = event.payload["key"]
+            .as_str()
+            .unwrap_or_default();
+
+        let tag_iri = format!("{}#tag-{}", resource_iri_str, key);
+
+        // Remove the hasTag link
+        let s = NamedNode::new(resource_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid resource IRI: {e}")))?;
+        let p_str = format!("{PICLOUD_NS}hasTag");
+        let p = NamedNodeRef::new(&p_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+        let o = NamedNode::new(&tag_iri)
+            .map_err(|e| PiCloudError::Internal(format!("invalid tag IRI: {e}")))?;
+
+        let quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                Some((&o).into()),
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        // Remove the tag node triples
+        self.remove_triples_about(&tag_iri)?;
+
+        // If this is an identity, re-evaluate all group membership rules
+        self.reevaluate_all_rules_for_identity(resource_iri_str)?;
+
+        debug!(resource_iri = resource_iri_str, key = key, "projected ResourceUntagged");
+        Ok(())
+    }
+
+    // ---- Group membership inference helpers (ADR-036) ----
+
+    /// Remove all `?identity picloud:memberOf <group>` triples.
+    fn remove_membership_triples_for_group(&self, group_iri: &str) -> Result<()> {
+        let p = NamedNode::new(format!("{PICLOUD_NS}memberOf"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+        let o = NamedNode::new(group_iri)
+            .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?;
+
+        let quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                None,
+                Some(NamedNodeRef::new(p.as_str()).unwrap()),
+                Some((&o).into()),
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Evaluate a single membership rule and materialize `memberOf` triples
+    /// for all identities whose tags match the rule's conditions.
+    fn evaluate_membership_rule(
+        &self,
+        rule_iri: &str,
+        group_iri: &str,
+        _event: &EventEnvelope,
+    ) -> Result<()> {
+        // Build a SPARQL query that finds all identities matching the rule's
+        // tag conditions. We read the conditions from the graph.
+        let conditions_query = format!(
+            "SELECT ?key ?value WHERE {{ <{}> <{}requiresTag> ?cond . ?cond <{}tagKey> ?key . OPTIONAL {{ ?cond <{}tagValue> ?value }} }}",
+            rule_iri, PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+        );
+
+        let conditions_result = self.execute_query(&conditions_query)?;
+        if conditions_result.bindings.is_empty() {
+            return Ok(());
+        }
+
+        // Build a SPARQL query to find identities matching ALL conditions
+        let mut patterns = String::new();
+        patterns.push_str("?identity a <https://picloud.local/ontology#Identity> .\n");
+
+        for (i, binding) in conditions_result.bindings.iter().enumerate() {
+            let key = binding["key"]["value"].as_str().unwrap_or_default();
+            let tag_var = format!("?tag{}", i);
+            patterns.push_str(&format!(
+                "?identity <{}hasTag> {} .\n{} <{}tagKey> \"{}\" .\n",
+                PICLOUD_NS, tag_var, tag_var, PICLOUD_NS, key
+            ));
+            if let Some(value) = binding.get("value").and_then(|v| v["value"].as_str()) {
+                patterns.push_str(&format!(
+                    "{} <{}tagValue> \"{}\" .\n",
+                    tag_var, PICLOUD_NS, value
+                ));
+            }
+        }
+
+        let identity_query = format!("SELECT DISTINCT ?identity WHERE {{ {} }}", patterns);
+        let identity_result = self.execute_query(&identity_query)?;
+
+        for binding in &identity_result.bindings {
+            if let Some(identity_iri) = binding["identity"]["value"].as_str() {
+                // Check if membership already exists
+                let exists_query = format!(
+                    "ASK {{ <{}> <{}memberOf> <{}> }}",
+                    identity_iri, PICLOUD_NS, group_iri
+                );
+                if let Ok(result) = self.execute_query(&exists_query) {
+                    if let Some(already_member) = result.bindings.first()
+                        .and_then(|b| b["result"].as_bool())
+                    {
+                        if already_member {
+                            continue;
+                        }
+                    }
+                }
+
+                self.insert_triple(
+                    identity_iri,
+                    &format!("{PICLOUD_NS}memberOf"),
+                    NamedNode::new(group_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?
+                        .into(),
+                )?;
+                debug!(
+                    identity_iri = identity_iri,
+                    group_iri = group_iri,
+                    rule_iri = rule_iri,
+                    "inferred group membership from rule"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Re-evaluate all rules for a specific group and rebuild inferred memberships.
+    fn reevaluate_group_memberships(&self, group_iri: &str) -> Result<()> {
+        // Remove all current memberships for this group
+        self.remove_membership_triples_for_group(group_iri)?;
+
+        // Find all rules targeting this group
+        let rules_query = format!(
+            "SELECT ?rule WHERE {{ ?rule a <{}GroupMembershipRule> . ?rule <{}targetGroup> <{}> }}",
+            PICLOUD_NS, PICLOUD_NS, group_iri
+        );
+        let rules_result = self.execute_query(&rules_query)?;
+
+        // Create a dummy event for the evaluate call
+        let dummy_event = EventEnvelope::new(
+            ResourceIri(format!("https://picloud.local/schemas/events/internal/v1")),
+            "internal",
+            ResourceIri(group_iri.to_string()),
+            None,
+            uuid::Uuid::new_v4(),
+            serde_json::json!({}),
+        );
+
+        for binding in &rules_result.bindings {
+            if let Some(rule_iri) = binding["rule"]["value"].as_str() {
+                self.evaluate_membership_rule(rule_iri, group_iri, &dummy_event)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Re-evaluate all membership rules that could apply to a given identity.
+    fn reevaluate_all_rules_for_identity(&self, identity_iri: &str) -> Result<()> {
+        // Check if this resource is actually an identity
+        let is_identity_query = format!(
+            "ASK {{ <{}> a <{}Identity> }}",
+            identity_iri, PICLOUD_NS
+        );
+        if let Ok(result) = self.execute_query(&is_identity_query) {
+            if let Some(is_identity) = result.bindings.first()
+                .and_then(|b| b["result"].as_bool())
+            {
+                if !is_identity {
+                    return Ok(());
+                }
+            }
+        }
+
+        // Find all membership rules in the system
+        let rules_query = format!(
+            "SELECT ?rule ?group WHERE {{ ?rule a <{}GroupMembershipRule> . ?rule <{}targetGroup> ?group }}",
+            PICLOUD_NS, PICLOUD_NS
+        );
+        let rules_result = self.execute_query(&rules_query)?;
+
+        for binding in &rules_result.bindings {
+            if let (Some(rule_iri), Some(group_iri)) = (
+                binding["rule"]["value"].as_str(),
+                binding["group"]["value"].as_str(),
+            ) {
+                // Check if this identity matches this rule's conditions
+                let conditions_query = format!(
+                    "SELECT ?key ?value WHERE {{ <{}> <{}requiresTag> ?cond . ?cond <{}tagKey> ?key . OPTIONAL {{ ?cond <{}tagValue> ?value }} }}",
+                    rule_iri, PICLOUD_NS, PICLOUD_NS, PICLOUD_NS
+                );
+                let conditions_result = self.execute_query(&conditions_query)?;
+
+                let mut all_match = true;
+                for cond_binding in &conditions_result.bindings {
+                    let key = cond_binding["key"]["value"].as_str().unwrap_or_default();
+                    let value = cond_binding.get("value").and_then(|v| v["value"].as_str());
+
+                    let mut check_query = format!(
+                        "ASK {{ <{}> <{}hasTag> ?tag . ?tag <{}tagKey> \"{}\"",
+                        identity_iri, PICLOUD_NS, PICLOUD_NS, key
+                    );
+                    if let Some(val) = value {
+                        check_query.push_str(&format!(
+                            " . ?tag <{}tagValue> \"{}\"",
+                            PICLOUD_NS, val
+                        ));
+                    }
+                    check_query.push_str(" }");
+
+                    if let Ok(result) = self.execute_query(&check_query) {
+                        if let Some(matches) = result.bindings.first()
+                            .and_then(|b| b["result"].as_bool())
+                        {
+                            if !matches {
+                                all_match = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if all_match && !conditions_result.bindings.is_empty() {
+                    // Add membership if not already present
+                    let exists_query = format!(
+                        "ASK {{ <{}> <{}memberOf> <{}> }}",
+                        identity_iri, PICLOUD_NS, group_iri
+                    );
+                    let already_member = self.execute_query(&exists_query)
+                        .ok()
+                        .and_then(|r| r.bindings.first()?.get("result")?.as_bool())
+                        .unwrap_or(false);
+
+                    if !already_member {
+                        self.insert_triple(
+                            identity_iri,
+                            &format!("{PICLOUD_NS}memberOf"),
+                            NamedNode::new(group_iri)
+                                .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?
+                                .into(),
+                        )?;
+                        debug!(
+                            identity_iri = identity_iri,
+                            group_iri = group_iri,
+                            rule_iri = rule_iri,
+                            "inferred group membership from rule (identity re-eval)"
+                        );
+                    }
+                } else {
+                    // Remove membership for this group if it was inferred and no longer matches
+                    // (only remove if no rule still matches)
+                    // We skip explicit removal here — the full reevaluate_group_memberships
+                    // handles that case when rules are deleted
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn project_product_deployed(&self, event: &EventEnvelope) -> Result<()> {
         let product_iri_str = event.payload["product_iri"]
             .as_str()
@@ -755,6 +1326,14 @@ impl StateProjector for OxigraphProjector {
             "ResourceFailed" => self.project_resource_failed(event),
             "ResourceDeleted" => self.project_resource_deleted(event),
             "IdentityCreated" => self.project_identity_created(event),
+            "GroupCreated" => self.project_group_created(event),
+            "GroupDeleted" => self.project_group_deleted(event),
+            "GroupMemberAdded" => self.project_group_member_added(event),
+            "GroupMemberRemoved" => self.project_group_member_removed(event),
+            "GroupMembershipRuleCreated" => self.project_group_membership_rule_created(event),
+            "GroupMembershipRuleDeleted" => self.project_group_membership_rule_deleted(event),
+            "ResourceTagged" => self.project_resource_tagged(event),
+            "ResourceUntagged" => self.project_resource_untagged(event),
             "ProductDeployed" => self.project_product_deployed(event),
             "ProductDeleted" => self.project_product_deleted(event),
             other => {
@@ -1105,6 +1684,460 @@ mod tests {
             .await
             .unwrap();
         assert!(result.bindings.is_empty());
+    }
+
+    // ---- Group, Tag, and Inference tests (ADR-036) ----
+
+    fn make_identity_created_event(iri_builder: &IriBuilder, name: &str) -> EventEnvelope {
+        let identity_iri = iri_builder.identity(name);
+        EventEnvelope::new(
+            iri_builder.event_schema("IdentityCreated", 1),
+            "IdentityCreated",
+            identity_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "identity_iri": identity_iri.as_str(),
+                "identity_type": "Human",
+                "name": name,
+            }),
+        )
+    }
+
+    fn make_group_created_event(iri_builder: &IriBuilder, name: &str, permissions: Vec<&str>) -> EventEnvelope {
+        let group_iri = iri_builder.group(name);
+        EventEnvelope::new(
+            iri_builder.event_schema("GroupCreated", 1),
+            "GroupCreated",
+            group_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "group_iri": group_iri.as_str(),
+                "name": name,
+                "permissions": permissions,
+            }),
+        )
+    }
+
+    fn make_resource_tagged_event(
+        iri_builder: &IriBuilder,
+        resource_iri: &ResourceIri,
+        key: &str,
+        value: &str,
+    ) -> EventEnvelope {
+        EventEnvelope::new(
+            iri_builder.event_schema("ResourceTagged", 1),
+            "ResourceTagged",
+            resource_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": resource_iri.as_str(),
+                "key": key,
+                "value": value,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_project_group_created() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let event = make_group_created_event(&iri_builder, "engineering-team", vec!["products/photo-app/*:read"]);
+
+        projector.project(&event).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?name WHERE {{ ?g a <{}Group> . ?g <{}name> ?name }}",
+                PICLOUD_NS, PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["name"]["value"].as_str().unwrap(), "engineering-team");
+    }
+
+    #[tokio::test]
+    async fn test_project_group_with_permissions() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+        let event = make_group_created_event(&iri_builder, "admins", vec!["*:read", "*:write"]);
+
+        projector.project(&event).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?perm WHERE {{ ?g a <{}Group> . ?g <{}permission> ?perm }}",
+                PICLOUD_NS, PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_project_group_deleted_removes_triples() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        let create_event = make_group_created_event(&iri_builder, "eng", vec!["*:read"]);
+        projector.project(&create_event).await.unwrap();
+
+        let group_iri = iri_builder.group("eng");
+        let delete_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupDeleted", 1),
+            "GroupDeleted",
+            group_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({ "group_iri": group_iri.as_str() }),
+        );
+        projector.project(&delete_event).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?g WHERE {{ ?g a <{}Group> }}",
+                PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_project_explicit_group_member() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        // Create identity and group
+        projector.project(&make_identity_created_event(&iri_builder, "alice")).await.unwrap();
+        projector.project(&make_group_created_event(&iri_builder, "eng", vec![])).await.unwrap();
+
+        let group_iri = iri_builder.group("eng");
+        let identity_iri = iri_builder.identity("alice");
+
+        // Add member
+        let add_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMemberAdded", 1),
+            "GroupMemberAdded",
+            group_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "group_iri": group_iri.as_str(),
+                "identity_iri": identity_iri.as_str(),
+                "reason": "explicit",
+            }),
+        );
+        projector.project(&add_event).await.unwrap();
+
+        // Query membership
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["group"]["value"].as_str().unwrap(), group_iri.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_project_group_member_removed() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        projector.project(&make_identity_created_event(&iri_builder, "alice")).await.unwrap();
+        projector.project(&make_group_created_event(&iri_builder, "eng", vec![])).await.unwrap();
+
+        let group_iri = iri_builder.group("eng");
+        let identity_iri = iri_builder.identity("alice");
+
+        // Add and then remove
+        let add_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMemberAdded", 1),
+            "GroupMemberAdded",
+            group_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "group_iri": group_iri.as_str(),
+                "identity_iri": identity_iri.as_str(),
+                "reason": "explicit",
+            }),
+        );
+        projector.project(&add_event).await.unwrap();
+
+        let remove_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMemberRemoved", 1),
+            "GroupMemberRemoved",
+            group_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "group_iri": group_iri.as_str(),
+                "identity_iri": identity_iri.as_str(),
+            }),
+        );
+        projector.project(&remove_event).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_project_resource_tagged() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        projector.project(&make_identity_created_event(&iri_builder, "alice")).await.unwrap();
+
+        let identity_iri = iri_builder.identity("alice");
+        let tag_event = make_resource_tagged_event(&iri_builder, &identity_iri, "department", "engineering");
+        projector.project(&tag_event).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?key ?val WHERE {{ <{}> <{}hasTag> ?tag . ?tag <{}tagKey> ?key . ?tag <{}tagValue> ?val }}",
+                identity_iri.as_str(), PICLOUD_NS, PICLOUD_NS, PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["key"]["value"].as_str().unwrap(), "department");
+        assert_eq!(result.bindings[0]["val"]["value"].as_str().unwrap(), "engineering");
+    }
+
+    #[tokio::test]
+    async fn test_project_resource_untagged() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        projector.project(&make_identity_created_event(&iri_builder, "alice")).await.unwrap();
+
+        let identity_iri = iri_builder.identity("alice");
+        projector.project(&make_resource_tagged_event(&iri_builder, &identity_iri, "department", "engineering")).await.unwrap();
+
+        // Untag
+        let untag_event = EventEnvelope::new(
+            iri_builder.event_schema("ResourceUntagged", 1),
+            "ResourceUntagged",
+            identity_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "resource_iri": identity_iri.as_str(),
+                "key": "department",
+            }),
+        );
+        projector.project(&untag_event).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?tag WHERE {{ <{}> <{}hasTag> ?tag }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_tag_based_group_membership_inference() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        // Create identity, group, and tag the identity
+        projector.project(&make_identity_created_event(&iri_builder, "alice")).await.unwrap();
+        projector.project(&make_group_created_event(&iri_builder, "eng-team", vec!["*:read"])).await.unwrap();
+
+        let identity_iri = iri_builder.identity("alice");
+        let group_iri = iri_builder.group("eng-team");
+
+        // Tag alice with department=engineering
+        projector.project(&make_resource_tagged_event(&iri_builder, &identity_iri, "department", "engineering")).await.unwrap();
+
+        // Create a membership rule: department=engineering → eng-team
+        let rule_iri = iri_builder.group_rule("eng-team", "dept-match");
+        let rule_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMembershipRuleCreated", 1),
+            "GroupMembershipRuleCreated",
+            rule_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "rule_iri": rule_iri.as_str(),
+                "group_iri": group_iri.as_str(),
+                "tag_conditions": [{"key": "department", "value": "engineering"}],
+            }),
+        );
+        projector.project(&rule_event).await.unwrap();
+
+        // Alice should now be a member of eng-team via inference
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["group"]["value"].as_str().unwrap(), group_iri.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_tag_after_rule_triggers_inference() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        // Create identity and group first
+        projector.project(&make_identity_created_event(&iri_builder, "bob")).await.unwrap();
+        projector.project(&make_group_created_event(&iri_builder, "ops", vec![])).await.unwrap();
+
+        let identity_iri = iri_builder.identity("bob");
+        let group_iri = iri_builder.group("ops");
+
+        // Create rule first (before tagging)
+        let rule_iri = iri_builder.group_rule("ops", "team-match");
+        let rule_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMembershipRuleCreated", 1),
+            "GroupMembershipRuleCreated",
+            rule_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "rule_iri": rule_iri.as_str(),
+                "group_iri": group_iri.as_str(),
+                "tag_conditions": [{"key": "team", "value": "ops"}],
+            }),
+        );
+        projector.project(&rule_event).await.unwrap();
+
+        // Bob should not yet be a member
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+
+        // Now tag bob — this should trigger inference
+        projector.project(&make_resource_tagged_event(&iri_builder, &identity_iri, "team", "ops")).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["group"]["value"].as_str().unwrap(), group_iri.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_multi_condition_rule() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        projector.project(&make_identity_created_event(&iri_builder, "carol")).await.unwrap();
+        projector.project(&make_group_created_event(&iri_builder, "senior-eng", vec![])).await.unwrap();
+
+        let identity_iri = iri_builder.identity("carol");
+        let group_iri = iri_builder.group("senior-eng");
+
+        // Rule: department=engineering AND level=senior
+        let rule_iri = iri_builder.group_rule("senior-eng", "senior-eng-match");
+        let rule_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMembershipRuleCreated", 1),
+            "GroupMembershipRuleCreated",
+            rule_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "rule_iri": rule_iri.as_str(),
+                "group_iri": group_iri.as_str(),
+                "tag_conditions": [
+                    {"key": "department", "value": "engineering"},
+                    {"key": "level", "value": "senior"},
+                ],
+            }),
+        );
+        projector.project(&rule_event).await.unwrap();
+
+        // Tag with only one condition — should NOT match
+        projector.project(&make_resource_tagged_event(&iri_builder, &identity_iri, "department", "engineering")).await.unwrap();
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty(), "should not match with only one tag");
+
+        // Tag with second condition — now should match
+        projector.project(&make_resource_tagged_event(&iri_builder, &identity_iri, "level", "senior")).await.unwrap();
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["group"]["value"].as_str().unwrap(), group_iri.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_non_matching_tag_no_inference() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        projector.project(&make_identity_created_event(&iri_builder, "dave")).await.unwrap();
+        projector.project(&make_group_created_event(&iri_builder, "sales", vec![])).await.unwrap();
+
+        let identity_iri = iri_builder.identity("dave");
+        let group_iri = iri_builder.group("sales");
+
+        // Rule: department=sales
+        let rule_iri = iri_builder.group_rule("sales", "dept-match");
+        let rule_event = EventEnvelope::new(
+            iri_builder.event_schema("GroupMembershipRuleCreated", 1),
+            "GroupMembershipRuleCreated",
+            rule_iri.clone(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "rule_iri": rule_iri.as_str(),
+                "group_iri": group_iri.as_str(),
+                "tag_conditions": [{"key": "department", "value": "sales"}],
+            }),
+        );
+        projector.project(&rule_event).await.unwrap();
+
+        // Tag dave with department=engineering (NOT sales)
+        projector.project(&make_resource_tagged_event(&iri_builder, &identity_iri, "department", "engineering")).await.unwrap();
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?group WHERE {{ <{}> <{}memberOf> ?group }}",
+                identity_iri.as_str(), PICLOUD_NS,
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty(), "engineering user should not be in sales group");
     }
 
     #[tokio::test]

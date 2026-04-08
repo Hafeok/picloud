@@ -33,6 +33,16 @@ pub enum PiCloudError {
     #[error("Passkey challenge failed: {reason}")]
     PasskeyChallengeFailed { reason: String },
 
+    // --- Group errors (ADR-036) ---
+    #[error("Group not found: {iri}")]
+    GroupNotFound { iri: String },
+
+    #[error("Identity {identity_iri} is already a member of group {group_iri}")]
+    AlreadyGroupMember { identity_iri: String, group_iri: String },
+
+    #[error("Group membership rule not found: {iri}")]
+    GroupMembershipRuleNotFound { iri: String },
+
     // --- Storage errors ---
     #[error("Volume not found: {volume_id}")]
     VolumeNotFound { volume_id: Uuid },

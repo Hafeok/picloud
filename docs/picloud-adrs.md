@@ -939,3 +939,65 @@ https://picloud.local/products/photo-app/delta-tables/telemetry
 - Products can project event store data into Delta Tables via platform-provided projectors, enabling analytical queries over event-sourced data without querying the event log directly.
 - Storage allocation (ADR-024) must account for Parquet file sizes and Delta transaction log overhead.
 - Phase 4 compaction and retention policies apply to delta tables via Delta's built-in `VACUUM` semantics.
+
+## ADR-036: User Groups, Resource Tagging, and Tag-Based Group Membership Inference
+
+**Status:** Accepted (Phase 2)
+
+**Context:** PiCloud's IAM model supports individual human identities with platform roles and permissions. As clusters grow, managing permissions per-user becomes unwieldy. Operators need a way to organize users into groups and assign permissions at the group level. Additionally, automatic group membership based on resource attributes would reduce manual administration — for example, "all users tagged `department=engineering` should be in the `engineering-team` group."
+
+**Decision:** Introduce three interconnected capabilities:
+
+1. **User Groups** — A `Group` is a first-class platform resource with its own IRI (`https://picloud.local/groups/{name}` for platform groups, or product-scoped via `https://picloud.local/products/{product}/groups/{name}`). Groups carry permissions identical in structure to roles. Users can be explicitly added to groups. A user's effective permissions are the union of their direct permissions and all group permissions.
+
+2. **Resource Tagging** — All platform resources gain a `tags` field: a set of key-value pairs (`Vec<Tag>` on `ResourceMeta`). Tags are projected into the RDF graph as structured triples. Tags are free-form strings — the platform does not enforce a tag taxonomy.
+
+3. **Tag-Based Group Membership Rules** — A `GroupMembershipRule` is a resource associated with a group. Each rule specifies a set of tag conditions (key-value pairs, AND logic). The RDF projector materializes group membership by evaluating rules: when a user is tagged or a rule is created/deleted, the projector runs SPARQL queries to find all identities matching the rule's tag conditions and inserts/removes `picloud:memberOf` triples accordingly. This gives operators declarative, self-maintaining group membership.
+
+Event flow:
+```
+ResourceTagged → projector stores tag triples → evaluates all rules → materializes memberOf
+GroupMembershipRuleCreated → projector stores rule triples → evaluates rule → materializes memberOf
+```
+
+RDF model:
+```turtle
+# Tags on resources
+<resource> picloud:hasTag <resource#tag-department> .
+<resource#tag-department> picloud:tagKey "department" .
+<resource#tag-department> picloud:tagValue "engineering" .
+
+# Group
+<group> a picloud:Group .
+<group> picloud:name "engineering-team" .
+<group> picloud:permission "products/photo-app/*:read" .
+
+# Explicit membership
+<identity> picloud:memberOf <group> .
+
+# Membership rule
+<rule> a picloud:GroupMembershipRule .
+<rule> picloud:targetGroup <group> .
+<rule> picloud:requiresTag <rule#cond-0> .
+<rule#cond-0> picloud:tagKey "department" .
+<rule#cond-0> picloud:tagValue "engineering" .
+```
+
+**Rationale:**
+- Groups are the standard RBAC primitive for managing permissions at scale. Every serious IAM system has them.
+- Tags are the natural metadata mechanism for cloud platforms. They enable automation, cost tracking, and policy without schema changes.
+- RDF inference via SPARQL is a natural fit for PiCloud's architecture — the graph is already the read model, and SPARQL is expressive enough to evaluate tag-matching rules without custom inference engines.
+- Materializing membership at projection time (rather than computing at query time) keeps authorization checks fast — a simple `picloud:memberOf` lookup.
+- AND logic for tag conditions covers the vast majority of use cases. OR logic can be achieved by creating multiple rules for the same group.
+
+**Rejected alternatives:**
+- **OPA/Rego policy engine** — adds an external dependency and a separate policy language. SPARQL-based rules keep everything in the existing RDF model.
+- **Lazy evaluation at query time** — would make every authorization check run a SPARQL query against all rules. Materialization is O(events) not O(requests).
+- **Hierarchical groups (nested groups)** — deferred. Flat groups cover the primary use case. Nesting can be added later via transitive `picloud:memberOf` inference if needed.
+
+**Consequences:**
+- `ResourceMeta` gains a `tags: Vec<Tag>` field — all existing resource types become taggable without code changes.
+- New event types: `GroupCreated`, `GroupDeleted`, `GroupMemberAdded`, `GroupMemberRemoved`, `GroupMembershipRuleCreated`, `GroupMembershipRuleDeleted`, `ResourceTagged`, `ResourceUntagged`.
+- The RDF projector gains handlers for all new events plus inference logic for rule evaluation.
+- Authorization checks must union direct permissions with group permissions — this affects `picloud-iam` token issuance.
+- Tag keys and values are free-form strings. Operators are responsible for consistency (the platform may add tag key validation in a future ADR).
