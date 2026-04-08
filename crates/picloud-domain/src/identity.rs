@@ -152,6 +152,99 @@ pub struct ClientCredentialsRequest {
     pub scope: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// WebAuthn / passkey ceremony types
+// ---------------------------------------------------------------------------
+
+/// Unique identifier for an in-flight challenge (registration or authentication).
+pub type ChallengeId = String;
+
+/// Options sent to the client to begin a WebAuthn registration ceremony.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationChallenge {
+    /// The challenge the client must sign with the new credential.
+    pub challenge: String,
+    /// The relying party ID (domain).
+    pub rp_id: String,
+    /// The relying party display name.
+    pub rp_name: String,
+    /// The user identifier (opaque bytes, base64-encoded).
+    pub user_id: String,
+    /// The user display name.
+    pub user_name: String,
+    /// Timeout in milliseconds.
+    pub timeout_ms: u64,
+}
+
+/// The client's response to a registration challenge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationResponse {
+    /// The new credential ID (base64url-encoded).
+    pub credential_id: String,
+    /// The public key in COSE format (base64url-encoded).
+    pub public_key: String,
+    /// The attestation object (base64url-encoded) — simplified, not fully verified.
+    pub attestation: Option<String>,
+    /// Optional authenticator AAGUID.
+    pub aaguid: Option<String>,
+    /// Display name the user gave this authenticator.
+    pub display_name: Option<String>,
+}
+
+/// Options sent to the client to begin a WebAuthn authentication ceremony.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthenticationChallenge {
+    /// The challenge bytes (base64url-encoded).
+    pub challenge: String,
+    /// The relying party ID.
+    pub rp_id: String,
+    /// The credential IDs the client may use (base64url-encoded).
+    pub allow_credentials: Vec<String>,
+    /// Timeout in milliseconds.
+    pub timeout_ms: u64,
+}
+
+/// The client's response to an authentication challenge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthenticationResponse {
+    /// The credential ID that was used (base64url-encoded).
+    pub credential_id: String,
+    /// The signed challenge data (base64url-encoded).
+    pub signature: String,
+    /// The authenticator data (base64url-encoded).
+    pub authenticator_data: Option<String>,
+    /// The client data JSON (base64url-encoded).
+    pub client_data_json: Option<String>,
+}
+
+/// Device flow — the CLI requests a device code and polls for completion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceFlowResponse {
+    /// The device code the CLI uses to poll.
+    pub device_code: String,
+    /// The URL the user opens in a browser.
+    pub verification_url: String,
+    /// The interval (in seconds) the CLI should wait between polls.
+    pub interval_secs: u64,
+    /// When this device code expires.
+    pub expires_in_secs: u64,
+}
+
+/// Result of polling a device flow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status")]
+pub enum DeviceFlowPollResult {
+    /// The user has not yet completed authentication.
+    #[serde(rename = "pending")]
+    Pending,
+    /// Authentication is complete; here is the token.
+    #[serde(rename = "complete")]
+    Complete { access_token: String, token_type: String, expires_in: i64 },
+    /// The device code has expired.
+    #[serde(rename = "expired")]
+    Expired,
+}
+
 /// An RBAC role — additive permissions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Role {

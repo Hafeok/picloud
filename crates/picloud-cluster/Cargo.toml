@@ -15,5 +15,10 @@ thiserror      = { workspace = true }
 serde          = { workspace = true }
 serde_json     = { workspace = true }
 openraft = { workspace = true }
+reqwest  = { workspace = true }
+axum     = { workspace = true }
 mdns-sd  = { workspace = true }
 uuid     = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

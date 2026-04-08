@@ -12,7 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 picloud-domain = { workspace = true }
-# CLI talks to the cluster via HTTP only — no slice imports
+picloud-sdk-gen = { workspace = true }
+# CLI talks to the cluster via HTTP only — except sdk-gen which runs locally
 clap    = { workspace = true }
 tokio   = { workspace = true }
 reqwest = { workspace = true }

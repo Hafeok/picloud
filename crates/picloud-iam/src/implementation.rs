@@ -17,7 +17,9 @@ use tracing::{debug, warn};
 
 use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::identity::{
-    AppRegistration, JsonWebKey, JsonWebKeySet, OidcDiscoveryDocument, TokenResponse,
+    AppRegistration, AuthenticationChallenge, AuthenticationResponse, ChallengeId,
+    DeviceFlowPollResult, DeviceFlowResponse, JsonWebKey, JsonWebKeySet, OidcDiscoveryDocument,
+    RegisteredPasskey, RegistrationChallenge, RegistrationResponse, TokenResponse,
 };
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
 use picloud_domain::traits::{IdentityProvider, ValidatedIdentity, WorkloadCertificate};
@@ -48,16 +50,62 @@ pub struct StoredAppRegistration {
     pub product_name: String,
 }
 
+/// An in-flight WebAuthn challenge awaiting completion.
+#[derive(Debug, Clone)]
+struct PendingChallenge {
+    /// The identity this challenge belongs to.
+    identity_iri: ResourceIri,
+    /// The raw challenge bytes (base64url-encoded in the wire format).
+    challenge_bytes: Vec<u8>,
+    /// Whether this is a registration or authentication challenge.
+    kind: ChallengeKind,
+    /// When this challenge expires.
+    expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ChallengeKind {
+    Registration,
+    Authentication,
+}
+
+/// An in-flight device flow awaiting browser authentication.
+#[derive(Debug, Clone)]
+struct PendingDeviceFlow {
+    /// When this device code expires.
+    expires_at: chrono::DateTime<chrono::Utc>,
+    /// Once the user authenticates in the browser, the token is stored here.
+    completed_token: Option<String>,
+    /// The identity that authenticated (set on completion).
+    identity_iri: Option<ResourceIri>,
+}
+
+/// A stored enrollment token.
+#[derive(Debug, Clone)]
+struct StoredEnrollmentToken {
+    token: picloud_domain::identity::EnrollmentToken,
+}
+
 /// Local identity provider backed by HMAC-SHA256 token signing and rcgen certificates.
 pub struct LocalIdentityProvider {
     signing_key: hmac::Key,
     key_id: String,
     identities: Arc<RwLock<HashMap<String, StoredIdentity>>>,
     app_registrations: Arc<RwLock<HashMap<String, StoredAppRegistration>>>,
+    /// Passkey credentials keyed by identity IRI.
+    passkeys: Arc<RwLock<HashMap<String, Vec<RegisteredPasskey>>>>,
+    /// In-flight WebAuthn challenges keyed by challenge ID.
+    pending_challenges: Arc<RwLock<HashMap<String, PendingChallenge>>>,
+    /// In-flight device flows keyed by device code.
+    pending_device_flows: Arc<RwLock<HashMap<String, PendingDeviceFlow>>>,
+    /// Enrollment tokens keyed by token string.
+    enrollment_tokens: Arc<RwLock<HashMap<String, StoredEnrollmentToken>>>,
     _iri_builder: IriBuilder,
     cluster_domain: ClusterDomain,
     /// Token validity duration in seconds.
     token_ttl_secs: i64,
+    /// Challenge validity duration in seconds.
+    challenge_ttl_secs: i64,
 }
 
 impl LocalIdentityProvider {
@@ -68,9 +116,14 @@ impl LocalIdentityProvider {
             key_id: "picloud-hmac-1".to_string(),
             identities: Arc::new(RwLock::new(HashMap::new())),
             app_registrations: Arc::new(RwLock::new(HashMap::new())),
+            passkeys: Arc::new(RwLock::new(HashMap::new())),
+            pending_challenges: Arc::new(RwLock::new(HashMap::new())),
+            pending_device_flows: Arc::new(RwLock::new(HashMap::new())),
+            enrollment_tokens: Arc::new(RwLock::new(HashMap::new())),
             _iri_builder: IriBuilder::new(domain.clone()),
             cluster_domain: domain,
             token_ttl_secs: 3600,
+            challenge_ttl_secs: 300, // 5 minutes
         }
     }
 
@@ -81,9 +134,14 @@ impl LocalIdentityProvider {
             key_id: "picloud-hmac-1".to_string(),
             identities: Arc::new(RwLock::new(HashMap::new())),
             app_registrations: Arc::new(RwLock::new(HashMap::new())),
+            passkeys: Arc::new(RwLock::new(HashMap::new())),
+            pending_challenges: Arc::new(RwLock::new(HashMap::new())),
+            pending_device_flows: Arc::new(RwLock::new(HashMap::new())),
+            enrollment_tokens: Arc::new(RwLock::new(HashMap::new())),
             _iri_builder: IriBuilder::new(domain.clone()),
             cluster_domain: domain,
             token_ttl_secs,
+            challenge_ttl_secs: 300,
         }
     }
 
@@ -102,6 +160,46 @@ impl LocalIdentityProvider {
         let mut rng = rand::thread_rng();
         let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
         URL_SAFE_NO_PAD.encode(&bytes)
+    }
+
+    /// Generate random bytes and return them as base64url-encoded string.
+    fn random_base64(len: usize) -> String {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let bytes: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+        URL_SAFE_NO_PAD.encode(&bytes)
+    }
+
+    /// Generate random bytes (raw).
+    fn random_bytes(len: usize) -> Vec<u8> {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        (0..len).map(|_| rng.gen()).collect()
+    }
+
+    /// Store an enrollment token for later use.
+    pub async fn store_enrollment_token(&self, token: picloud_domain::identity::EnrollmentToken) {
+        let key = token.token.clone();
+        self.enrollment_tokens
+            .write()
+            .await
+            .insert(key, StoredEnrollmentToken { token });
+    }
+
+    /// Register a passkey for an identity (used internally and in tests).
+    pub async fn store_passkey(&self, identity_iri: &ResourceIri, passkey: RegisteredPasskey) {
+        let key = identity_iri.as_str().to_string();
+        let mut store = self.passkeys.write().await;
+        store.entry(key).or_default().push(passkey);
+    }
+
+    /// Get all passkeys for an identity.
+    pub async fn get_passkeys(&self, identity_iri: &ResourceIri) -> Vec<RegisteredPasskey> {
+        let store = self.passkeys.read().await;
+        store
+            .get(identity_iri.as_str())
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Register an identity so that tokens issued for it carry the correct roles.
@@ -363,6 +461,352 @@ impl IdentityProvider for LocalIdentityProvider {
             scopes: registration.scopes,
         })
     }
+
+    // ---- WebAuthn / passkey ceremonies ----
+
+    async fn begin_registration(
+        &self,
+        identity_iri: &ResourceIri,
+    ) -> Result<(ChallengeId, RegistrationChallenge)> {
+        let challenge_bytes = Self::random_bytes(32);
+        let challenge_b64 = URL_SAFE_NO_PAD.encode(&challenge_bytes);
+        let challenge_id = Self::random_base64(16);
+
+        // Extract user name from IRI (last path segment)
+        let user_name = identity_iri
+            .as_str()
+            .rsplit('/')
+            .next()
+            .unwrap_or("unknown")
+            .to_string();
+
+        let pending = PendingChallenge {
+            identity_iri: identity_iri.clone(),
+            challenge_bytes: challenge_bytes.clone(),
+            kind: ChallengeKind::Registration,
+            expires_at: Utc::now() + Duration::seconds(self.challenge_ttl_secs),
+        };
+
+        self.pending_challenges
+            .write()
+            .await
+            .insert(challenge_id.clone(), pending);
+
+        debug!("Started registration challenge {} for {}", challenge_id, identity_iri);
+
+        let options = RegistrationChallenge {
+            challenge: challenge_b64,
+            rp_id: self.cluster_domain.0.clone(),
+            rp_name: "PiCloud".to_string(),
+            user_id: URL_SAFE_NO_PAD.encode(identity_iri.as_str().as_bytes()),
+            user_name,
+            timeout_ms: (self.challenge_ttl_secs as u64) * 1000,
+        };
+
+        Ok((challenge_id, options))
+    }
+
+    async fn complete_registration(
+        &self,
+        challenge_id: &str,
+        response: RegistrationResponse,
+    ) -> Result<RegisteredPasskey> {
+        // Remove and validate the pending challenge
+        let pending = self
+            .pending_challenges
+            .write()
+            .await
+            .remove(challenge_id)
+            .ok_or_else(|| PiCloudError::PasskeyChallengeFailed {
+                reason: "unknown or expired challenge ID".to_string(),
+            })?;
+
+        if pending.kind != ChallengeKind::Registration {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "challenge is not a registration challenge".to_string(),
+            });
+        }
+
+        if Utc::now() >= pending.expires_at {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "challenge has expired".to_string(),
+            });
+        }
+
+        // Decode the public key from the response
+        let public_key_bytes = URL_SAFE_NO_PAD
+            .decode(&response.public_key)
+            .map_err(|_| PiCloudError::PasskeyChallengeFailed {
+                reason: "invalid public key encoding".to_string(),
+            })?;
+
+        let passkey = RegisteredPasskey {
+            credential_id: response.credential_id.clone(),
+            public_key: public_key_bytes,
+            aaguid: response.aaguid,
+            registered_at: Utc::now(),
+            last_used_at: None,
+            display_name: response.display_name,
+        };
+
+        // Store the passkey
+        self.store_passkey(&pending.identity_iri, passkey.clone()).await;
+
+        // Ensure the identity is registered (if not already)
+        {
+            let store = self.identities.read().await;
+            if !store.contains_key(pending.identity_iri.as_str()) {
+                drop(store);
+                self.register_identity(pending.identity_iri.clone(), vec![]).await;
+            }
+        }
+
+        debug!(
+            "Registered passkey {} for {}",
+            response.credential_id,
+            pending.identity_iri
+        );
+
+        Ok(passkey)
+    }
+
+    async fn begin_authentication(
+        &self,
+        identity_iri: &ResourceIri,
+    ) -> Result<(ChallengeId, AuthenticationChallenge)> {
+        let passkeys = self.get_passkeys(identity_iri).await;
+        if passkeys.is_empty() {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "no passkeys registered for this identity".to_string(),
+            });
+        }
+
+        let challenge_bytes = Self::random_bytes(32);
+        let challenge_b64 = URL_SAFE_NO_PAD.encode(&challenge_bytes);
+        let challenge_id = Self::random_base64(16);
+
+        let pending = PendingChallenge {
+            identity_iri: identity_iri.clone(),
+            challenge_bytes,
+            kind: ChallengeKind::Authentication,
+            expires_at: Utc::now() + Duration::seconds(self.challenge_ttl_secs),
+        };
+
+        self.pending_challenges
+            .write()
+            .await
+            .insert(challenge_id.clone(), pending);
+
+        let allow_credentials = passkeys.iter().map(|p| p.credential_id.clone()).collect();
+
+        debug!("Started authentication challenge {} for {}", challenge_id, identity_iri);
+
+        let options = AuthenticationChallenge {
+            challenge: challenge_b64,
+            rp_id: self.cluster_domain.0.clone(),
+            allow_credentials,
+            timeout_ms: (self.challenge_ttl_secs as u64) * 1000,
+        };
+
+        Ok((challenge_id, options))
+    }
+
+    async fn complete_authentication(
+        &self,
+        challenge_id: &str,
+        response: AuthenticationResponse,
+    ) -> Result<String> {
+        // Remove and validate the pending challenge
+        let pending = self
+            .pending_challenges
+            .write()
+            .await
+            .remove(challenge_id)
+            .ok_or_else(|| PiCloudError::PasskeyChallengeFailed {
+                reason: "unknown or expired challenge ID".to_string(),
+            })?;
+
+        if pending.kind != ChallengeKind::Authentication {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "challenge is not an authentication challenge".to_string(),
+            });
+        }
+
+        if Utc::now() >= pending.expires_at {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "challenge has expired".to_string(),
+            });
+        }
+
+        // Verify the credential ID matches a registered passkey
+        let passkeys = self.get_passkeys(&pending.identity_iri).await;
+        let matching_passkey = passkeys
+            .iter()
+            .find(|p| p.credential_id == response.credential_id)
+            .ok_or_else(|| PiCloudError::PasskeyChallengeFailed {
+                reason: "credential ID does not match any registered passkey".to_string(),
+            })?;
+
+        // Simplified signature verification: in a full W3C WebAuthn implementation,
+        // we would verify the signature using the stored public key against the
+        // authenticator data + client data hash. For this simplified flow, we verify
+        // by HMAC-signing the challenge with the stored public key as context.
+        //
+        // The client is expected to sign: HMAC-SHA256(challenge_bytes, credential_public_key)
+        // and send the result as the signature field.
+        let expected_tag = hmac::sign(
+            &hmac::Key::new(hmac::HMAC_SHA256, &matching_passkey.public_key),
+            &pending.challenge_bytes,
+        );
+        let expected_sig = URL_SAFE_NO_PAD.encode(expected_tag.as_ref());
+
+        if response.signature != expected_sig {
+            warn!(
+                "Authentication failed for {} — signature mismatch",
+                pending.identity_iri
+            );
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "signature verification failed".to_string(),
+            });
+        }
+
+        // Update last_used_at
+        {
+            let mut store = self.passkeys.write().await;
+            if let Some(passkeys) = store.get_mut(pending.identity_iri.as_str()) {
+                if let Some(pk) = passkeys.iter_mut().find(|p| p.credential_id == response.credential_id) {
+                    pk.last_used_at = Some(Utc::now());
+                }
+            }
+        }
+
+        debug!("Authentication succeeded for {}", pending.identity_iri);
+
+        // Issue a token for the authenticated identity
+        self.issue_token(&pending.identity_iri, None).await
+    }
+
+    async fn enroll_with_token(
+        &self,
+        token: &str,
+    ) -> Result<(ChallengeId, RegistrationChallenge)> {
+        // Find and validate the enrollment token
+        let mut tokens = self.enrollment_tokens.write().await;
+        let stored = tokens.get_mut(token).ok_or_else(|| {
+            PiCloudError::PasskeyChallengeFailed {
+                reason: "invalid enrollment token".to_string(),
+            }
+        })?;
+
+        if !stored.token.is_valid() {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "enrollment token is expired or already used".to_string(),
+            });
+        }
+
+        // Mark the token as used
+        stored.token.used = true;
+
+        // Determine the identity IRI for enrollment
+        let identity_iri = match &stored.token.target_identity {
+            Some(iri) => iri.clone(),
+            None => {
+                // For bootstrap tokens, create a new admin identity
+                let iri_builder = IriBuilder::new(self.cluster_domain.clone());
+                let admin_id = uuid::Uuid::new_v4();
+                let iri = iri_builder.resource("platform", "identities", &admin_id.to_string());
+                // Register as admin
+                drop(tokens);
+                self.register_identity(iri.clone(), vec!["admin".to_string()]).await;
+                return self.begin_registration(&iri).await;
+            }
+        };
+
+        drop(tokens);
+        self.begin_registration(&identity_iri).await
+    }
+
+    async fn begin_device_flow(&self) -> Result<DeviceFlowResponse> {
+        let device_code = Self::random_base64(32);
+        let expires_in_secs: u64 = 600; // 10 minutes
+
+        let pending = PendingDeviceFlow {
+            expires_at: Utc::now() + Duration::seconds(expires_in_secs as i64),
+            completed_token: None,
+            identity_iri: None,
+        };
+
+        self.pending_device_flows
+            .write()
+            .await
+            .insert(device_code.clone(), pending);
+
+        let verification_url = format!(
+            "https://{}/auth/device?code={}",
+            self.cluster_domain.0, device_code
+        );
+
+        debug!("Started device flow: {}", device_code);
+
+        Ok(DeviceFlowResponse {
+            device_code,
+            verification_url,
+            interval_secs: 5,
+            expires_in_secs,
+        })
+    }
+
+    async fn poll_device_flow(
+        &self,
+        device_code: &str,
+    ) -> Result<DeviceFlowPollResult> {
+        let store = self.pending_device_flows.read().await;
+        let pending = store.get(device_code).ok_or_else(|| {
+            PiCloudError::PasskeyChallengeFailed {
+                reason: "unknown device code".to_string(),
+            }
+        })?;
+
+        if Utc::now() >= pending.expires_at {
+            return Ok(DeviceFlowPollResult::Expired);
+        }
+
+        match &pending.completed_token {
+            Some(token) => Ok(DeviceFlowPollResult::Complete {
+                access_token: token.clone(),
+                token_type: "Bearer".to_string(),
+                expires_in: self.token_ttl_secs,
+            }),
+            None => Ok(DeviceFlowPollResult::Pending),
+        }
+    }
+
+    async fn complete_device_flow(
+        &self,
+        device_code: &str,
+        identity_iri: &ResourceIri,
+    ) -> Result<()> {
+        let token = self.issue_token(identity_iri, None).await?;
+
+        let mut store = self.pending_device_flows.write().await;
+        let pending = store.get_mut(device_code).ok_or_else(|| {
+            PiCloudError::PasskeyChallengeFailed {
+                reason: "unknown device code".to_string(),
+            }
+        })?;
+
+        if Utc::now() >= pending.expires_at {
+            return Err(PiCloudError::PasskeyChallengeFailed {
+                reason: "device code has expired".to_string(),
+            });
+        }
+
+        pending.completed_token = Some(token);
+        pending.identity_iri = Some(identity_iri.clone());
+
+        debug!("Completed device flow for {}", identity_iri);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -589,5 +1033,357 @@ mod tests {
             result.unwrap_err(),
             PiCloudError::Unauthenticated
         ));
+    }
+
+    // -- WebAuthn registration tests --
+
+    #[tokio::test]
+    async fn begin_registration_returns_challenge() {
+        let provider = test_provider();
+        let iri = test_iri();
+
+        let (challenge_id, options) = provider
+            .begin_registration(&iri)
+            .await
+            .expect("begin_registration should succeed");
+
+        assert!(!challenge_id.is_empty());
+        assert!(!options.challenge.is_empty());
+        assert_eq!(options.rp_id, "picloud.local");
+        assert_eq!(options.rp_name, "PiCloud");
+        assert_eq!(options.user_name, "test-user");
+        assert!(options.timeout_ms > 0);
+    }
+
+    #[tokio::test]
+    async fn complete_registration_stores_passkey() {
+        let provider = test_provider();
+        let iri = test_iri();
+
+        let (challenge_id, _options) = provider
+            .begin_registration(&iri)
+            .await
+            .expect("begin_registration should succeed");
+
+        let public_key = LocalIdentityProvider::random_bytes(32);
+        let response = picloud_domain::identity::RegistrationResponse {
+            credential_id: "test-cred-001".to_string(),
+            public_key: URL_SAFE_NO_PAD.encode(&public_key),
+            attestation: None,
+            aaguid: Some("test-aaguid".to_string()),
+            display_name: Some("My YubiKey".to_string()),
+        };
+
+        let passkey = provider
+            .complete_registration(&challenge_id, response)
+            .await
+            .expect("complete_registration should succeed");
+
+        assert_eq!(passkey.credential_id, "test-cred-001");
+        assert_eq!(passkey.public_key, public_key);
+        assert_eq!(passkey.aaguid, Some("test-aaguid".to_string()));
+        assert_eq!(passkey.display_name, Some("My YubiKey".to_string()));
+
+        // Verify the passkey was stored
+        let stored = provider.get_passkeys(&iri).await;
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].credential_id, "test-cred-001");
+    }
+
+    #[tokio::test]
+    async fn complete_registration_with_invalid_challenge_fails() {
+        let provider = test_provider();
+
+        let response = picloud_domain::identity::RegistrationResponse {
+            credential_id: "test-cred".to_string(),
+            public_key: URL_SAFE_NO_PAD.encode(&[1, 2, 3]),
+            attestation: None,
+            aaguid: None,
+            display_name: None,
+        };
+
+        let result = provider
+            .complete_registration("nonexistent-challenge", response)
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PiCloudError::PasskeyChallengeFailed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn complete_registration_challenge_cannot_be_reused() {
+        let provider = test_provider();
+        let iri = test_iri();
+
+        let (challenge_id, _options) = provider
+            .begin_registration(&iri)
+            .await
+            .unwrap();
+
+        let public_key = LocalIdentityProvider::random_bytes(32);
+        let response = picloud_domain::identity::RegistrationResponse {
+            credential_id: "cred-1".to_string(),
+            public_key: URL_SAFE_NO_PAD.encode(&public_key),
+            attestation: None,
+            aaguid: None,
+            display_name: None,
+        };
+
+        // First completion succeeds
+        provider
+            .complete_registration(&challenge_id, response.clone())
+            .await
+            .expect("first complete should succeed");
+
+        // Second completion with same challenge_id fails (it was consumed)
+        let result = provider
+            .complete_registration(&challenge_id, response)
+            .await;
+        assert!(result.is_err());
+    }
+
+    // -- WebAuthn authentication tests --
+
+    async fn register_test_passkey(provider: &LocalIdentityProvider) -> (ResourceIri, Vec<u8>) {
+        let iri = test_iri();
+        let (challenge_id, _) = provider.begin_registration(&iri).await.unwrap();
+
+        let public_key = LocalIdentityProvider::random_bytes(32);
+        let response = picloud_domain::identity::RegistrationResponse {
+            credential_id: "auth-test-cred".to_string(),
+            public_key: URL_SAFE_NO_PAD.encode(&public_key),
+            attestation: None,
+            aaguid: None,
+            display_name: None,
+        };
+        provider.complete_registration(&challenge_id, response).await.unwrap();
+        (iri, public_key)
+    }
+
+    #[tokio::test]
+    async fn begin_authentication_with_no_passkeys_fails() {
+        let provider = test_provider();
+        let iri = test_iri();
+
+        let result = provider.begin_authentication(&iri).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PiCloudError::PasskeyChallengeFailed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn authentication_round_trip() {
+        let provider = test_provider();
+        let (iri, public_key) = register_test_passkey(&provider).await;
+
+        // Begin authentication
+        let (challenge_id, options) = provider
+            .begin_authentication(&iri)
+            .await
+            .expect("begin_authentication should succeed");
+
+        assert!(!options.challenge.is_empty());
+        assert_eq!(options.allow_credentials, vec!["auth-test-cred"]);
+
+        // Compute the expected signature: HMAC-SHA256(challenge_bytes, public_key)
+        let challenge_bytes = URL_SAFE_NO_PAD.decode(&options.challenge).unwrap();
+        let sig_key = hmac::Key::new(hmac::HMAC_SHA256, &public_key);
+        let sig = hmac::sign(&sig_key, &challenge_bytes);
+        let signature = URL_SAFE_NO_PAD.encode(sig.as_ref());
+
+        let response = picloud_domain::identity::AuthenticationResponse {
+            credential_id: "auth-test-cred".to_string(),
+            signature,
+            authenticator_data: None,
+            client_data_json: None,
+        };
+
+        let token = provider
+            .complete_authentication(&challenge_id, response)
+            .await
+            .expect("complete_authentication should succeed");
+
+        // Validate the returned token
+        let validated = provider.validate_token(&token).await.unwrap();
+        assert_eq!(validated.identity_iri, iri);
+    }
+
+    #[tokio::test]
+    async fn authentication_with_wrong_signature_fails() {
+        let provider = test_provider();
+        let (iri, _public_key) = register_test_passkey(&provider).await;
+
+        let (challenge_id, _options) = provider.begin_authentication(&iri).await.unwrap();
+
+        let response = picloud_domain::identity::AuthenticationResponse {
+            credential_id: "auth-test-cred".to_string(),
+            signature: "wrong-signature-data".to_string(),
+            authenticator_data: None,
+            client_data_json: None,
+        };
+
+        let result = provider.complete_authentication(&challenge_id, response).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PiCloudError::PasskeyChallengeFailed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn authentication_with_unknown_credential_fails() {
+        let provider = test_provider();
+        let (iri, _public_key) = register_test_passkey(&provider).await;
+
+        let (challenge_id, _options) = provider.begin_authentication(&iri).await.unwrap();
+
+        let response = picloud_domain::identity::AuthenticationResponse {
+            credential_id: "unknown-cred".to_string(),
+            signature: "doesnt-matter".to_string(),
+            authenticator_data: None,
+            client_data_json: None,
+        };
+
+        let result = provider.complete_authentication(&challenge_id, response).await;
+        assert!(result.is_err());
+    }
+
+    // -- Enrollment token tests --
+
+    #[tokio::test]
+    async fn enroll_with_valid_bootstrap_token() {
+        let provider = test_provider();
+
+        let token = picloud_domain::identity::EnrollmentToken {
+            token: "bootstrap-token-123".to_string(),
+            purpose: picloud_domain::identity::EnrollmentPurpose::Bootstrap,
+            expires_at: Utc::now() + Duration::hours(1),
+            used: false,
+            target_identity: None,
+        };
+        provider.store_enrollment_token(token).await;
+
+        let (challenge_id, options) = provider
+            .enroll_with_token("bootstrap-token-123")
+            .await
+            .expect("enroll_with_token should succeed");
+
+        assert!(!challenge_id.is_empty());
+        assert!(!options.challenge.is_empty());
+        assert_eq!(options.rp_id, "picloud.local");
+    }
+
+    #[tokio::test]
+    async fn enroll_with_used_token_fails() {
+        let provider = test_provider();
+
+        let token = picloud_domain::identity::EnrollmentToken {
+            token: "used-token".to_string(),
+            purpose: picloud_domain::identity::EnrollmentPurpose::Bootstrap,
+            expires_at: Utc::now() + Duration::hours(1),
+            used: true,
+            target_identity: None,
+        };
+        provider.store_enrollment_token(token).await;
+
+        let result = provider.enroll_with_token("used-token").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn enroll_with_expired_token_fails() {
+        let provider = test_provider();
+
+        let token = picloud_domain::identity::EnrollmentToken {
+            token: "expired-token".to_string(),
+            purpose: picloud_domain::identity::EnrollmentPurpose::Bootstrap,
+            expires_at: Utc::now() - Duration::hours(1),
+            used: false,
+            target_identity: None,
+        };
+        provider.store_enrollment_token(token).await;
+
+        let result = provider.enroll_with_token("expired-token").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn enroll_with_passkey_reset_token() {
+        let provider = test_provider();
+        let iri = test_iri();
+
+        let token = picloud_domain::identity::EnrollmentToken {
+            token: "reset-token-456".to_string(),
+            purpose: picloud_domain::identity::EnrollmentPurpose::PasskeyReset,
+            expires_at: Utc::now() + Duration::hours(1),
+            used: false,
+            target_identity: Some(iri.clone()),
+        };
+        provider.store_enrollment_token(token).await;
+
+        let (challenge_id, options) = provider
+            .enroll_with_token("reset-token-456")
+            .await
+            .expect("enroll should succeed");
+
+        assert!(!challenge_id.is_empty());
+        // The user_name should come from the target identity
+        assert_eq!(options.user_name, "test-user");
+    }
+
+    // -- Device flow tests --
+
+    #[tokio::test]
+    async fn device_flow_round_trip() {
+        let provider = test_provider();
+        let iri = test_iri();
+        provider.register_identity(iri.clone(), vec!["user".to_string()]).await;
+
+        // Begin device flow
+        let flow = provider
+            .begin_device_flow()
+            .await
+            .expect("begin_device_flow should succeed");
+
+        assert!(!flow.device_code.is_empty());
+        assert!(flow.verification_url.contains(&flow.device_code));
+        assert_eq!(flow.interval_secs, 5);
+
+        // Poll — should be pending
+        let poll = provider.poll_device_flow(&flow.device_code).await.unwrap();
+        assert!(matches!(poll, DeviceFlowPollResult::Pending));
+
+        // Complete the device flow (simulates browser auth)
+        provider
+            .complete_device_flow(&flow.device_code, &iri)
+            .await
+            .expect("complete_device_flow should succeed");
+
+        // Poll again — should be complete with a token
+        let poll = provider.poll_device_flow(&flow.device_code).await.unwrap();
+        match poll {
+            DeviceFlowPollResult::Complete { access_token, token_type, expires_in } => {
+                assert_eq!(token_type, "Bearer");
+                assert!(expires_in > 0);
+                // Validate the token
+                let validated = provider.validate_token(&access_token).await.unwrap();
+                assert_eq!(validated.identity_iri, iri);
+                assert_eq!(validated.roles, vec!["user"]);
+            }
+            other => panic!("Expected Complete, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn device_flow_unknown_code_fails() {
+        let provider = test_provider();
+
+        let result = provider.poll_device_flow("nonexistent-code").await;
+        assert!(result.is_err());
     }
 }

@@ -133,8 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bind_addr: config.bind_addr,
         cluster_domain: config.cluster_domain.clone(),
     };
-    let cluster = MdnsCluster::start(cluster_config)?;
-    let cluster: Arc<dyn ClusterMembership> = Arc::new(cluster);
+    let mut cluster = MdnsCluster::start(cluster_config)?;
     info!("Cluster membership started");
 
     // 2. Start event log (persistent, backed by JSON-lines file)
@@ -143,6 +142,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("failed to open persistent event log"),
     );
     let event_log_trait: Arc<dyn EventLog> = event_log.clone();
+
+    // 2b. Start Raft consensus node
+    //
+    // The apply callback feeds committed Raft entries into the event log.
+    let event_log_for_raft = event_log.clone();
+    let apply_cb: picloud_cluster::ApplyCallback = Arc::new(move |json: &str| {
+        if let Ok(envelope) = serde_json::from_str::<picloud_domain::events::EventEnvelope>(json) {
+            let el = event_log_for_raft.clone();
+            tokio::spawn(async move {
+                if let Err(e) = el.append(envelope).await {
+                    error!("Failed to append Raft-committed event: {e}");
+                }
+            });
+        } else {
+            warn!("Raft committed entry is not a valid EventEnvelope");
+        }
+    });
+
+    let raft_node_id = picloud_cluster::node_id_from_uuid(&config.node_id);
+    let raft_addr = format!("{}:{}", config.bind_addr, config.http_port);
+    let mut initial_members = std::collections::BTreeMap::new();
+    initial_members.insert(
+        raft_node_id,
+        openraft::BasicNode::new(&raft_addr),
+    );
+    let raft = picloud_cluster::create_raft_node(
+        raft_node_id,
+        &raft_addr,
+        Some(apply_cb),
+        Some(initial_members),
+    )
+    .await
+    .expect("failed to create Raft node");
+    let raft = Arc::new(raft);
+    cluster.set_raft(Arc::clone(&raft));
+    let raft_router = picloud_cluster::raft_rpc_router(Arc::clone(&raft));
+    info!(raft_node_id, "Raft consensus node started");
+
+    let cluster: Arc<dyn ClusterMembership> = Arc::new(cluster);
     info!(
         path = %config.events_path.display(),
         events = event_log.len().await,
@@ -353,7 +391,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             storage.clone(),
             scheduler.clone(),
         )
-        .with_ingress_table(ingress_table);
+        .with_ingress_table(ingress_table)
+        .with_extra_router(raft_router);
     if let Some(tls) = tls_config {
         http_server = http_server.with_tls_config(tls);
     }

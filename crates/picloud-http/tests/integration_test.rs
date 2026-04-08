@@ -283,6 +283,54 @@ impl picloud_domain::traits::IdentityProvider for FakeIam {
     ) -> picloud_domain::error::Result<picloud_domain::identity::AppRegistration> {
         Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
     }
+    async fn begin_registration(
+        &self,
+        _identity_iri: &picloud_domain::iri::ResourceIri,
+    ) -> picloud_domain::error::Result<(picloud_domain::identity::ChallengeId, picloud_domain::identity::RegistrationChallenge)> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn complete_registration(
+        &self,
+        _challenge_id: &str,
+        _response: picloud_domain::identity::RegistrationResponse,
+    ) -> picloud_domain::error::Result<picloud_domain::identity::RegisteredPasskey> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn begin_authentication(
+        &self,
+        _identity_iri: &picloud_domain::iri::ResourceIri,
+    ) -> picloud_domain::error::Result<(picloud_domain::identity::ChallengeId, picloud_domain::identity::AuthenticationChallenge)> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn complete_authentication(
+        &self,
+        _challenge_id: &str,
+        _response: picloud_domain::identity::AuthenticationResponse,
+    ) -> picloud_domain::error::Result<String> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn enroll_with_token(
+        &self,
+        _token: &str,
+    ) -> picloud_domain::error::Result<(picloud_domain::identity::ChallengeId, picloud_domain::identity::RegistrationChallenge)> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn begin_device_flow(&self) -> picloud_domain::error::Result<picloud_domain::identity::DeviceFlowResponse> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn poll_device_flow(
+        &self,
+        _device_code: &str,
+    ) -> picloud_domain::error::Result<picloud_domain::identity::DeviceFlowPollResult> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
+    async fn complete_device_flow(
+        &self,
+        _device_code: &str,
+        _identity_iri: &picloud_domain::iri::ResourceIri,
+    ) -> picloud_domain::error::Result<()> {
+        Err(picloud_domain::error::PiCloudError::Internal("not implemented".into()))
+    }
 }
 
 struct FakeStorage;

@@ -13,6 +13,7 @@ use picloud_domain::traits::{ClusterMembership, NodeInfo};
 
 use crate::discovery::{DiscoveryConfig, MdnsDiscovery};
 use crate::peers::PeerList;
+use crate::raft::{node_id_from_uuid, PiCloudRaft};
 
 /// Configuration for the cluster node.
 #[derive(Debug, Clone)]
@@ -27,8 +28,7 @@ pub struct ClusterConfig {
 /// Concrete implementation of ClusterMembership.
 ///
 /// Uses mDNS to discover peers on the local network and maintains a live
-/// peer list. Leadership is currently single-node (the first node considers
-/// itself leader). This will be replaced by Raft election in a follow-up.
+/// peer list. Leadership is determined by the Raft consensus protocol.
 pub struct MdnsCluster {
     config: ClusterConfig,
     peers: Arc<PeerList>,
@@ -36,6 +36,8 @@ pub struct MdnsCluster {
     iri_builder: IriBuilder,
     _browse_handle: Option<tokio::task::JoinHandle<()>>,
     _monitor_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Raft node handle — `None` until `set_raft` is called.
+    raft: Option<Arc<PiCloudRaft>>,
 }
 
 impl MdnsCluster {
@@ -72,12 +74,30 @@ impl MdnsCluster {
             iri_builder,
             _browse_handle: Some(browse_handle),
             _monitor_handle: Some(monitor_handle),
+            raft: None,
         })
     }
 
     /// Access the peer list directly.
     pub fn peers(&self) -> &Arc<PeerList> {
         &self.peers
+    }
+
+    /// Set the Raft handle after it has been created.
+    ///
+    /// This is called from the composition root after Raft is initialised.
+    pub fn set_raft(&mut self, raft: Arc<PiCloudRaft>) {
+        self.raft = Some(raft);
+    }
+
+    /// Return a reference to the Raft handle, if set.
+    pub fn raft(&self) -> Option<&Arc<PiCloudRaft>> {
+        self.raft.as_ref()
+    }
+
+    /// Return the `u64` Raft node ID derived from this node's UUID.
+    pub fn raft_node_id(&self) -> u64 {
+        node_id_from_uuid(&self.config.node_id)
     }
 
     /// Gracefully shut down mDNS and stop browsing.
@@ -89,21 +109,43 @@ impl MdnsCluster {
 #[async_trait]
 impl ClusterMembership for MdnsCluster {
     async fn is_leader(&self) -> bool {
-        // Temporary: leader if no peers or we are the lowest node_id
-        let peers = self.peers.all();
-        if peers.is_empty() {
-            return true;
+        if let Some(ref raft) = self.raft {
+            let my_id = self.raft_node_id();
+            raft.current_leader().await == Some(my_id)
+        } else {
+            // Fallback when Raft is not yet initialised
+            let peers = self.peers.all();
+            if peers.is_empty() {
+                return true;
+            }
+            peers.iter().all(|p| self.config.node_id < p.node_id)
         }
-        peers.iter().all(|p| self.config.node_id < p.node_id)
     }
 
     async fn leader_id(&self) -> Result<Uuid> {
+        if let Some(ref raft) = self.raft {
+            if let Some(_leader_raft_id) = raft.current_leader().await {
+                // In a real multi-node setup we would map the raft u64 ID
+                // back to a UUID. For now, if the Raft leader is us, return
+                // our UUID; otherwise fall through to the peer-based lookup.
+                let my_id = self.raft_node_id();
+                if _leader_raft_id == my_id {
+                    return Ok(self.config.node_id);
+                }
+                // Look up the leader UUID from peer list by matching raft node ID
+                for peer in self.peers.all() {
+                    if node_id_from_uuid(&peer.node_id) == _leader_raft_id {
+                        return Ok(peer.node_id);
+                    }
+                }
+            }
+        }
+
+        // Fallback: lowest UUID
         let peers = self.peers.all();
         if peers.is_empty() {
             return Ok(self.config.node_id);
         }
-
-        // Leader is the node with the lowest UUID (temporary until Raft)
         let min_peer = peers.iter().min_by_key(|p| p.node_id).unwrap();
         if self.config.node_id < min_peer.node_id {
             Ok(self.config.node_id)

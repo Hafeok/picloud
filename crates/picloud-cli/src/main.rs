@@ -163,7 +163,16 @@ enum CaCommands {
 
 #[derive(Subcommand)]
 enum SdkCommands {
-    /// Generate and publish SDKs from the cluster's live ontology
+    /// Generate SDKs from the cluster's live ontology
+    Generate {
+        /// Languages to generate (rust, typescript, dotnet)
+        #[arg(long, num_args = 1.., default_values = ["rust", "typescript", "dotnet"])]
+        languages: Vec<String>,
+        /// Output directory for generated SDKs
+        #[arg(long, default_value = "./generated-sdks")]
+        output: String,
+    },
+    /// Generate and optionally publish SDKs to package registries
     Publish {
         /// Languages to publish (rust, typescript, dotnet)
         #[arg(long, num_args = 1.., default_values = ["rust", "typescript", "dotnet"])]
@@ -171,6 +180,12 @@ enum SdkCommands {
         /// Registry override (defaults to crates.io / npm / NuGet)
         #[arg(long)]
         registry: Option<String>,
+        /// Actually publish (default is dry-run)
+        #[arg(long, default_value = "false")]
+        publish: bool,
+        /// Output directory for generated SDKs
+        #[arg(long, default_value = "./generated-sdks")]
+        output: String,
     },
 }
 
@@ -714,11 +729,116 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             IdentityCommands::Token => {
                 println!("Initiating device authentication flow...");
-                println!("Open the following URL in your browser:");
-                println!("  http://{}:{}/auth/device", cli.domain, cli.port);
-                println!("Waiting for authentication...");
-                // In a real implementation, this would poll for completion
-                eprintln!("Device flow not yet implemented — use browser enrollment");
+
+                // Step 1: Begin device flow
+                let begin_url = format!("http://{}:{}/auth/device/begin", cli.domain, cli.port);
+                match reqwest::Client::new()
+                    .post(&begin_url)
+                    .header("Content-Type", "application/json")
+                    .body("{}")
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        if !resp.status().is_success() {
+                            eprintln!("Failed to start device flow: HTTP {}", resp.status());
+                            return Ok(());
+                        }
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(flow) => {
+                                let device_code = flow["device_code"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let verification_url = flow["verification_url"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let interval = flow["interval_secs"].as_u64().unwrap_or(5);
+                                let expires_in = flow["expires_in_secs"].as_u64().unwrap_or(600);
+
+                                println!();
+                                println!("Open the following URL in your browser to authenticate:");
+                                println!("  {}", verification_url);
+                                println!();
+                                println!("Waiting for authentication (expires in {}s)...", expires_in);
+
+                                // Step 2: Poll for completion
+                                let poll_url = format!(
+                                    "http://{}:{}/auth/device/poll",
+                                    cli.domain, cli.port
+                                );
+                                let mut attempts = expires_in / interval;
+                                loop {
+                                    tokio::time::sleep(
+                                        std::time::Duration::from_secs(interval),
+                                    )
+                                    .await;
+                                    attempts = attempts.saturating_sub(1);
+                                    if attempts == 0 {
+                                        eprintln!("Device flow expired.");
+                                        break;
+                                    }
+
+                                    let poll_body =
+                                        json!({ "device_code": device_code });
+                                    match reqwest::Client::new()
+                                        .post(&poll_url)
+                                        .json(&poll_body)
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(poll_resp) => {
+                                            if let Ok(result) =
+                                                poll_resp.json::<serde_json::Value>().await
+                                            {
+                                                match result["status"].as_str() {
+                                                    Some("complete") => {
+                                                        let token = result["access_token"]
+                                                            .as_str()
+                                                            .unwrap_or_default();
+                                                        println!("Authentication successful.");
+                                                        println!();
+                                                        println!("Access token:");
+                                                        println!("  {}", token);
+                                                        println!();
+                                                        println!("Set this token for future CLI calls:");
+                                                        println!(
+                                                            "  export PICLOUD_TOKEN={}",
+                                                            token
+                                                        );
+                                                        break;
+                                                    }
+                                                    Some("expired") => {
+                                                        eprintln!("Device flow expired.");
+                                                        break;
+                                                    }
+                                                    Some("pending") => {
+                                                        // Still waiting
+                                                        eprint!(".");
+                                                    }
+                                                    _ => {
+                                                        eprintln!(
+                                                            "Unexpected poll response: {}",
+                                                            result
+                                                        );
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Poll failed: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to parse device flow response: {}", e),
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to start device flow: {}", e),
+                }
             }
         },
         Commands::Events { command } => match command {
@@ -817,27 +937,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Commands::Sdk { command } => match command {
+            SdkCommands::Generate {
+                languages,
+                output,
+            } => {
+                let output_dir = std::path::PathBuf::from(&output);
+                let domain = picloud_domain::iri::ClusterDomain(cli.domain.clone());
+                let generator = picloud_sdk_gen::SdkGenerator::new(domain, output_dir);
+
+                for lang_str in &languages {
+                    let language = match parse_sdk_language(lang_str) {
+                        Some(l) => l,
+                        None => {
+                            eprintln!("Unknown SDK language: {}", lang_str);
+                            continue;
+                        }
+                    };
+                    match generator.generate(language) {
+                        Ok(result) => {
+                            println!("Generated {} SDK at {}", language, result.output_path.display());
+                            for f in &result.files_generated {
+                                println!("  {}", f);
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to generate {} SDK: {}", lang_str, e),
+                    }
+                }
+            }
             SdkCommands::Publish {
                 languages,
                 registry,
+                publish,
+                output,
             } => {
-                println!("Generating SDKs for: {}", languages.join(", "));
-                if let Some(ref r) = registry {
-                    println!("  Registry: {}", r);
+                let dry_run = !publish;
+                let output_dir = std::path::PathBuf::from(&output);
+                let domain = picloud_domain::iri::ClusterDomain(cli.domain.clone());
+                let generator = picloud_sdk_gen::SdkGenerator::new(domain, output_dir);
+
+                if dry_run {
+                    println!("Dry-run mode (use --publish to actually publish)");
                 }
-                let payload = json!({
-                    "languages": languages,
-                    "registry": registry,
-                });
-                match client.post_command("SdkPublish", payload).await {
-                    Ok(_) => println!("SDKs published successfully"),
-                    Err(e) => eprintln!("SDK publish failed: {}", e),
+
+                for lang_str in &languages {
+                    let language = match parse_sdk_language(lang_str) {
+                        Some(l) => l,
+                        None => {
+                            eprintln!("Unknown SDK language: {}", lang_str);
+                            continue;
+                        }
+                    };
+                    match generator.publish(language, dry_run, registry.as_deref()) {
+                        Ok(result) => {
+                            println!(
+                                "{} {} SDK at {}",
+                                if dry_run { "Would publish" } else { "Published" },
+                                result.language,
+                                result.output_path.display(),
+                            );
+                            println!("  Command: {}", result.command);
+                        }
+                        Err(e) => eprintln!("Failed to publish {} SDK: {}", lang_str, e),
+                    }
                 }
             }
         },
     }
 
     Ok(())
+}
+
+/// Parse a language string into an SdkLanguage enum.
+fn parse_sdk_language(s: &str) -> Option<picloud_sdk_gen::SdkLanguage> {
+    match s.to_lowercase().as_str() {
+        "rust" => Some(picloud_sdk_gen::SdkLanguage::Rust),
+        "typescript" | "ts" => Some(picloud_sdk_gen::SdkLanguage::TypeScript),
+        "dotnet" | ".net" | "csharp" => Some(picloud_sdk_gen::SdkLanguage::DotNet),
+        _ => None,
+    }
 }
 
 /// Simple URL encoding for query parameters

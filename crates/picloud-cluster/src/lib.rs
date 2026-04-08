@@ -12,7 +12,13 @@
 pub mod discovery;
 pub mod implementation;
 pub mod peers;
+pub mod raft;
 
 pub use discovery::{DiscoveryConfig, MdnsDiscovery};
 pub use implementation::{ClusterConfig, MdnsCluster};
 pub use peers::{PeerInfo, PeerList};
+pub use raft::{
+    create_raft_node, node_id_from_uuid, raft_rpc_router, ApplyCallback, ClientRequest,
+    ClientResponse, HttpNetworkFactory, MemLogStore, MemStateMachine, PiCloudRaft,
+    PiCloudTypeConfig,
+};

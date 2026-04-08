@@ -6,4 +6,4 @@
 
 pub mod implementation;
 
-pub use implementation::{SdkGenerator, SdkGenerationResult, SdkLanguage};
+pub use implementation::{SdkGenerator, SdkGenerationResult, SdkLanguage, SdkPublishResult};

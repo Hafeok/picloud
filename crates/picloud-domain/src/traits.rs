@@ -105,6 +105,61 @@ pub trait IdentityProvider: Send + Sync {
         redirect_uris: Vec<String>,
         scopes: Vec<String>,
     ) -> Result<crate::identity::AppRegistration>;
+
+    // ---- WebAuthn / passkey ceremonies ----
+
+    /// Begin a passkey registration ceremony for a human identity.
+    /// Returns a challenge ID (to correlate begin/complete) and the options for the client.
+    async fn begin_registration(
+        &self,
+        identity_iri: &ResourceIri,
+    ) -> Result<(crate::identity::ChallengeId, crate::identity::RegistrationChallenge)>;
+
+    /// Complete a passkey registration ceremony.
+    /// Validates the challenge and stores the new credential.
+    async fn complete_registration(
+        &self,
+        challenge_id: &str,
+        response: crate::identity::RegistrationResponse,
+    ) -> Result<crate::identity::RegisteredPasskey>;
+
+    /// Begin a passkey authentication ceremony for a human identity.
+    /// Returns a challenge ID and the options (including allowed credential IDs).
+    async fn begin_authentication(
+        &self,
+        identity_iri: &ResourceIri,
+    ) -> Result<(crate::identity::ChallengeId, crate::identity::AuthenticationChallenge)>;
+
+    /// Complete a passkey authentication ceremony.
+    /// Verifies the signed challenge, returns an access token on success.
+    async fn complete_authentication(
+        &self,
+        challenge_id: &str,
+        response: crate::identity::AuthenticationResponse,
+    ) -> Result<String>;
+
+    /// Exchange an enrollment token (bootstrap/recovery) for a registration challenge.
+    /// The token is validated and marked as used.
+    async fn enroll_with_token(
+        &self,
+        token: &str,
+    ) -> Result<(crate::identity::ChallengeId, crate::identity::RegistrationChallenge)>;
+
+    /// Begin a device flow — returns a device code and verification URL.
+    async fn begin_device_flow(&self) -> Result<crate::identity::DeviceFlowResponse>;
+
+    /// Poll a device flow — returns pending, complete (with token), or expired.
+    async fn poll_device_flow(
+        &self,
+        device_code: &str,
+    ) -> Result<crate::identity::DeviceFlowPollResult>;
+
+    /// Mark a device flow as authenticated (called after the user completes passkey auth in the browser).
+    async fn complete_device_flow(
+        &self,
+        device_code: &str,
+        identity_iri: &ResourceIri,
+    ) -> Result<()>;
 }
 
 #[derive(Debug, Clone)]

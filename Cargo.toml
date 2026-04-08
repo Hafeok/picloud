@@ -39,7 +39,7 @@ async-trait  = "0.1"
 futures      = "0.3"
 
 # Raft consensus
-openraft     = { version = "0.9", features = ["serde"] }
+openraft     = { version = "0.9", features = ["serde", "storage-v2"] }
 
 # RDF / SPARQL
 oxigraph     = { version = "0.4", default-features = false }

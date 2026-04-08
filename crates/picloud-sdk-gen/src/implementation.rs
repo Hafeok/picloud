@@ -37,6 +37,15 @@ pub struct SdkGenerationResult {
     pub files_generated: Vec<String>,
 }
 
+/// Result of publishing an SDK to a package registry.
+#[derive(Debug, Clone)]
+pub struct SdkPublishResult {
+    pub language: SdkLanguage,
+    pub output_path: PathBuf,
+    pub dry_run: bool,
+    pub command: String,
+}
+
 /// Generates typed SDK clients from template files.
 pub struct SdkGenerator {
     pub cluster_domain: ClusterDomain,
@@ -66,6 +75,104 @@ impl SdkGenerator {
         let mut results = Vec::with_capacity(languages.len());
         for lang in languages {
             results.push(self.generate(lang)?);
+        }
+        Ok(results)
+    }
+
+    /// Publish a previously generated SDK to its package registry.
+    ///
+    /// When `dry_run` is true (the default), the publish command is constructed
+    /// but not executed. Set `dry_run` to false (via `--publish` flag) to
+    /// actually run the registry publish command.
+    ///
+    /// - Rust:       `cargo publish` in the generated crate directory
+    /// - TypeScript: `npm publish` in the generated package directory
+    /// - .NET:       `dotnet nuget push` in the generated package directory
+    pub fn publish(
+        &self,
+        language: SdkLanguage,
+        dry_run: bool,
+        registry: Option<&str>,
+    ) -> Result<SdkPublishResult> {
+        // Ensure the SDK has been generated first
+        let gen_result = self.generate(language)?;
+
+        let command = match language {
+            SdkLanguage::Rust => {
+                let mut cmd = "cargo publish".to_string();
+                if dry_run {
+                    cmd.push_str(" --dry-run");
+                }
+                if let Some(reg) = registry {
+                    cmd.push_str(&format!(" --registry {}", reg));
+                }
+                cmd
+            }
+            SdkLanguage::TypeScript => {
+                let mut cmd = "npm publish".to_string();
+                if dry_run {
+                    cmd.push_str(" --dry-run");
+                }
+                if let Some(reg) = registry {
+                    cmd.push_str(&format!(" --registry {}", reg));
+                }
+                cmd
+            }
+            SdkLanguage::DotNet => {
+                let nupkg_pattern = gen_result.output_path.join("*.nupkg");
+                let mut cmd = format!(
+                    "dotnet nuget push {}",
+                    nupkg_pattern.display()
+                );
+                if let Some(reg) = registry {
+                    cmd.push_str(&format!(" --source {}", reg));
+                } else {
+                    cmd.push_str(" --source https://api.nuget.org/v3/index.json");
+                }
+                if dry_run {
+                    // dotnet nuget push has no built-in dry-run; we just skip execution
+                    cmd.push_str(" # (dry-run — not executed)");
+                }
+                cmd
+            }
+        };
+
+        if !dry_run {
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .current_dir(&gen_result.output_path)
+                .output()
+                .map_err(|e| PiCloudError::Internal(format!(
+                    "Failed to run publish command for {}: {}", language, e
+                )))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(PiCloudError::Internal(format!(
+                    "Publish failed for {}: {}", language, stderr
+                )));
+            }
+        }
+
+        Ok(SdkPublishResult {
+            language,
+            output_path: gen_result.output_path,
+            dry_run,
+            command,
+        })
+    }
+
+    /// Publish SDKs for all supported languages.
+    pub fn publish_all(
+        &self,
+        dry_run: bool,
+        registry: Option<&str>,
+    ) -> Result<Vec<SdkPublishResult>> {
+        let languages = [SdkLanguage::Rust, SdkLanguage::TypeScript, SdkLanguage::DotNet];
+        let mut results = Vec::with_capacity(languages.len());
+        for lang in languages {
+            results.push(self.publish(lang, dry_run, registry)?);
         }
         Ok(results)
     }
@@ -488,6 +595,81 @@ mod tests {
         assert!(output.join("rust/Cargo.toml").exists());
         assert!(output.join("typescript/package.json").exists());
         assert!(output.join("dotnet/PiCloud.Sdk.csproj").exists());
+
+        cleanup(&output);
+    }
+
+    #[test]
+    fn test_publish_rust_dry_run() {
+        let output = temp_output_dir();
+        let gen = SdkGenerator::new(ClusterDomain::default(), output.clone());
+
+        let result = gen.publish(SdkLanguage::Rust, true, None).unwrap();
+
+        assert_eq!(result.language, SdkLanguage::Rust);
+        assert!(result.dry_run);
+        assert!(result.command.contains("cargo publish"));
+        assert!(result.command.contains("--dry-run"));
+        // Verify the SDK was generated as part of publish
+        assert!(output.join("rust/Cargo.toml").exists());
+
+        cleanup(&output);
+    }
+
+    #[test]
+    fn test_publish_typescript_dry_run() {
+        let output = temp_output_dir();
+        let gen = SdkGenerator::new(ClusterDomain::default(), output.clone());
+
+        let result = gen.publish(SdkLanguage::TypeScript, true, None).unwrap();
+
+        assert!(result.dry_run);
+        assert!(result.command.contains("npm publish"));
+        assert!(result.command.contains("--dry-run"));
+
+        cleanup(&output);
+    }
+
+    #[test]
+    fn test_publish_dotnet_dry_run() {
+        let output = temp_output_dir();
+        let gen = SdkGenerator::new(ClusterDomain::default(), output.clone());
+
+        let result = gen.publish(SdkLanguage::DotNet, true, None).unwrap();
+
+        assert!(result.dry_run);
+        assert!(result.command.contains("dotnet nuget push"));
+        assert!(result.command.contains("dry-run"));
+
+        cleanup(&output);
+    }
+
+    #[test]
+    fn test_publish_with_custom_registry() {
+        let output = temp_output_dir();
+        let gen = SdkGenerator::new(ClusterDomain::default(), output.clone());
+
+        let result = gen.publish(SdkLanguage::Rust, true, Some("my-registry")).unwrap();
+        assert!(result.command.contains("--registry my-registry"));
+
+        let result = gen.publish(SdkLanguage::TypeScript, true, Some("https://npm.example.com")).unwrap();
+        assert!(result.command.contains("--registry https://npm.example.com"));
+
+        let result = gen.publish(SdkLanguage::DotNet, true, Some("https://nuget.example.com")).unwrap();
+        assert!(result.command.contains("--source https://nuget.example.com"));
+
+        cleanup(&output);
+    }
+
+    #[test]
+    fn test_publish_all_dry_run() {
+        let output = temp_output_dir();
+        let gen = SdkGenerator::new(ClusterDomain::default(), output.clone());
+
+        let results = gen.publish_all(true, None).unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r.dry_run));
 
         cleanup(&output);
     }

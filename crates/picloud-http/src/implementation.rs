@@ -143,6 +143,7 @@ pub struct PiCloudHttpServer {
     pub scheduler: Option<Arc<dyn WorkloadScheduler>>,
     pub ingress_routes: IngressTable,
     pub tls_config: Option<rustls::ServerConfig>,
+    pub extra_router: Option<Router>,
 }
 
 impl PiCloudHttpServer {
@@ -158,6 +159,7 @@ impl PiCloudHttpServer {
             scheduler: None,
             ingress_routes: new_ingress_table(),
             tls_config: None,
+            extra_router: None,
         }
     }
 
@@ -192,12 +194,18 @@ impl PiCloudHttpServer {
         self
     }
 
+    /// Merge additional routes into the HTTP server (e.g. Raft RPC endpoints).
+    pub fn with_extra_router(mut self, router: Router) -> Self {
+        self.extra_router = Some(router);
+        self
+    }
+
     /// Build the axum [`Router`] with all platform routes.
     pub fn build_router(&self) -> Router {
         let iri_builder = IriBuilder::new(self.cluster_domain.clone());
         let cluster_root_iri = iri_builder.cluster_root().to_string();
 
-        Router::new()
+        let mut router = Router::new()
             .route("/", get(handle_cluster_root))
             .route("/health", get(handle_health))
             .route("/nodes", get(handle_nodes))
@@ -234,6 +242,13 @@ impl PiCloudHttpServer {
             .route("/.well-known/jwks.json", get(handle_jwks))
             .route("/auth/token", post(handle_token))
             .route("/auth/authorize", get(handle_authorize))
+            .route("/auth/register/begin", post(handle_register_begin))
+            .route("/auth/register/complete", post(handle_register_complete))
+            .route("/auth/login/begin", post(handle_login_begin))
+            .route("/auth/login/complete", post(handle_login_complete))
+            .route("/auth/enroll", post(handle_enroll))
+            .route("/auth/device/begin", post(handle_device_begin))
+            .route("/auth/device/poll", post(handle_device_poll))
             .fallback(handle_ingress_proxy)
             .with_state(AppState {
                 cluster_root_iri,
@@ -243,7 +258,14 @@ impl PiCloudHttpServer {
                 cluster: self.cluster.clone(),
                 iam: self.iam.clone(),
                 ingress_routes: self.ingress_routes.clone(),
-            })
+            });
+
+        // Merge any extra routes (e.g. Raft RPC endpoints from picloud-cluster)
+        if let Some(extra) = &self.extra_router {
+            router = router.merge(extra.clone());
+        }
+
+        router
     }
 
     /// Bind to the configured address and start serving.
@@ -1533,10 +1555,10 @@ async fn handle_token(
     }
 }
 
-/// GET /auth/authorize — Authorization endpoint stub (Phase 2)
+/// GET /auth/authorize — Authorization endpoint.
 ///
-/// Full WebAuthn/passkey ceremony is Phase 3. For now, return a JSON
-/// response indicating that passkey authentication is required.
+/// Returns WebAuthn passkey authentication info. Browser clients use this
+/// to discover the passkey registration/authentication endpoints.
 async fn handle_authorize(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Response {
@@ -1546,12 +1568,326 @@ async fn handle_authorize(
         Json(serde_json::json!({
             "status": "authentication_required",
             "method": "passkey",
-            "message": "WebAuthn/FIDO2 passkey authentication is required. Full ceremony available in Phase 3.",
+            "message": "WebAuthn/FIDO2 passkey authentication is required.",
             "issuer": issuer,
-            "authorize_endpoint": format!("{}/auth/authorize", issuer),
+            "register_begin": format!("{}/auth/register/begin", issuer),
+            "register_complete": format!("{}/auth/register/complete", issuer),
+            "login_begin": format!("{}/auth/login/begin", issuer),
+            "login_complete": format!("{}/auth/login/complete", issuer),
+            "enroll": format!("{}/auth/enroll", issuer),
+            "device_begin": format!("{}/auth/device/begin", issuer),
+            "device_poll": format!("{}/auth/device/poll", issuer),
         })),
     )
         .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// WebAuthn / Passkey Handlers
+// ---------------------------------------------------------------------------
+
+/// POST /auth/register/begin — start passkey registration
+#[derive(Deserialize)]
+struct RegisterBeginRequest {
+    /// The identity IRI to register a passkey for.
+    identity_iri: String,
+}
+
+async fn handle_register_begin(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<RegisterBeginRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    let identity_iri = match ResourceIri::new(&req.identity_iri) {
+        Ok(iri) => iri,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid IRI: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    match iam.begin_registration(&identity_iri).await {
+        Ok((challenge_id, options)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "challenge_id": challenge_id,
+                "options": serde_json::to_value(&options).unwrap_or_default(),
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/register/complete — complete passkey registration
+#[derive(Deserialize)]
+struct RegisterCompleteRequest {
+    challenge_id: String,
+    credential_id: String,
+    public_key: String,
+    attestation: Option<String>,
+    aaguid: Option<String>,
+    display_name: Option<String>,
+}
+
+async fn handle_register_complete(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<RegisterCompleteRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    let response = picloud_domain::identity::RegistrationResponse {
+        credential_id: req.credential_id,
+        public_key: req.public_key,
+        attestation: req.attestation,
+        aaguid: req.aaguid,
+        display_name: req.display_name,
+    };
+
+    match iam.complete_registration(&req.challenge_id, response).await {
+        Ok(passkey) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "registered",
+                "credential_id": passkey.credential_id,
+                "registered_at": passkey.registered_at.to_rfc3339(),
+            })),
+        )
+            .into_response(),
+        Err(picloud_domain::error::PiCloudError::PasskeyChallengeFailed { reason }) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/login/begin — start passkey authentication
+#[derive(Deserialize)]
+struct LoginBeginRequest {
+    identity_iri: String,
+}
+
+async fn handle_login_begin(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<LoginBeginRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    let identity_iri = match ResourceIri::new(&req.identity_iri) {
+        Ok(iri) => iri,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid IRI: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    match iam.begin_authentication(&identity_iri).await {
+        Ok((challenge_id, options)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "challenge_id": challenge_id,
+                "options": serde_json::to_value(&options).unwrap_or_default(),
+            })),
+        )
+            .into_response(),
+        Err(picloud_domain::error::PiCloudError::PasskeyChallengeFailed { reason }) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/login/complete — complete passkey authentication
+#[derive(Deserialize)]
+struct LoginCompleteRequest {
+    challenge_id: String,
+    credential_id: String,
+    signature: String,
+    authenticator_data: Option<String>,
+    client_data_json: Option<String>,
+}
+
+async fn handle_login_complete(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<LoginCompleteRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    let response = picloud_domain::identity::AuthenticationResponse {
+        credential_id: req.credential_id,
+        signature: req.signature,
+        authenticator_data: req.authenticator_data,
+        client_data_json: req.client_data_json,
+    };
+
+    match iam.complete_authentication(&req.challenge_id, response).await {
+        Ok(token) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "access_token": token,
+                "token_type": "Bearer",
+            })),
+        )
+            .into_response(),
+        Err(picloud_domain::error::PiCloudError::PasskeyChallengeFailed { reason }) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/enroll — exchange an enrollment token for a registration challenge
+#[derive(Deserialize)]
+struct EnrollRequest {
+    token: String,
+}
+
+async fn handle_enroll(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<EnrollRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    match iam.enroll_with_token(&req.token).await {
+        Ok((challenge_id, options)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "challenge_id": challenge_id,
+                "options": serde_json::to_value(&options).unwrap_or_default(),
+            })),
+        )
+            .into_response(),
+        Err(picloud_domain::error::PiCloudError::PasskeyChallengeFailed { reason }) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/device/begin — start a device flow (CLI uses this)
+async fn handle_device_begin(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    match iam.begin_device_flow().await {
+        Ok(flow) => {
+            let body = serde_json::to_value(&flow).unwrap_or_default();
+            (StatusCode::OK, Json(body)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/device/poll — poll a device flow for completion
+#[derive(Deserialize)]
+struct DevicePollRequest {
+    device_code: String,
+}
+
+async fn handle_device_poll(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<DevicePollRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    match iam.poll_device_flow(&req.device_code).await {
+        Ok(result) => {
+            let body = serde_json::to_value(&result).unwrap_or_default();
+            (StatusCode::OK, Json(body)).into_response()
+        }
+        Err(picloud_domain::error::PiCloudError::PasskeyChallengeFailed { reason }) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
