@@ -7,9 +7,10 @@ use async_trait::async_trait;
 use tracing::info;
 use uuid::Uuid;
 
-use picloud_domain::error::Result;
+use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::iri::{ClusterDomain, IriBuilder};
-use picloud_domain::traits::{ClusterMembership, NodeInfo};
+use picloud_domain::resources::ClusterIdentity;
+use picloud_domain::traits::{ClusterIdentityStore, ClusterMembership, NodeInfo};
 
 use crate::discovery::{DiscoveryConfig, MdnsDiscovery};
 use crate::peers::PeerList;
@@ -54,6 +55,8 @@ impl MdnsCluster {
             node_name: config.node_name.clone(),
             http_port: config.http_port,
             bind_addr: config.bind_addr,
+            cluster_domain: Some(config.cluster_domain.0.clone()),
+            cluster_id: None, // Set after cluster identity is established
         };
 
         let discovery = MdnsDiscovery::new(discovery_config, Arc::clone(&peers))?;
@@ -181,6 +184,84 @@ impl ClusterMembership for MdnsCluster {
 
     async fn local_node_id(&self) -> Uuid {
         self.config.node_id
+    }
+}
+
+/// In-memory cluster identity store (ADR-042).
+///
+/// Stores the cluster identity that is established at `cluster init`.
+/// Once set, the identity is immutable for the lifetime of the cluster.
+pub struct InMemoryClusterIdentityStore {
+    identity: tokio::sync::RwLock<Option<ClusterIdentity>>,
+}
+
+impl InMemoryClusterIdentityStore {
+    pub fn new() -> Self {
+        Self {
+            identity: tokio::sync::RwLock::new(None),
+        }
+    }
+}
+
+impl Default for InMemoryClusterIdentityStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ClusterIdentityStore for InMemoryClusterIdentityStore {
+    async fn initialize(&self, identity: ClusterIdentity) -> Result<()> {
+        let mut guard = self.identity.write().await;
+        if let Some(ref existing) = *guard {
+            return Err(PiCloudError::ClusterAlreadyInitialized {
+                cluster_id: existing.cluster_id.to_string(),
+            });
+        }
+        info!(
+            cluster_id = %identity.cluster_id,
+            domain = %identity.domain.0,
+            "Cluster identity established"
+        );
+        *guard = Some(identity);
+        Ok(())
+    }
+
+    async fn get(&self) -> Result<Option<ClusterIdentity>> {
+        let guard = self.identity.read().await;
+        Ok(guard.clone())
+    }
+
+    async fn validate_node_join(
+        &self,
+        _node_id: Uuid,
+        ca_fingerprint: &str,
+        cluster_id: Uuid,
+    ) -> Result<()> {
+        let guard = self.identity.read().await;
+        let identity = guard.as_ref().ok_or_else(|| PiCloudError::Internal(
+            "Cluster identity not yet initialized".to_string(),
+        ))?;
+
+        if identity.cluster_id != cluster_id {
+            return Err(PiCloudError::NodeJoinRejected {
+                reason: format!(
+                    "Cluster ID mismatch: expected {}, got {}",
+                    identity.cluster_id, cluster_id
+                ),
+            });
+        }
+
+        if identity.ca_fingerprint != ca_fingerprint {
+            return Err(PiCloudError::NodeJoinRejected {
+                reason: format!(
+                    "CA fingerprint mismatch: expected {}, got {}",
+                    identity.ca_fingerprint, ca_fingerprint
+                ),
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -312,5 +393,91 @@ mod tests {
         async fn local_node_id(&self) -> Uuid {
             self.config.node_id
         }
+    }
+
+    #[tokio::test]
+    async fn test_cluster_identity_store_initialize() {
+        let store = InMemoryClusterIdentityStore::new();
+        assert!(store.get().await.unwrap().is_none());
+
+        let identity = ClusterIdentity {
+            cluster_id: Uuid::new_v4(),
+            domain: ClusterDomain::default(),
+            created_at: chrono::Utc::now(),
+            ca_fingerprint: "sha256:abc123".to_string(),
+        };
+        store.initialize(identity.clone()).await.unwrap();
+
+        let stored = store.get().await.unwrap().unwrap();
+        assert_eq!(stored.cluster_id, identity.cluster_id);
+        assert_eq!(stored.ca_fingerprint, "sha256:abc123");
+    }
+
+    #[tokio::test]
+    async fn test_cluster_identity_store_double_init_fails() {
+        let store = InMemoryClusterIdentityStore::new();
+        let identity = ClusterIdentity {
+            cluster_id: Uuid::new_v4(),
+            domain: ClusterDomain::default(),
+            created_at: chrono::Utc::now(),
+            ca_fingerprint: "sha256:abc".to_string(),
+        };
+        store.initialize(identity.clone()).await.unwrap();
+        // Second init must fail
+        let result = store.initialize(identity).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_node_join_success() {
+        let store = InMemoryClusterIdentityStore::new();
+        let cluster_id = Uuid::new_v4();
+        let identity = ClusterIdentity {
+            cluster_id,
+            domain: ClusterDomain::default(),
+            created_at: chrono::Utc::now(),
+            ca_fingerprint: "sha256:abc".to_string(),
+        };
+        store.initialize(identity).await.unwrap();
+
+        let result = store
+            .validate_node_join(Uuid::new_v4(), "sha256:abc", cluster_id)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_node_join_wrong_cluster_id() {
+        let store = InMemoryClusterIdentityStore::new();
+        let identity = ClusterIdentity {
+            cluster_id: Uuid::new_v4(),
+            domain: ClusterDomain::default(),
+            created_at: chrono::Utc::now(),
+            ca_fingerprint: "sha256:abc".to_string(),
+        };
+        store.initialize(identity).await.unwrap();
+
+        let result = store
+            .validate_node_join(Uuid::new_v4(), "sha256:abc", Uuid::new_v4())
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_node_join_wrong_fingerprint() {
+        let store = InMemoryClusterIdentityStore::new();
+        let cluster_id = Uuid::new_v4();
+        let identity = ClusterIdentity {
+            cluster_id,
+            domain: ClusterDomain::default(),
+            created_at: chrono::Utc::now(),
+            ca_fingerprint: "sha256:correct".to_string(),
+        };
+        store.initialize(identity).await.unwrap();
+
+        let result = store
+            .validate_node_join(Uuid::new_v4(), "sha256:wrong", cluster_id)
+            .await;
+        assert!(result.is_err());
     }
 }

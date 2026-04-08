@@ -79,6 +79,11 @@ enum Commands {
         #[command(subcommand)]
         command: TagCommands,
     },
+    /// Alert management (ADR-041)
+    Alerts {
+        #[command(subcommand)]
+        command: AlertCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -242,6 +247,19 @@ enum TagCommands {
     Find {
         /// Tag in key=value format
         tag: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AlertCommands {
+    /// List active alerts across the cluster
+    List {
+        /// Filter by severity (info, warning, critical)
+        #[arg(long)]
+        severity: Option<String>,
+        /// Filter by resource IRI or path
+        #[arg(long)]
+        resource: Option<String>,
     },
 }
 
@@ -464,31 +482,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Cluster { command } => match command {
             ClusterCommands::Init { domain, ca_cert } => {
-                println!("PiCloud Cluster Bootstrap");
-                println!("=========================");
+                println!("PiCloud Cluster Bootstrap (ADR-042)");
+                println!("===================================");
                 println!();
-                println!("The PiCloud cluster auto-starts when the picloud-server binary runs.");
-                println!("Nodes discover each other via mDNS and form a Raft cluster automatically.");
-                println!();
-                println!("Configuration:");
-                println!("  Domain:  {}", domain);
-                if let Some(ref cert) = ca_cert {
-                    println!("  CA cert: {} (bring-your-own)", cert);
-                } else {
-                    println!("  CA cert: auto-generated (platform CA)");
+
+                // Try to fetch existing cluster identity from the server
+                match client.get("/cluster/identity").await {
+                    Ok(identity) => {
+                        // Cluster already initialized — display identity
+                        let cluster_id = identity.get("cluster_id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        let id_domain = identity.get("domain").and_then(|v| v.as_str()).unwrap_or(&domain);
+                        let fingerprint = identity.get("ca_fingerprint").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        let created_at = identity.get("created_at").and_then(|v| v.as_str()).unwrap_or("unknown");
+
+                        println!("Cluster Identity (already initialized):");
+                        println!("  Cluster ID:      {}", cluster_id);
+                        println!("  Domain:          {}", id_domain);
+                        println!("  CA Fingerprint:  {}", fingerprint);
+                        println!("  Created:         {}", created_at);
+                        println!();
+                        println!("This cluster is already initialized. The identity is immutable.");
+                    }
+                    Err(_) => {
+                        // Cluster not yet initialized or server unreachable — display instructions
+                        let cluster_id = Uuid::new_v4();
+                        println!("Initializing new cluster identity...");
+                        println!();
+                        println!("Configuration:");
+                        println!("  Cluster ID:  {}", cluster_id);
+                        println!("  Domain:      {}", domain);
+                        if let Some(ref cert) = ca_cert {
+                            println!("  CA cert:     {} (bring-your-own)", cert);
+                        } else {
+                            println!("  CA cert:     auto-generated (platform CA)");
+                        }
+                        println!();
+                        println!("To start the cluster on this node:");
+                        println!("  picloud-server");
+                        println!("  Environment:");
+                        println!("    PICLOUD_DOMAIN={}", domain);
+                        if let Some(ref cert) = ca_cert {
+                            println!("    PICLOUD_CA_CERT={}", cert);
+                        }
+                        println!();
+                        println!("On additional nodes, run picloud-server with the same domain.");
+                        println!("They will discover this cluster via mDNS and join automatically.");
+                        println!("Nodes advertising a different domain are invisible (ADR-042).");
+                        println!();
+                        println!("Once running, check cluster status with:");
+                        println!("  picloud --port {} cluster status", cli.port);
+                    }
                 }
-                println!();
-                println!("To start the cluster on this node:");
-                println!("  picloud-server --domain {}", domain);
-                if let Some(ref cert) = ca_cert {
-                    println!("    --ca-cert {}", cert);
-                }
-                println!();
-                println!("On additional nodes, just run picloud-server with the same domain.");
-                println!("They will discover the existing cluster via mDNS and join automatically.");
-                println!();
-                println!("Once running, check cluster status with:");
-                println!("  picloud --port {} cluster status", cli.port);
             }
             ClusterCommands::Recover => {
                 println!("Initiating physical recovery...");
@@ -1276,6 +1320,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Err(e) => eprintln!("Failed to find resources: {}", e),
+                }
+            }
+        },
+        Commands::Alerts { command } => match command {
+            AlertCommands::List { severity, resource } => {
+                // Query the graph for active picloud:Alert triples (ADR-041)
+                let sparql = r#"
+                    SELECT ?resource ?type ?severity ?message ?timestamp
+                    WHERE {
+                        ?alert a <https://picloud.local/ontology#Alert> ;
+                               <https://picloud.local/ontology#alertResource> ?resource ;
+                               <https://picloud.local/ontology#alertType> ?type ;
+                               <https://picloud.local/ontology#alertSeverity> ?severity ;
+                               <https://picloud.local/ontology#alertMessage> ?message ;
+                               <https://picloud.local/ontology#alertTimestamp> ?timestamp .
+                    }
+                    ORDER BY DESC(?timestamp)
+                "#;
+
+                let path = format!("/graph?query={}", urlencoding(sparql));
+                match client.get(&path).await {
+                    Ok(body) => {
+                        if let Some(bindings) = body.get("bindings").and_then(|v| v.as_array()) {
+                            // Filter by severity if specified
+                            let filtered: Vec<&serde_json::Value> = bindings
+                                .iter()
+                                .filter(|b| {
+                                    if let Some(ref sev) = severity {
+                                        b.get("severity")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s == sev.as_str())
+                                            .unwrap_or(false)
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .filter(|b| {
+                                    if let Some(ref res) = resource {
+                                        b.get("resource")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.contains(res.as_str()))
+                                            .unwrap_or(false)
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .collect();
+
+                            if filtered.is_empty() {
+                                println!("No active alerts.");
+                            } else {
+                                println!("Active Alerts ({}):", filtered.len());
+                                println!("  {:<10} {:<25} {:<40} {}", "SEVERITY", "TYPE", "RESOURCE", "MESSAGE");
+                                println!("  {:<10} {:<25} {:<40} {}", "--------", "----", "--------", "-------");
+                                for alert in &filtered {
+                                    let sev = alert.get("severity").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let atype = alert.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let res = alert.get("resource").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let msg = alert.get("message").and_then(|v| v.as_str()).unwrap_or("?");
+                                    println!("  {:<10} {:<25} {:<40} {}", sev, atype, res, msg);
+                                }
+                            }
+                        } else {
+                            // Fallback: try /api/alerts endpoint
+                            match client.get("/api/alerts").await {
+                                Ok(alerts_body) => {
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&alerts_body).unwrap_or_default()
+                                    );
+                                }
+                                Err(e) => eprintln!("Failed to query alerts: {}", e),
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to query alerts: {}", e),
                 }
             }
         },

@@ -30,4 +30,5 @@ tracing-subscriber = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { workspace = true }
 uuid               = { workspace = true }
+chrono             = { workspace = true }
 openraft           = { workspace = true }

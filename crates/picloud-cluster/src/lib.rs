@@ -14,8 +14,8 @@ pub mod implementation;
 pub mod peers;
 pub mod raft;
 
-pub use discovery::{DiscoveryConfig, MdnsDiscovery};
-pub use implementation::{ClusterConfig, MdnsCluster};
+pub use discovery::{service_type_for_domain, DiscoveryConfig, MdnsDiscovery};
+pub use implementation::{ClusterConfig, InMemoryClusterIdentityStore, MdnsCluster};
 pub use peers::{PeerInfo, PeerList};
 pub use raft::{
     create_raft_node, node_id_from_uuid, raft_rpc_router, ApplyCallback, ClientRequest,

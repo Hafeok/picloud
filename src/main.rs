@@ -15,18 +15,19 @@ use uuid::Uuid;
 
 use picloud_domain::iri::ClusterDomain;
 use picloud_domain::traits::{
-    ClusterMembership, DnsRegistry, EventFilter, EventLog, IdentityProvider,
-    SecretStore, StateProjector, StorageBackend, WorkloadScheduler,
+    ClusterIdentityStore, ClusterMembership, DnsRegistry, EventFilter,
+    EventLog, IdentityProvider, SecretStore, StateProjector, StorageBackend,
+    WorkloadScheduler,
 };
 
-use picloud_cluster::{ClusterConfig, MdnsCluster};
+use picloud_cluster::{ClusterConfig, InMemoryClusterIdentityStore, MdnsCluster};
 use picloud_events::PersistentEventLog;
 use picloud_iam::{InMemorySecretStore, LocalIdentityProvider};
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
 use picloud_storage::LocalStorageBackend;
 use picloud_workload::ProcessScheduler;
-use picloud_http::{MetricsAgent, PiCloudHttpServer, Provisioner};
+use picloud_http::{InferenceEngine, MetricsAgent, PiCloudHttpServer, Provisioner};
 
 /// Server configuration, loaded from env or defaults
 struct ServerConfig {
@@ -358,7 +359,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("NodeJoined event emitted");
     }
 
-    // 10b. Start metrics agent (ADR-040)
+    // 10b. Establish cluster identity (ADR-042)
+    let identity_store = Arc::new(InMemoryClusterIdentityStore::new());
+    {
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let ca_fingerprint = ca.fingerprint().unwrap_or_else(|_| "unknown".to_string());
+        let cluster_id = config.node_id; // Use node ID as cluster ID for single-node bootstrap
+        let identity = picloud_domain::resources::ClusterIdentity {
+            cluster_id,
+            domain: config.cluster_domain.clone(),
+            created_at: chrono::Utc::now(),
+            ca_fingerprint: ca_fingerprint.clone(),
+        };
+
+        match identity_store.initialize(identity).await {
+            Ok(()) => {
+                // Emit ClusterInitialized event
+                let init_event = picloud_domain::events::EventEnvelope::new(
+                    iri_builder.event_schema("ClusterInitialized", 1),
+                    "ClusterInitialized",
+                    iri_builder.cluster_identity(),
+                    None,
+                    Uuid::new_v4(),
+                    serde_json::json!({
+                        "cluster_id": cluster_id.to_string(),
+                        "domain": config.cluster_domain.0,
+                        "ca_fingerprint": ca_fingerprint,
+                    }),
+                );
+                event_log_trait.append(init_event).await?;
+                info!(
+                    cluster_id = %cluster_id,
+                    domain = %config.cluster_domain.0,
+                    ca_fingerprint = %ca_fingerprint,
+                    "Cluster identity established"
+                );
+            }
+            Err(e) => {
+                info!("Cluster identity already established: {}", e);
+            }
+        }
+    }
+    let _identity_store: Arc<dyn ClusterIdentityStore> = identity_store;
+
+    // 10c. Register built-in alert rules (ADR-041)
+    {
+        let rules = picloud_domain::resources::builtin_alert_rules();
+        info!(
+            rule_count = rules.len(),
+            "Built-in alert rules registered"
+        );
+        for rule in &rules {
+            info!(
+                rule = rule.name,
+                alert_type = rule.alert_type,
+                threshold = rule.threshold,
+                severity = %rule.severity,
+                "Registered alert rule"
+            );
+        }
+    }
+
+    // 10d. Start metrics agent (ADR-040)
     {
         let metrics_interval_secs: u64 = std::env::var("PICLOUD_METRICS_INTERVAL")
             .ok()
@@ -397,6 +459,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .expect("failed to start resource provisioner");
         info!("Resource provisioner started");
+    }
+
+    // 12b. Start inference engine (ADR-038)
+    {
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let engine = Arc::new(InferenceEngine::new(
+            projector.clone(),
+            event_log_trait.clone(),
+            iri_builder,
+        ));
+        let reconciliation_interval: u64 = std::env::var("PICLOUD_RECONCILIATION_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(600); // 10 minutes
+        engine.start_event_loop();
+        engine.start_reconciliation_loop(reconciliation_interval);
+        info!(
+            reconciliation_interval_secs = reconciliation_interval,
+            "Inference engine started"
+        );
     }
 
     // 13. Start HTTP server

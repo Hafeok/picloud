@@ -63,6 +63,13 @@ pub enum PiCloudError {
     #[error("Workload {name} failed to start: {reason}")]
     WorkloadStartFailed { name: String, reason: String },
 
+    // --- Cluster identity errors (ADR-042) ---
+    #[error("Node join rejected: {reason}")]
+    NodeJoinRejected { reason: String },
+
+    #[error("Cluster already initialized (cluster_id: {cluster_id})")]
+    ClusterAlreadyInitialized { cluster_id: String },
+
     // --- Generic ---
     #[error("Internal error: {0}")]
     Internal(String),

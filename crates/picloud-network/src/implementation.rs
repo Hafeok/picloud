@@ -165,6 +165,19 @@ impl PlatformCa {
         self.ca_cert_pem.clone()
     }
 
+    /// Compute the SHA-256 fingerprint of the CA certificate (ADR-042).
+    ///
+    /// Returns a hex-encoded string prefixed with "sha256:".
+    pub fn fingerprint(&self) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        // Hash the raw PEM bytes (deterministic for the same cert)
+        let mut hasher = Sha256::new();
+        hasher.update(self.ca_cert_pem.as_bytes());
+        let result = hasher.finalize();
+        let hex = result.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        Ok(format!("sha256:{hex}"))
+    }
+
     /// Issue a TLS certificate for a cluster node, signed by the platform CA.
     pub fn issue_node_certificate(&self, node_name: &str) -> Result<NodeCertificate> {
         let expires_at = Utc::now() + Duration::days(365);

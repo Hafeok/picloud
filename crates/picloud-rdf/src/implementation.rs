@@ -436,6 +436,61 @@ impl OxigraphProjector {
             )?;
         }
 
+        // Project group-specific triples (ADR-037): type and hasRole
+        if resource_type == "Group" || resource_type == "group" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("Group").into(),
+            )?;
+            if let Some(roles) = event.payload["roles"].as_array() {
+                for role in roles {
+                    if let Some(role_name) = role.as_str() {
+                        let role_iri = self.iri_builder.resource("platform", "roles", role_name);
+                        self.insert_triple(
+                            resource_iri_str,
+                            &format!("{PICLOUD_NS}hasRole"),
+                            NamedNode::new(role_iri.as_str())
+                                .map_err(|e| PiCloudError::Internal(format!("invalid role IRI: {e}")))?
+                                .into(),
+                        )?;
+                    }
+                }
+            }
+            if let Some(desc) = event.payload["description"].as_str() {
+                if !desc.is_empty() {
+                    self.insert_triple(
+                        resource_iri_str,
+                        &format!("{PICLOUD_NS}description"),
+                        Literal::new_simple_literal(desc).into(),
+                    )?;
+                }
+            }
+        }
+
+        // Project inference-rule-specific triples (ADR-038)
+        if resource_type == "InferenceRule" || resource_type == "inference-rule" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("InferenceRule").into(),
+            )?;
+            if let Some(scope) = event.payload["scope"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}scope"),
+                    Literal::new_simple_literal(scope).into(),
+                )?;
+            }
+            if let Some(construct) = event.payload["construct_query"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}constructQuery"),
+                    Literal::new_simple_literal(construct).into(),
+                )?;
+            }
+        }
+
         debug!(resource_iri = resource_iri_str, "projected ResourceDeclared");
         Ok(())
     }
@@ -1097,6 +1152,53 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_group_membership_changed(&self, event: &EventEnvelope) -> Result<()> {
+        let group_iri_str = event.payload["group_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let member_iri_str = event.payload["member_iri"]
+            .as_str()
+            .unwrap_or_default();
+        let action = event.payload["action"]
+            .as_str()
+            .unwrap_or("added");
+
+        match action {
+            "added" => {
+                // Ensure group type is declared
+                self.insert_triple(
+                    group_iri_str,
+                    RDF_TYPE,
+                    picloud_term("Group").into(),
+                )?;
+                self.insert_triple(
+                    group_iri_str,
+                    &format!("{PICLOUD_NS}hasMember"),
+                    NamedNode::new(member_iri_str)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid member IRI: {e}")))?
+                        .into(),
+                )?;
+                debug!(group = group_iri_str, member = member_iri_str, "projected GroupMembershipChanged (added)");
+            }
+            "removed" => {
+                // Remove the specific hasMember triple
+                let s = NamedNode::new(group_iri_str)
+                    .map_err(|e| PiCloudError::Internal(format!("invalid group IRI: {e}")))?;
+                let p = NamedNode::new(format!("{PICLOUD_NS}hasMember"))
+                    .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+                let o = NamedNode::new(member_iri_str)
+                    .map_err(|e| PiCloudError::Internal(format!("invalid member IRI: {e}")))?;
+                let quad = Quad::new(s, p, o, oxigraph::model::GraphName::DefaultGraph);
+                let _ = self.store.remove(&quad);
+                debug!(group = group_iri_str, member = member_iri_str, "projected GroupMembershipChanged (removed)");
+            }
+            _ => {
+                debug!(action = action, "unknown GroupMembershipChanged action — skipping");
+            }
+        }
+        Ok(())
+    }
+
     /// Replace the status literal for a resource in the default graph
     /// (and optionally a product graph).
     fn update_status(
@@ -1224,6 +1326,7 @@ impl StateProjector for OxigraphProjector {
             "TagRemoved" => self.project_tag_removed(event),
             "ConfigChanged" => self.project_config_changed(event),
             "FeatureFlagChanged" => self.project_feature_flag_changed(event),
+            "GroupMembershipChanged" => self.project_group_membership_changed(event),
             other => {
                 debug!(event_type = other, "unhandled event type — skipping projection");
                 Ok(())

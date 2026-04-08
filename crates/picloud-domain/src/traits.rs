@@ -285,3 +285,50 @@ pub trait DnsRegistry: Send + Sync {
     async fn deregister(&self, iri: &ResourceIri) -> Result<()>;
     async fn resolve(&self, iri: &ResourceIri) -> Result<String>;
 }
+
+// ---- Alert Engine (ADR-041) ----
+
+/// Evaluate built-in alert rules against recorded metrics and emit
+/// AlertFired / AlertResolved events. Tracks dampening state.
+/// Implemented by: picloud-http (or wherever the inference engine lives)
+#[async_trait]
+pub trait AlertEvaluator: Send + Sync {
+    /// Evaluate all registered alert rules against current metric state.
+    /// Returns the list of alert events (fired or resolved) produced.
+    async fn evaluate(
+        &self,
+        node_iri: &ResourceIri,
+        metrics: &[crate::events::MetricEntry],
+    ) -> Result<Vec<AlertAction>>;
+}
+
+/// An action produced by the alert evaluator.
+#[derive(Debug, Clone)]
+pub enum AlertAction {
+    Fire(crate::events::AlertFiredPayload),
+    Resolve(crate::events::AlertResolvedPayload),
+}
+
+// ---- Cluster Identity (ADR-042) ----
+
+/// Manage the cluster's immutable identity.
+/// Implemented by: picloud-cluster
+#[async_trait]
+pub trait ClusterIdentityStore: Send + Sync {
+    /// Initialize the cluster identity. Fails if already initialized.
+    async fn initialize(
+        &self,
+        identity: crate::resources::ClusterIdentity,
+    ) -> Result<()>;
+
+    /// Retrieve the cluster identity, if initialized.
+    async fn get(&self) -> Result<Option<crate::resources::ClusterIdentity>>;
+
+    /// Validate a node join request. Returns Ok(()) if valid, Err with reason if not.
+    async fn validate_node_join(
+        &self,
+        node_id: Uuid,
+        ca_fingerprint: &str,
+        cluster_id: Uuid,
+    ) -> Result<()>;
+}

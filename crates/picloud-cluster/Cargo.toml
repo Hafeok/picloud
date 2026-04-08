@@ -14,6 +14,7 @@ tracing        = { workspace = true }
 thiserror      = { workspace = true }
 serde          = { workspace = true }
 serde_json     = { workspace = true }
+chrono         = { workspace = true }
 openraft = { workspace = true }
 reqwest  = { workspace = true }
 axum     = { workspace = true }

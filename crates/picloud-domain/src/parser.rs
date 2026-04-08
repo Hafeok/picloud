@@ -49,6 +49,9 @@ pub enum ResourceDeclaration {
     Config(ConfigDecl),
     #[serde(rename = "feature-flag")]
     FeatureFlag(FeatureFlagDecl),
+    Group(GroupDecl),
+    #[serde(rename = "inference-rule")]
+    InferenceRule(InferenceRuleDecl),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +228,52 @@ pub struct FeatureFlagDecl {
     /// Tags attached to this resource (ADR-036)
     #[serde(default)]
     pub tags: HashMap<String, String>,
+}
+
+/// A group declaration (ADR-037)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupDecl {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Roles inherited by all members of this group
+    pub roles: Vec<String>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+/// An inference rule declaration (ADR-038)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceRuleDecl {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Scope: "platform" or a product name
+    #[serde(default = "default_scope")]
+    pub scope: String,
+    /// Trigger mode: "event" or "reconciliation"
+    #[serde(default = "default_trigger")]
+    pub trigger: String,
+    /// Event types that trigger this rule
+    #[serde(default, rename = "trigger-events")]
+    pub trigger_events: Vec<String>,
+    /// Whether to also run on the 10-minute reconciliation schedule
+    #[serde(default)]
+    pub reconciliation: bool,
+    /// The SPARQL CONSTRUCT query
+    pub construct: String,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+fn default_scope() -> String {
+    "platform".to_string()
+}
+
+fn default_trigger() -> String {
+    "event".to_string()
 }
 
 fn default_true() -> bool {
@@ -420,6 +469,24 @@ impl ResourceDeclaration {
                 }
                 Ok(())
             }
+            ResourceDeclaration::Group(g) => {
+                if g.name.is_empty() {
+                    return Err(validation_err("group", "name cannot be empty"));
+                }
+                if g.roles.is_empty() {
+                    return Err(validation_err(&g.name, "roles cannot be empty"));
+                }
+                Ok(())
+            }
+            ResourceDeclaration::InferenceRule(r) => {
+                if r.name.is_empty() {
+                    return Err(validation_err("inference-rule", "name cannot be empty"));
+                }
+                if r.construct.is_empty() {
+                    return Err(validation_err(&r.name, "construct query cannot be empty"));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -436,6 +503,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Role(r) => r.product.as_deref(),
             ResourceDeclaration::Config(c) => Some(&c.product),
             ResourceDeclaration::FeatureFlag(f) => Some(&f.product),
+            ResourceDeclaration::Group(_) => None, // groups are platform-scoped
+            ResourceDeclaration::InferenceRule(_) => None, // rules have their own scope field
         }
     }
 
@@ -452,6 +521,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Role(r) => &r.name,
             ResourceDeclaration::Config(c) => &c.name,
             ResourceDeclaration::FeatureFlag(f) => &f.name,
+            ResourceDeclaration::Group(g) => &g.name,
+            ResourceDeclaration::InferenceRule(r) => &r.name,
         }
     }
 
@@ -468,6 +539,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Role(r) => &r.tags,
             ResourceDeclaration::Config(c) => &c.tags,
             ResourceDeclaration::FeatureFlag(f) => &f.tags,
+            ResourceDeclaration::Group(g) => &g.tags,
+            ResourceDeclaration::InferenceRule(r) => &r.tags,
         }
     }
 
@@ -484,6 +557,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::Role(_) => "role",
             ResourceDeclaration::Config(_) => "config",
             ResourceDeclaration::FeatureFlag(_) => "feature-flag",
+            ResourceDeclaration::Group(_) => "group",
+            ResourceDeclaration::InferenceRule(_) => "inference-rule",
         }
     }
 }
@@ -912,6 +987,28 @@ fn parse_bicep_declaration(
                 description: get_string_optional(&kv, "description"),
                 enabled: get_bool_or_default(&kv, "enabled", true),
                 version: get_string_required(&kv, "version", name)?,
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "group" => {
+            let roles = get_string_array(&kv, "roles")?;
+            Ok(ResourceDeclaration::Group(GroupDecl {
+                name: name.to_string(),
+                description: get_string_optional(&kv, "description"),
+                roles,
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "inference-rule" => {
+            let trigger_events = get_string_array(&kv, "trigger-events").unwrap_or_default();
+            Ok(ResourceDeclaration::InferenceRule(InferenceRuleDecl {
+                name: name.to_string(),
+                description: get_string_optional(&kv, "description"),
+                scope: get_string_optional(&kv, "scope").unwrap_or_else(|| "platform".to_string()),
+                trigger: get_string_optional(&kv, "trigger").unwrap_or_else(|| "event".to_string()),
+                trigger_events,
+                reconciliation: get_bool_or_default(&kv, "reconciliation", false),
+                construct: get_string_required(&kv, "construct", name)?,
                 tags: get_tags_map(&kv, "tags"),
             }))
         }

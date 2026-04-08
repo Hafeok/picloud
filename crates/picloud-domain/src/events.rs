@@ -103,6 +103,21 @@ pub enum PlatformEvent {
 
     // --- Feature flag events (ADR-044) ---
     FeatureFlagChanged(FeatureFlagChangedPayload),
+
+    // --- Alert events (ADR-041) ---
+    AlertFired(AlertFiredPayload),
+    AlertResolved(AlertResolvedPayload),
+
+    // --- Cluster identity events (ADR-042) ---
+    ClusterInitialized(ClusterInitializedPayload),
+    NodeJoinRejected(NodeJoinRejectedPayload),
+
+    // --- Group events (ADR-037) ---
+    GroupMembershipChanged(GroupMembershipChangedPayload),
+
+    // --- Inference events (ADR-038) ---
+    InferenceRuleEvaluated(InferenceRuleEvaluatedPayload),
+    ReconciliationCompleted(ReconciliationCompletedPayload),
 }
 
 // --- Payload types ---
@@ -291,6 +306,125 @@ pub struct FeatureFlagChangedPayload {
     pub action: String,
 }
 
+// --- Alert payloads (ADR-041) ---
+
+/// Alert severity levels.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl std::fmt::Display for AlertSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlertSeverity::Info => write!(f, "info"),
+            AlertSeverity::Warning => write!(f, "warning"),
+            AlertSeverity::Critical => write!(f, "critical"),
+        }
+    }
+}
+
+/// Payload for AlertFired event (ADR-041).
+/// Emitted when a SPARQL CONSTRUCT rule produces a picloud:Alert triple.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertFiredPayload {
+    /// Type of alert, e.g. "HighCpuTemperature", "HighMemoryUsage"
+    pub alert_type: String,
+    /// Severity: info, warning, or critical
+    pub severity: AlertSeverity,
+    /// Human-readable message
+    pub message: String,
+    /// IRI of the resource the alert is about
+    pub resource_iri: ResourceIri,
+    /// IRI of the inference rule that fired this alert
+    pub rule_iri: ResourceIri,
+    /// When the alert fired
+    pub fired_at: DateTime<Utc>,
+}
+
+/// Payload for AlertResolved event (ADR-041).
+/// Emitted when the CONSTRUCT query no longer produces the alert triple.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertResolvedPayload {
+    /// Type of alert that was resolved
+    pub alert_type: String,
+    /// IRI of the resource that was alerting
+    pub resource_iri: ResourceIri,
+    /// IRI of the inference rule that resolved
+    pub rule_iri: ResourceIri,
+    /// When the alert was resolved
+    pub resolved_at: DateTime<Utc>,
+}
+
+// --- Cluster identity payloads (ADR-042) ---
+
+/// Payload for ClusterInitialized event (ADR-042).
+/// Emitted once at cluster init — establishes immutable cluster identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterInitializedPayload {
+    /// Unique cluster identifier (UUID generated at init)
+    pub cluster_id: Uuid,
+    /// Human-readable cluster domain (e.g. "picloud.local")
+    pub domain: String,
+    /// SHA-256 fingerprint of the cluster CA certificate
+    pub ca_fingerprint: String,
+}
+
+/// Payload for NodeJoinRejected event (ADR-042).
+/// Emitted when a node attempts to join but fails validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeJoinRejectedPayload {
+    /// The node ID that was rejected
+    pub node_id: Uuid,
+    /// The address the node attempted to join from
+    pub address: String,
+    /// Human-readable reason for rejection
+    pub reason: String,
+}
+
+// --- Group payloads (ADR-037) ---
+
+/// Payload for GroupMembershipChanged event (ADR-037).
+/// Emitted when inference rules add or remove members from a group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupMembershipChangedPayload {
+    /// IRI of the group whose membership changed
+    pub group_iri: ResourceIri,
+    /// IRI of the user who was added or removed
+    pub member_iri: ResourceIri,
+    /// "added" or "removed"
+    pub action: String,
+}
+
+// --- Inference payloads (ADR-038) ---
+
+/// Payload for InferenceRuleEvaluated event (ADR-038).
+/// Emitted after a rule is evaluated, summarising assertions and retractions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceRuleEvaluatedPayload {
+    /// IRI of the inference rule that was evaluated
+    pub rule_iri: ResourceIri,
+    /// Number of new triples asserted
+    pub assertions: usize,
+    /// Number of triples retracted
+    pub retractions: usize,
+}
+
+/// Payload for ReconciliationCompleted event (ADR-038).
+/// Emitted at the end of each 10-minute reconciliation pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconciliationCompletedPayload {
+    /// Number of rules evaluated in this pass
+    pub rules_evaluated: usize,
+    /// Total new triples asserted across all rules
+    pub total_assertions: usize,
+    /// Total triples retracted across all rules
+    pub total_retractions: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +482,94 @@ mod tests {
         let a = make_envelope();
         let b = make_envelope();
         assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn alert_severity_serde_round_trip() {
+        let severities = vec![
+            AlertSeverity::Info,
+            AlertSeverity::Warning,
+            AlertSeverity::Critical,
+        ];
+        for severity in severities {
+            let json = serde_json::to_string(&severity).unwrap();
+            let back: AlertSeverity = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, severity);
+        }
+    }
+
+    #[test]
+    fn alert_severity_serializes_as_snake_case() {
+        assert_eq!(serde_json::to_string(&AlertSeverity::Info).unwrap(), "\"info\"");
+        assert_eq!(serde_json::to_string(&AlertSeverity::Warning).unwrap(), "\"warning\"");
+        assert_eq!(serde_json::to_string(&AlertSeverity::Critical).unwrap(), "\"critical\"");
+    }
+
+    #[test]
+    fn alert_severity_display() {
+        assert_eq!(AlertSeverity::Info.to_string(), "info");
+        assert_eq!(AlertSeverity::Warning.to_string(), "warning");
+        assert_eq!(AlertSeverity::Critical.to_string(), "critical");
+    }
+
+    #[test]
+    fn alert_fired_payload_serde() {
+        let payload = AlertFiredPayload {
+            alert_type: "HighCpuTemperature".to_string(),
+            severity: AlertSeverity::Critical,
+            message: "CPU temperature above 80 C on pi-node-02".to_string(),
+            resource_iri: ResourceIri("https://picloud.local/nodes/pi-node-02".to_string()),
+            rule_iri: ResourceIri("https://picloud.local/inference-rules/high-cpu-temp-critical".to_string()),
+            fired_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["alert_type"], "HighCpuTemperature");
+        assert_eq!(json["severity"], "critical");
+        let back: AlertFiredPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.alert_type, "HighCpuTemperature");
+        assert_eq!(back.severity, AlertSeverity::Critical);
+    }
+
+    #[test]
+    fn alert_resolved_payload_serde() {
+        let payload = AlertResolvedPayload {
+            alert_type: "HighCpuTemperature".to_string(),
+            resource_iri: ResourceIri("https://picloud.local/nodes/pi-node-02".to_string()),
+            rule_iri: ResourceIri("https://picloud.local/inference-rules/high-cpu-temp-critical".to_string()),
+            resolved_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["alert_type"], "HighCpuTemperature");
+        let back: AlertResolvedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.alert_type, "HighCpuTemperature");
+    }
+
+    #[test]
+    fn cluster_initialized_payload_serde() {
+        let payload = ClusterInitializedPayload {
+            cluster_id: Uuid::new_v4(),
+            domain: "picloud.local".to_string(),
+            ca_fingerprint: "sha256:abc123".to_string(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["domain"], "picloud.local");
+        assert_eq!(json["ca_fingerprint"], "sha256:abc123");
+        let back: ClusterInitializedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.domain, "picloud.local");
+        assert_eq!(back.cluster_id, payload.cluster_id);
+    }
+
+    #[test]
+    fn node_join_rejected_payload_serde() {
+        let payload = NodeJoinRejectedPayload {
+            node_id: Uuid::new_v4(),
+            address: "192.168.1.50:7443".to_string(),
+            reason: "CA fingerprint mismatch".to_string(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["reason"], "CA fingerprint mismatch");
+        let back: NodeJoinRejectedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.reason, "CA fingerprint mismatch");
     }
 
     #[test]

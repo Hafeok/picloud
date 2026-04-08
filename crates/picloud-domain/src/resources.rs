@@ -314,6 +314,40 @@ impl FeatureFlag {
     }
 }
 
+/// A Group — an IAM resource for role inheritance (ADR-037)
+///
+/// Users in a group inherit all roles assigned to the group.
+/// Membership is managed via SPARQL CONSTRUCT inference rules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Group {
+    pub meta: ResourceMeta,
+    pub description: Option<String>,
+    /// Roles inherited by all members of this group
+    pub roles: Vec<String>,
+}
+
+/// An Inference Rule — a SPARQL CONSTRUCT query as a platform resource (ADR-038)
+///
+/// Rules are declared in `.picloud` files, stored in the RDF graph, and
+/// evaluated by the inference engine. They produce triples that are
+/// written back to the graph; new/removed triples emit events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceRule {
+    pub meta: ResourceMeta,
+    pub description: Option<String>,
+    /// Scope: "platform" or a product name
+    pub scope: String,
+    /// Trigger mode: "event" or "reconciliation"
+    pub trigger: String,
+    /// Event types that trigger this rule (when trigger = "event")
+    #[serde(default)]
+    pub trigger_events: Vec<String>,
+    /// Whether to also run on the 10-minute reconciliation schedule
+    pub reconciliation: bool,
+    /// The SPARQL CONSTRUCT query
+    pub construct_query: String,
+}
+
 /// A Node — a cluster member
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -323,6 +357,106 @@ pub struct Node {
     pub is_leader: bool,
     pub storage_capacity_gb: u64,
     pub storage_used_gb: u64,
+}
+
+/// Cluster identity — established at `cluster init`, immutable after (ADR-042).
+///
+/// The dual boundary: `domain` prevents accidental mDNS cross-discovery,
+/// `cluster_id` + `ca_fingerprint` prevent deliberate or accidental cross-join.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterIdentity {
+    /// Unique cluster identifier (UUID generated at init)
+    pub cluster_id: Uuid,
+    /// Human-readable cluster domain (e.g. "picloud.local")
+    pub domain: crate::iri::ClusterDomain,
+    /// When the cluster was initialized
+    pub created_at: DateTime<Utc>,
+    /// SHA-256 fingerprint of the cluster CA certificate
+    pub ca_fingerprint: String,
+}
+
+/// An active alert — produced by inference rules (ADR-041).
+///
+/// Alert triples live in the RDF graph. This struct is the domain
+/// representation returned by `picloud alerts list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Alert {
+    /// Type of alert, e.g. "HighCpuTemperature"
+    pub alert_type: String,
+    /// Severity: info, warning, or critical
+    pub severity: crate::events::AlertSeverity,
+    /// Human-readable message
+    pub message: String,
+    /// IRI of the resource this alert is about
+    pub resource_iri: crate::iri::ResourceIri,
+    /// When the alert was fired
+    pub fired_at: DateTime<Utc>,
+}
+
+/// A built-in platform alert rule definition (ADR-041).
+///
+/// These are registered at startup and evaluated by the inference engine.
+#[derive(Debug, Clone)]
+pub struct BuiltInAlertRule {
+    /// Rule name, used to derive the rule IRI
+    pub name: &'static str,
+    /// Metric name to check (e.g. "cpu_temp_celsius")
+    pub metric_name: &'static str,
+    /// Threshold value — alert fires when metric exceeds this
+    pub threshold: f64,
+    /// Alert type name (e.g. "HighCpuTemperature")
+    pub alert_type: &'static str,
+    /// Alert severity
+    pub severity: crate::events::AlertSeverity,
+    /// Human-readable message template (use {value} and {threshold} placeholders)
+    pub message_template: &'static str,
+}
+
+/// The set of built-in platform alert rules shipped with PiCloud (ADR-041).
+pub fn builtin_alert_rules() -> Vec<BuiltInAlertRule> {
+    use crate::events::AlertSeverity;
+    vec![
+        BuiltInAlertRule {
+            name: "high-cpu-temp-critical",
+            metric_name: "cpu_temp_celsius",
+            threshold: 80.0,
+            alert_type: "HighCpuTemperature",
+            severity: AlertSeverity::Critical,
+            message_template: "CPU temperature above 80 C",
+        },
+        BuiltInAlertRule {
+            name: "high-cpu-temp-warning",
+            metric_name: "cpu_temp_celsius",
+            threshold: 70.0,
+            alert_type: "HighCpuTemperature",
+            severity: AlertSeverity::Warning,
+            message_template: "CPU temperature above 70 C",
+        },
+        BuiltInAlertRule {
+            name: "high-memory-critical",
+            metric_name: "memory_used_percent",
+            threshold: 90.0,
+            alert_type: "HighMemoryUsage",
+            severity: AlertSeverity::Critical,
+            message_template: "Memory usage above 90%",
+        },
+        BuiltInAlertRule {
+            name: "high-memory-warning",
+            metric_name: "memory_used_percent",
+            threshold: 80.0,
+            alert_type: "HighMemoryUsage",
+            severity: AlertSeverity::Warning,
+            message_template: "Memory usage above 80%",
+        },
+        BuiltInAlertRule {
+            name: "high-disk-critical",
+            metric_name: "disk_used_percent",
+            threshold: 90.0,
+            alert_type: "HighDiskUsage",
+            severity: AlertSeverity::Critical,
+            message_template: "Disk usage above 90%",
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -601,5 +735,57 @@ mod tests {
         assert_eq!(meta.tags.len(), 1);
         assert_eq!(meta.tags[0].key, "team");
         assert_eq!(meta.tags[0].value, "backend");
+    }
+
+    #[test]
+    fn cluster_identity_serde_round_trip() {
+        let identity = ClusterIdentity {
+            cluster_id: Uuid::new_v4(),
+            domain: crate::iri::ClusterDomain("acme.local".to_string()),
+            created_at: Utc::now(),
+            ca_fingerprint: "sha256:deadbeef".to_string(),
+        };
+        let json = serde_json::to_string(&identity).unwrap();
+        let back: ClusterIdentity = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cluster_id, identity.cluster_id);
+        assert_eq!(back.domain.0, "acme.local");
+        assert_eq!(back.ca_fingerprint, "sha256:deadbeef");
+    }
+
+    #[test]
+    fn alert_serde_round_trip() {
+        use crate::events::AlertSeverity;
+        let alert = Alert {
+            alert_type: "HighCpuTemperature".to_string(),
+            severity: AlertSeverity::Critical,
+            message: "CPU temperature above 80 C".to_string(),
+            resource_iri: crate::iri::ResourceIri("https://picloud.local/nodes/pi-01".to_string()),
+            fired_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&alert).unwrap();
+        let back: Alert = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.alert_type, "HighCpuTemperature");
+        assert_eq!(back.severity, AlertSeverity::Critical);
+    }
+
+    #[test]
+    fn builtin_alert_rules_are_populated() {
+        let rules = builtin_alert_rules();
+        assert_eq!(rules.len(), 5);
+        // Verify critical CPU temp rule
+        assert_eq!(rules[0].name, "high-cpu-temp-critical");
+        assert_eq!(rules[0].threshold, 80.0);
+        // Verify warning CPU temp rule
+        assert_eq!(rules[1].name, "high-cpu-temp-warning");
+        assert_eq!(rules[1].threshold, 70.0);
+        // Verify critical memory rule
+        assert_eq!(rules[2].name, "high-memory-critical");
+        assert_eq!(rules[2].threshold, 90.0);
+        // Verify warning memory rule
+        assert_eq!(rules[3].name, "high-memory-warning");
+        assert_eq!(rules[3].threshold, 80.0);
+        // Verify critical disk rule
+        assert_eq!(rules[4].name, "high-disk-critical");
+        assert_eq!(rules[4].threshold, 90.0);
     }
 }

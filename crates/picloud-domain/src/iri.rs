@@ -172,6 +172,30 @@ impl IriBuilder {
             self.domain.0, product_name, store_name, aggregate_type, aggregate_id
         ))
     }
+
+    /// IRI for a group: /groups/{name} (ADR-037)
+    pub fn group(&self, group_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/groups/{}",
+            self.domain.0, group_name
+        ))
+    }
+
+    /// IRI for a platform-level inference/alert rule: /inference-rules/{name}
+    pub fn inference_rule(&self, rule_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/inference-rules/{}",
+            self.domain.0, rule_name
+        ))
+    }
+
+    /// IRI for the cluster identity resource: /cluster/identity
+    pub fn cluster_identity(&self) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/cluster/identity",
+            self.domain.0
+        ))
+    }
 }
 
 #[cfg(test)]

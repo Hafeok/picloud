@@ -237,6 +237,11 @@ impl PiCloudHttpServer {
             // --- Feature flag routes (ADR-044) ---
             .route("/products/:name/flags", get(handle_flags_list))
             .route("/products/:name/flags/:flag", get(handle_flag_get))
+            // --- Inference rule routes (ADR-038) ---
+            .route("/inference-rules", get(handle_inference_rules))
+            // --- Group routes (ADR-037) ---
+            .route("/groups", get(handle_groups))
+            .route("/groups/:name", get(handle_group))
             .route("/api/commands", post(handle_command))
             .route("/api/apply", post(handle_apply))
             .route("/api/delete", post(handle_delete))
@@ -937,6 +942,32 @@ async fn handle_apply(
                 });
                 (iri, "ResourceDeclared", Some(f.product.clone()), payload)
             }
+            ResourceDeclaration::Group(g) => {
+                let iri = iri_builder.group(&g.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "Group",
+                    "name": g.name,
+                    "description": g.description,
+                    "roles": g.roles,
+                });
+                (iri, "ResourceDeclared", None, payload)
+            }
+            ResourceDeclaration::InferenceRule(r) => {
+                let iri = iri_builder.inference_rule(&r.name);
+                let payload = serde_json::json!({
+                    "resource_iri": iri.as_str(),
+                    "resource_type": "InferenceRule",
+                    "name": r.name,
+                    "description": r.description,
+                    "scope": r.scope,
+                    "trigger": r.trigger,
+                    "trigger_events": r.trigger_events,
+                    "reconciliation": r.reconciliation,
+                    "construct_query": r.construct,
+                });
+                (iri, "ResourceDeclared", None, payload)
+            }
         };
 
         let schema = iri_builder.event_schema(event_type, 1);
@@ -979,6 +1010,8 @@ async fn handle_apply(
                     }
                     ResourceDeclaration::Config(c) => iri_builder.product_config(&c.product).as_str().to_string(),
                     ResourceDeclaration::FeatureFlag(f) => iri_builder.feature_flag(&f.product, &f.name).as_str().to_string(),
+                    ResourceDeclaration::Group(g) => iri_builder.group(&g.name).as_str().to_string(),
+                    ResourceDeclaration::InferenceRule(r) => iri_builder.inference_rule(&r.name).as_str().to_string(),
                 };
 
                 for (tag_key, tag_value) in decl.tags() {
@@ -2607,6 +2640,162 @@ async fn handle_flag_get(
         )
             .into_response(),
     }
+}
+
+/// GET /inference-rules — list all inference rules from the RDF graph (ADR-038)
+async fn handle_inference_rules(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let ct = content_type_from_headers(&headers);
+    let Some(ref projector) = state.projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "projector not available" })),
+        )
+            .into_response();
+    };
+
+    let sparql = "SELECT ?rule ?scope ?construct WHERE { \
+        ?rule a <https://picloud.local/ontology#InferenceRule> . \
+        OPTIONAL { ?rule <https://picloud.local/ontology#scope> ?scope } . \
+        OPTIONAL { ?rule <https://picloud.local/ontology#constructQuery> ?construct } \
+    }";
+
+    match projector.query(sparql).await {
+        Ok(result) => {
+            let rules: Vec<serde_json::Value> = result
+                .bindings
+                .iter()
+                .map(|b| {
+                    serde_json::json!({
+                        "iri": b.get("rule").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "scope": b.get("scope").and_then(|v| v.as_str()).unwrap_or("platform"),
+                    })
+                })
+                .collect();
+            resource_response(serde_json::json!({ "inference_rules": rules }), ct)
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /groups — list all groups from the RDF graph (ADR-037)
+async fn handle_groups(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    let ct = content_type_from_headers(&headers);
+    let Some(ref projector) = state.projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "projector not available" })),
+        )
+            .into_response();
+    };
+
+    let sparql = "SELECT ?group ?desc WHERE { \
+        ?group a <https://picloud.local/ontology#Group> . \
+        OPTIONAL { ?group <https://picloud.local/ontology#description> ?desc } \
+    }";
+
+    match projector.query(sparql).await {
+        Ok(result) => {
+            let groups: Vec<serde_json::Value> = result
+                .bindings
+                .iter()
+                .map(|b| {
+                    serde_json::json!({
+                        "iri": b.get("group").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "description": b.get("desc").and_then(|v| v.as_str()),
+                    })
+                })
+                .collect();
+            resource_response(serde_json::json!({ "groups": groups }), ct)
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /groups/:name — get a specific group with its roles and members (ADR-037)
+async fn handle_group(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let ct = content_type_from_headers(&headers);
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let group_iri = iri_builder.group(&name);
+    let Some(ref projector) = state.projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "projector not available" })),
+        )
+            .into_response();
+    };
+
+    // Get roles
+    let roles_sparql = format!(
+        "SELECT ?role WHERE {{ <{}> <https://picloud.local/ontology#hasRole> ?role }}",
+        group_iri.as_str()
+    );
+    // Get members
+    let members_sparql = format!(
+        "SELECT ?member WHERE {{ <{}> <https://picloud.local/ontology#hasMember> ?member }}",
+        group_iri.as_str()
+    );
+    // Get description
+    let desc_sparql = format!(
+        "SELECT ?desc WHERE {{ <{}> <https://picloud.local/ontology#description> ?desc }}",
+        group_iri.as_str()
+    );
+
+    let roles = match projector.query(&roles_sparql).await {
+        Ok(r) => r.bindings.iter()
+            .filter_map(|b| b.get("role").and_then(|v| v.as_str()).map(String::from))
+            .collect::<Vec<_>>(),
+        Err(_) => vec![],
+    };
+
+    let members = match projector.query(&members_sparql).await {
+        Ok(r) => r.bindings.iter()
+            .filter_map(|b| b.get("member").and_then(|v| v.as_str()).map(String::from))
+            .collect::<Vec<_>>(),
+        Err(_) => vec![],
+    };
+
+    let description = match projector.query(&desc_sparql).await {
+        Ok(r) => r.bindings.first()
+            .and_then(|b| b.get("desc").and_then(|v| v.as_str()).map(String::from)),
+        Err(_) => None,
+    };
+
+    if roles.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("group '{}' not found", name) })),
+        )
+            .into_response();
+    }
+
+    resource_response(
+        serde_json::json!({
+            "iri": group_iri.as_str(),
+            "name": name,
+            "description": description,
+            "roles": roles,
+            "members": members,
+        }),
+        ct,
+    )
 }
 
 /// Helper to get a product's version from the RDF graph.
