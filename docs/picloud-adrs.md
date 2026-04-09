@@ -1976,3 +1976,902 @@ Delta Lake is built on Parquet and adds ACID transactions, schema evolution, and
 - For cluster-wide telemetry queries, the aggregated summaries in Oxigraph are the right layer — raw Parquet queries are per-node
 - Write throughput must be benchmarked on Pi5 NVMe — Parquet writes are batched, not per-span
 - The `arrow`, `parquet`, and `datafusion` crates add significant compile time — acceptable given the capability they provide
+
+---
+
+## ADR-047: Volume Snapshots and Offsite Backup as Storage Intent Primitives
+
+**Status:** Accepted
+
+**Context:** Replication across cluster nodes (ADR-013, ADR-024) protects against hardware failure. It does not protect against accidental deletion, data corruption, logical failures, or physical disasters affecting all nodes simultaneously (fire, flood, theft). For irreplaceable data — family photos, personal documents, application state — point-in-time snapshots and offsite backup are essential additional layers.
+
+**The three failure scenarios and their mitigations:**
+
+| Scenario | Replication | Snapshots | Offsite |
+|---|---|---|---|
+| Node hardware failure | ✓ | ✓ | ✓ |
+| Accidental deletion | ✗ | ✓ | ✓ |
+| Data corruption / bug | ✗ | ✓ | ✓ |
+| Total cluster loss (fire/flood/theft) | ✗ | ✗ | ✓ |
+
+**Decision:** Volume snapshots and offsite backup are first-class storage intent primitives declared in the volume resource definition. Snapshots are stored on a local NAS (fast recovery). Offsite backup targets S3-compatible endpoints (disaster recovery). Both are configured declaratively — the platform manages scheduling, retention, and transfer.
+
+### Volume declaration with snapshots and backup
+
+```bicep
+volume 'family-photos' = {
+  product: 'photo-app'
+  size: '500GB'
+  storageIntent: {
+    durability:  'full-replication'
+    performance: 'standard'
+    snapshots: {
+      enabled:  true
+      schedule: 'daily'           // hourly | daily | weekly
+      storage:  secret('nas-snapshot-config')
+      retention: {
+        daily:   30               // keep 30 daily snapshots
+        weekly:  26               // keep 26 weekly snapshots
+        monthly: 0                // 0 = keep forever
+      }
+    }
+    offsite: {
+      enabled:   true
+      target:    secret('s3-backup-config')
+      frequency: 'daily'          // daily | weekly
+      encryption: true            // always encrypt before upload
+    }
+  }
+}
+```
+
+### Snapshot storage — local NAS
+
+Snapshots are point-in-time, immutable copies of a volume stored on a local NAS. The NAS is referenced via a secret containing connection details (NFS mount path or SMB share). Snapshots are not stored on cluster NVMe — this preserves the full NVMe capacity for live data.
+
+**Snapshot secret format:**
+```json
+{
+  "type":   "nfs",
+  "host":   "192.168.1.200",
+  "path":   "/volume1/picloud-snapshots",
+  "options": "vers=4,rsize=1048576,wsize=1048576"
+}
+```
+
+**Snapshot naming convention:**
+```
+{volume-name}/{product}/{date}T{time}Z.snapshot
+family-photos/photo-app/2025-07-01T02:00:00Z.snapshot
+```
+
+**Snapshot schedule:**
+The platform runs a snapshot job according to the declared schedule. Snapshots are crash-consistent — the volume is quiesced briefly during the snapshot operation. The snapshot job emits `SnapshotCreated` and `SnapshotFailed` events.
+
+**Retention enforcement:**
+After each snapshot, the platform evaluates retention policy and deletes snapshots outside the policy window. Deletion emits `SnapshotDeleted` events. The retention policy is evaluated per category:
+- `daily: 30` — keep the most recent 30 daily snapshots
+- `weekly: 26` — keep the most recent 26 weekly snapshots (Sunday snapshots are promoted to weekly)
+- `monthly: 0` — keep all monthly snapshots forever (first snapshot of each month promoted to monthly)
+
+**Recovery:**
+```bash
+# List available snapshots for a volume
+picloud volume snapshots family-photos
+
+# Restore a volume to a point in time
+picloud volume restore family-photos \
+  --snapshot "2025-07-01T02:00:00Z" \
+  --target family-photos-restored
+```
+
+### Offsite backup — S3-compatible endpoint
+
+Offsite backup uploads encrypted volume data to any S3-compatible endpoint. Recommended providers for home use: Backblaze B2 (cheapest per GB), Cloudflare R2 (no egress fees), or a self-hosted MinIO instance at a family member's location.
+
+**S3 backup secret format:**
+```json
+{
+  "type":     "s3",
+  "endpoint": "https://s3.us-west-000.backblazeb2.com",
+  "bucket":   "picloud-backup-emil",
+  "region":   "us-west-000",
+  "access_key_id":     "...",
+  "secret_access_key": "..."
+}
+```
+
+**Encryption:** All data is encrypted client-side before upload using a platform-managed key stored in the cluster's secret store. The S3 provider never sees plaintext data. The encryption key is itself backed up to the NAS snapshot store — losing the key means losing the backup.
+
+**Backup format:** Volumes are uploaded as chunked, deduplicated, compressed archives. Chunks that have not changed since the last backup are not re-uploaded. This makes incremental backups efficient even for large volumes.
+
+**Backup schedule:**
+The platform runs offsite backup jobs according to the declared frequency. Backup jobs emit `BackupStarted`, `BackupCompleted`, and `BackupFailed` events. Backup duration and bytes transferred are recorded in the platform metrics (ADR-040) and queryable via the RDF graph.
+
+**Recovery from offsite:**
+```bash
+# List available offsite backups
+picloud volume backups family-photos --offsite
+
+# Restore from offsite (slower — downloads from S3)
+picloud volume restore family-photos \
+  --offsite \
+  --date "2025-07-01" \
+  --target family-photos-restored
+```
+
+### Snapshot and backup status in the RDF graph
+
+Current snapshot and backup state is projected into the RDF graph:
+
+```turtle
+<https://picloud.local/products/photo-app/volumes/family-photos>
+    a picloud:Volume ;
+    picloud:lastSnapshotAt     "2025-07-01T02:00:00Z"^^xsd:dateTime ;
+    picloud:lastSnapshotStatus "success" ;
+    picloud:snapshotCount      47 ;
+    picloud:lastBackupAt       "2025-07-01T03:00:00Z"^^xsd:dateTime ;
+    picloud:lastBackupStatus   "success" ;
+    picloud:lastBackupSizeGb   312.4 .
+```
+
+This means alert rules can fire on backup failures:
+
+```bicep
+inference-rule 'backup-failed-alert' = {
+  scope: 'platform'
+  trigger: 'event'
+  trigger-events: ['BackupFailed']
+  construct: '''
+    CONSTRUCT {
+      ?volume a picloud:Alert ;
+              picloud:alertType     "BackupFailed" ;
+              picloud:alertSeverity "critical" ;
+              picloud:alertMessage  "Offsite backup failed — data at risk" ;
+              picloud:alertResource ?volume .
+    }
+    WHERE {
+      ?volume a picloud:Volume ;
+              picloud:lastBackupStatus "failed" .
+    }
+  '''
+}
+```
+
+**Rationale:**
+- Snapshots and backup are declared in the volume resource — versioned, auditable, consistent with IaC-as-only-interface (ADR-010)
+- NAS for snapshots keeps recovery fast and local — no internet dependency for common recovery scenarios
+- S3 for offsite keeps disaster recovery simple — any S3-compatible provider works, including self-hosted
+- Client-side encryption before upload means the backup is secure regardless of provider security posture
+- Separating snapshot storage from cluster NVMe preserves full cluster storage capacity for live data
+- Backup failures emit events and fire alert rules — operators are notified before they discover data loss the hard way
+- Secrets for NAS and S3 credentials follow the existing secret injection model (ADR-009) — no new credential management needed
+
+**Consequences:**
+- `picloud-storage` gains NFS/SMB mount capability for snapshot storage
+- `picloud-storage` gains an S3-compatible client (`aws-sdk-s3` or `opendal` crate) for offsite backup
+- The encryption key for S3 backups must be backed up — losing it means losing all offsite backups. The platform should warn loudly if the encryption key has no backup.
+- Snapshot quiescing requires coordination with the workload — containers receive `SIGTSTP` during snapshot, `SIGCONT` after. Duration should be milliseconds.
+- A volume with both snapshots and offsite backup enabled uses three storage locations: cluster NVMe (live), NAS (snapshots), S3 (offsite). All three are declared in one resource definition.
+
+---
+
+## ADR-048: Native Ingress Router in picloud-http
+
+**Status:** Accepted
+
+**Context:** Applications built on PiCloud need HTTP routing — TLS termination, hostname-based routing, path-based routing, and port multiplexing — without depending on nginx, traefik, or any external reverse proxy. PiCloud owns the full stack: every workload, every certificate, every IRI. This means the routing table is the RDF graph, certificates come from the platform CA, and routing updates are events — not config file reloads.
+
+**Decision:** `picloud-http` implements a native ingress router using `hyper` (already in the stack) for proxying and `rustls` (already in the stack) for TLS termination. No external proxy dependency. The router's state is rebuilt from Oxigraph on every `IngressCreated`, `IngressUpdated`, and `IngressDeleted` event. Internal ports are routed over the cluster mTLS mesh and never exposed externally.
+
+### Why this is simpler than nginx/traefik
+
+nginx and traefik solve routing for arbitrary external infrastructure they do not control. PiCloud controls everything — workload addresses, certificates, and routing intent are all platform state. This eliminates the hard parts:
+
+| nginx/traefik concern | PiCloud answer |
+|---|---|
+| Dynamic config reload | Events update the routing table live — no config files |
+| SSL certificate management | Platform CA issues all certs (ADR-030) |
+| Upstream discovery | Scheduler knows every container's node and port |
+| Load balancing | One upstream per ingress — scheduler handles placement |
+| Access logs / metrics | OTel handles everything (ADR-045) |
+| Multiple upstreams | Not needed — containers are scheduled, not pooled |
+
+### Router state
+
+The router maintains an in-memory routing table rebuilt from Oxigraph on ingress resource events:
+
+```rust
+/// The complete router state — rebuilt from RDF graph on every ingress event.
+/// Lookups are O(1) — HashMap keyed by (host, internal) then matched by path prefix.
+pub struct IngressRouter {
+    /// External routes — TLS terminated, publicly reachable
+    external: HashMap<String, Vec<RouteEntry>>,   // keyed by hostname
+    /// Internal routes — mTLS mesh only, not externally reachable
+    internal: Vec<RouteEntry>,
+    /// TLS config per hostname — SNI-based certificate selection
+    tls:      Arc<rustls::ServerConfig>,
+}
+
+pub struct RouteEntry {
+    pub path_prefix:  String,
+    pub upstream:     Upstream,
+    pub product:      String,
+    pub workload_iri: ResourceIri,
+}
+
+pub struct Upstream {
+    /// Internal cluster address — known from scheduler state in RDF graph
+    pub address: String,
+    pub port:    u16,
+    /// mTLS client cert for internal upstream connections
+    pub client_cert: Arc<rustls::ClientConfig>,
+}
+```
+
+### Request lifecycle
+
+```
+Client → TLS handshake (SNI hostname extracted)
+       → Route lookup: hostname → path prefix match → Upstream
+       → Proxy request via hyper client (mTLS to upstream)
+       → Stream response back to client
+       → OTel span closed with status and duration
+```
+
+### Routing rules
+
+**Host-based routing** — `photos.picloud.local` routes to the `web-frontend` container:
+```bicep
+ingress 'photos-web' = {
+  product: 'photo-app'
+  target:  'web-frontend'
+  port:    3000
+  host:    'photos.picloud.local'
+  tls:     true
+}
+```
+
+**Path-based routing** — automatic for all platform resources under `picloud.local/products/...`. No ingress resource needed.
+
+**Internal ports** — exposed only within the cluster mTLS mesh:
+```bicep
+ingress 'api-metrics' = {
+  product:  'photo-app'
+  target:   'api-server'
+  port:     9090
+  internal: true           // mTLS mesh only — never externally reachable
+}
+```
+
+**Multiple ingresses per container** — each port gets its own ingress resource. The platform registers each independently.
+
+### TLS — SNI-based certificate selection
+
+Every hostname declared in an ingress resource gets a TLS certificate issued by the platform CA. The router uses SNI to select the correct certificate per connection. Certificate issuance happens at `IngressCreated` time — the router never serves a request without a valid certificate.
+
+```rust
+// SNI resolver — selects certificate based on hostname in TLS handshake
+impl rustls::server::ResolvesServerCert for SniResolver {
+    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        let hostname = client_hello.server_name()?;
+        self.certs.get(hostname).cloned()
+    }
+}
+```
+
+### Live routing updates — event-driven
+
+The router subscribes to the platform event stream. On relevant events it rebuilds the affected route entries from Oxigraph:
+
+```rust
+match event.event_type.as_str() {
+    "IngressCreated" | "IngressUpdated" => {
+        let upstream = graph.query_upstream(&event.payload)?;
+        router.upsert_route(upstream);
+        tls.issue_cert_if_needed(&upstream.host);
+    }
+    "IngressDeleted" => {
+        router.remove_route(&event.payload.ingress_iri);
+    }
+    "WorkloadRescheduled" => {
+        // Container moved to a different node — update upstream address
+        router.update_upstream_address(&event.payload);
+    }
+    _ => {}
+}
+```
+
+No config reload, no process restart. The routing table is always consistent with the RDF graph.
+
+### Connection draining (Phase 4)
+
+In Phase 1, when a workload reschedules, existing connections are closed and clients retry. Phase 4 adds graceful draining:
+- On `WorkloadRescheduling` event, mark upstream as draining — accept no new connections
+- Allow in-flight requests up to 30 seconds to complete
+- On `WorkloadRescheduled` event, update upstream address, resume routing
+
+### Implementation size
+
+The complete ingress router fits in approximately 500 lines across three files in `picloud-http`:
+
+```
+picloud-http/src/
+├── router.rs       ~200 lines  — RouteTable, lookup, upsert, remove
+├── proxy.rs        ~150 lines  — hyper reverse proxy, request forwarding
+├── tls.rs          ~100 lines  — SNI resolver, cert issuance, rustls config
+└── ingress.rs      ~50  lines  — event subscription, router update handler
+```
+
+**Rationale:**
+- No external proxy dependency — consistent with single-binary goal (ADR-001)
+- The routing table is the RDF graph — no separate config format, no drift between declared intent and runtime state
+- Event-driven updates mean routing is always consistent with workload state — when a container starts, it is immediately routable
+- SNI-based certificate selection handles multiple hostnames on a single port cleanly
+- Internal port isolation via `internal: true` solves the metrics/health/debug port exposure problem without firewall rules
+- hyper and rustls are already in the dependency stack — zero new dependencies required
+- ~500 lines is a well-understood, testable surface area — not a framework, just a router
+
+**Consequences:**
+- `picloud-http` gains `router.rs`, `proxy.rs`, `tls.rs`, `ingress.rs`
+- The router must handle the case where an upstream is temporarily unreachable (container restarting) — return 503 with a `Retry-After` header
+- WebSocket and HTTP/2 proxying require explicit support in the hyper proxy layer — add in Phase 2
+- The router runs on every node — requests are handled locally where possible, forwarded to the correct node when the target container runs elsewhere
+
+---
+
+## ADR-049: .picloud Format as Compiler Target — Turtle as Canonical IaC
+
+**Status:** Accepted  
+**Supersedes:** ADR-007 (Bicep-inspired syntax — retained as the `.picloud` surface format only)
+
+**Context:** ADR-007 established a Bicep-inspired `.picloud` syntax for resource definitions. The platform already uses RDF/Turtle natively for all state, ontologies, and event schemas. Introducing a custom language with a custom parser and custom validation creates a gap between how resources are *declared* and how they are *stored and queried*. The platform ontology and SHACL shapes already define every resource type and its constraints — they should be the single source of truth for validation, documentation, and tooling as well.
+
+**Decision:** `.picloud` files are a developer-friendly surface format that compiles to Turtle. The platform only ever sees Turtle. Both `.picloud` and `.ttl` files are accepted by the CLI. The platform ontology and SHACL shapes are the canonical type system — all validation, documentation, and SDK generation derive from them. No blank nodes are produced in compiled output — every nested structure gets a stable, dereferenceable IRI generated by the compiler.
+
+### The pipeline
+
+```
+Developer workflow:
+  .picloud files  ←  human-authored, checked into version control
+       ↓
+  picloud-compiler
+       ↓  validates each file against platform ontology (offline)
+       ↓  generates stable IRIs for all nested structures (no blank nodes)
+       ↓  merges all files into one deployment graph
+       ↓  SHACL validates merged graph
+       ↓  optional: validates cross-resource refs against live cluster
+       ↓
+  deployment.ttl  ←  canonical, submitted to cluster
+       ↓
+  picloud resource apply
+```
+
+### .picloud format (surface syntax)
+
+The `.picloud` format is a simplified, readable surface over Turtle. The compiler translates it to valid Turtle with stable IRIs.
+
+```
+// photo-app/resources.picloud
+
+product "photo-app" {
+  version     = "1.0.0"
+  description = "Photo sharing application"
+}
+
+volume "media-store" {
+  product    = "photo-app"
+  size       = "500GB"
+  durability = "full-replication"
+
+  snapshots {
+    enabled  = true
+    schedule = "daily"
+    storage  = secret("nas-config")
+    retention {
+      daily   = 30
+      weekly  = 26
+      monthly = 0
+    }
+  }
+
+  offsite {
+    enabled    = true
+    target     = secret("backblaze-config")
+    frequency  = "daily"
+    encryption = true
+  }
+}
+
+container "api-server" {
+  product  = "photo-app"
+  image    = "photo-api:1.0.0"
+  identity = "api-worker"
+
+  mount {
+    volume = "media-store"
+    path   = "/data"
+  }
+
+  tag { key = "team";        value = "backend"     }
+  tag { key = "environment"; value = "production"  }
+}
+
+feature-flag "new-upload-flow" {
+  product     = "photo-app"
+  description = "Redesigned upload flow"
+  enabled     = true
+  version     = ">= 2"
+}
+```
+
+### Compiled Turtle output — no blank nodes
+
+The compiler produces a merged `deployment.ttl` with stable IRIs for every nested structure:
+
+```turtle
+@prefix pc:  <https://picloud.local/ontology#> .
+@prefix app: <https://picloud.local/products/photo-app/> .
+
+# Product
+app:
+    a pc:Product ;
+    pc:version     "1.0.0" ;
+    pc:description "Photo sharing application" .
+
+# Volume
+app:volumes/media-store
+    a pc:Volume ;
+    pc:product  app: ;
+    pc:sizeGb   500 ;
+    pc:durability pc:FullReplication ;
+    pc:snapshots  app:volumes/media-store/snapshots ;
+    pc:offsite    app:volumes/media-store/offsite .
+
+# Snapshot config — stable IRI, not a blank node
+app:volumes/media-store/snapshots
+    a pc:SnapshotConfig ;
+    pc:enabled       true ;
+    pc:schedule      pc:Daily ;
+    pc:storageSecret "nas-config" ;
+    pc:retention     app:volumes/media-store/snapshots/retention .
+
+app:volumes/media-store/snapshots/retention
+    a pc:SnapshotRetention ;
+    pc:dailyCount   30 ;
+    pc:weeklyCount  26 ;
+    pc:monthlyCount 0 .
+
+# Container
+app:containers/api-server
+    a pc:Container ;
+    pc:product  app: ;
+    pc:image    "photo-api:1.0.0" ;
+    pc:identity app:identities/api-worker ;
+    pc:mount    app:containers/api-server/mounts/media-store ;
+    pc:tag      app:containers/api-server/tags/team ;
+    pc:tag      app:containers/api-server/tags/environment .
+
+# Mount — stable IRI
+app:containers/api-server/mounts/media-store
+    a pc:VolumeMount ;
+    pc:volume app:volumes/media-store ;
+    pc:path   "/data" .
+
+# Tags — stable IRIs
+app:containers/api-server/tags/team
+    a pc:Tag ;
+    pc:key   "team" ;
+    pc:value "backend" .
+
+app:containers/api-server/tags/environment
+    a pc:Tag ;
+    pc:key   "environment" ;
+    pc:value "production" .
+
+# Feature flag
+app:flags/new-upload-flow
+    a pc:FeatureFlag ;
+    pc:product      app: ;
+    pc:description  "Redesigned upload flow" ;
+    pc:enabled      true ;
+    pc:versionExpr  ">= 2" .
+```
+
+### IRI generation rules for nested structures
+
+The compiler generates nested IRIs deterministically from the parent IRI and property name:
+
+```
+{parent-iri}/{property-name}             for singleton nested objects
+{parent-iri}/{property-name}/{key}       for keyed collections (tags, mounts)
+{parent-iri}/{property-name}/{index}     for ordered lists
+```
+
+This means compiled output is deterministic — the same `.picloud` files always produce the same IRIs. Diffs are meaningful. SPARQL queries against nested structures always work.
+
+### Validation — two modes
+
+**Offline validation** (no cluster required):
+```bash
+picloud resource validate ./photo-app/
+```
+- Parses `.picloud` and `.ttl` files
+- Validates each file against the platform ontology
+- Merges into deployment graph
+- Runs SHACL validation against merged graph
+- Reports human-readable errors (translated from SHACL violations)
+
+**Online validation** (requires live cluster):
+```bash
+picloud resource validate ./photo-app/ --online
+```
+- Everything in offline mode, plus:
+- Validates cross-resource references against live cluster state
+- Checks referenced secrets exist
+- Checks referenced identities exist
+- Warns on version conflicts with currently deployed product
+
+**Human-readable error translation:**
+
+SHACL violations are translated to developer-friendly messages:
+
+| SHACL violation | Human-readable message |
+|---|---|
+| `sh:minCount` on `pc:image` | `Container 'api-server': required property 'image' is missing` |
+| `sh:datatype` on `pc:sizeGb` | `Volume 'media-store': 'size' must be a number in GB` |
+| `sh:in` on `pc:durability` | `Volume 'media-store': 'durability' must be one of: full-replication, quorum, local, none` |
+| `sh:pattern` on `pc:versionExpr` | `FeatureFlag 'new-upload-flow': 'version' must be a valid expression (e.g. '>= 2', '2..4')` |
+
+### Documentation generation
+
+```bash
+picloud docs generate --format markdown  # → docs/
+picloud docs generate --format jsonschema # → schema.json
+picloud docs generate --format openapi   # → openapi.yaml
+```
+
+All three derive from the same SHACL shapes and platform ontology. Adding a new resource type to the ontology automatically updates all three documentation formats on the next generation pass.
+
+**Markdown output** — one page per resource type, property table with types and constraints, examples in both `.picloud` and Turtle.
+
+**JSON Schema output** — one schema per resource type, suitable for IDE validation plugins and code generation.
+
+**OpenAPI output** — describes the platform HTTP API surface derived from the resource types, suitable for client generation in any language.
+
+### Version control workflow
+
+`.picloud` files are checked into version control. The compiled `deployment.ttl` is generated at deploy time — not checked in. This keeps the repository clean while maintaining Turtle as the canonical format.
+
+```
+photo-app/
+├── resources.picloud        ✓ checked in — human-authored
+├── schemas/
+│   ├── photo-events.ttl     ✓ checked in — event schemas
+│   └── album-events.ttl     ✓ checked in — event schemas
+└── ontology/
+    └── photo-app.ttl        ✓ checked in — domain ontology
+```
+
+### The new slice: picloud-compiler
+
+A new crate handles compilation, validation, and documentation generation:
+
+```
+picloud-compiler/
+├── src/
+│   ├── parser.rs      — .picloud surface format parser
+│   ├── compiler.rs    — .picloud → Turtle with stable IRI generation
+│   ├── validator.rs   — SHACL validation + human-readable error translation
+│   ├── merger.rs      — merges multiple files into one deployment graph
+│   ├── docs.rs        — Markdown / JSON Schema / OpenAPI generation
+│   └── lib.rs
+```
+
+**Rationale:**
+- The platform ontology is already the type system — SHACL validation is not an addition, it is the removal of a parallel custom validation layer
+- Turtle as canonical format means resource declarations and resource state use the same data model — no impedance mismatch
+- Named IRIs for all nested structures means every part of a resource definition is dereferenceable and SPARQL-queryable — blank nodes are not
+- Documentation and JSON Schema generated from SHACL shapes means the docs are always accurate — they cannot drift from the actual validation rules
+- `.picloud` surface format preserves developer ergonomics without requiring every developer to learn Turtle
+- Offline validation means CI/CD pipelines can validate without cluster access
+- Both `.picloud` and `.ttl` accepted means power users and LLMs can write Turtle directly when appropriate
+
+**Consequences:**
+- `picloud-compiler` is a new crate added to the workspace (depends only on `picloud-domain`)
+- ADR-007 is partially superseded — the `.picloud` syntax remains but is now a compiler input, not the platform's native format
+- The platform ontology (`platform.ttl`) becomes the most important file in the repository — it defines every valid resource type and constraint
+- All resource type additions require updating the platform ontology and SHACL shapes before implementation
+- The compiler's IRI generation rules must be stable — changing them would break existing deployments
+
+---
+
+## ADR-050: Builder Pattern CLI for Resource Generation
+
+**Status:** Accepted
+
+**Context:** Developers need to create new `.picloud` resource files without memorising syntax. The platform ontology and SHACL shapes define every valid resource type and property — the CLI can use this knowledge to guide developers interactively and generate valid files automatically.
+
+**Decision:** `picloud new {resource-type}` generates a `.picloud` file for a new resource. It accepts flags for all properties — fully specified invocations produce the file with no prompts. Partially specified invocations prompt for required fields only. After generation, `picloud compile validate` runs automatically. Generated files are never overwritten unless `--overwrite` is specified.
+
+**Behaviour:**
+
+```bash
+# Fully specified — no prompts, CI/CD friendly
+picloud new container \
+  --product photo-app \
+  --name api-server \
+  --image photo-api:1.0.0 \
+  --identity api-worker \
+  --mount media-store:/data \
+  --tag team=backend \
+  --tag environment=production \
+  --output ./photo-app/containers/api-server.picloud
+
+# Partially specified — prompts for missing required fields only
+picloud new container --product photo-app
+? Container name: api-server
+? Image: photo-api:1.0.0
+? Workload identity: api-worker
+✓ Generated: ./containers/api-server.picloud
+✓ Validation passed
+
+# Overwrite existing file
+picloud new container --product photo-app --name api-server --overwrite
+```
+
+**Supported resource types:**
+`product`, `container`, `binary`, `volume`, `feature-flag`, `config`, `inference-rule`, `event-store`, `rdf-store`, `ingress`, `group`, `event-subscription`, `ontology`
+
+**Output flag:** `--output` specifies the file path. If omitted, defaults to `./{resource-type}s/{name}.picloud` relative to the current directory.
+
+**Overwrite protection:** If the output file already exists and `--overwrite` is not set, the CLI refuses with a clear error. This prevents accidental overwrite of hand-edited files.
+
+**Post-generation validation:** After writing the file, `picloud compile validate` runs automatically against the generated file. If validation fails (e.g. a referenced volume does not exist in the same directory), the error is reported with the human-readable messages from ADR-049.
+
+**Flag naming:** All flags match the `.picloud` property names exactly — `--image`, `--identity`, `--mount`, `--tag`. This makes the CLI self-documenting and consistent with the resource files developers read and edit.
+
+**Rationale:**
+- Flags-first means CI/CD pipelines and LLMs can use `picloud new` non-interactively
+- Interactive fallback for required fields means humans get guidance without remembering syntax
+- Auto-validation closes the feedback loop — the developer knows the file is valid immediately
+- Overwrite protection prevents accidental data loss on hand-edited files
+- Flag names matching property names means one mental model for CLI and file format
+- Generated files are plain `.picloud` text — developers can open and edit them immediately
+
+**Consequences:**
+- `picloud new` is implemented in `picloud-cli` using the `picloud-compiler` crate for generation and validation
+- The builder must know which fields are required vs optional for each resource type — derived from SHACL `sh:minCount` constraints
+- The interactive prompt library must handle Ctrl+C gracefully and not leave partial files
+
+---
+
+## ADR-051: Product IAM — Roles, Custom Claims, Scopes, and Audience
+
+**Status:** Accepted
+
+**Context:** Products act as OIDC App Registrations (ADR-017). A token issued by the platform for a product must carry the roles, permissions, and custom claims specific to that product. Without roles and scopes, the token is structurally valid but semantically empty. Without audience validation, tokens can be reused across products. Four capabilities are needed: role definitions with inheritance, custom static claims, product-defined OAuth scopes, and audience-bound tokens.
+
+**Decision:** Products declare roles, scopes, and custom claims as resources in their `.picloud` files. The platform IAM engine resolves roles (including inheritance via OWL subclass inference), evaluates scope-to-claim mappings, and issues tokens with product-scoped audience. Three token flows are supported: user authentication, on-behalf-of (user delegating to a product acting against another product), and M2M client credentials.
+
+### Token anatomy
+
+Every token issued for a product carries:
+
+```json
+{
+  "iss": "https://picloud.local",
+  "aud": "https://picloud.local/products/photo-app",
+  "sub": "https://picloud.local/platform/identities/alice",
+  "exp": 1735689600,
+  "iat": 1735686000,
+  "scope": "photos:read photos:write",
+  "roles": ["editor"],
+  "permissions": ["photos:read", "photos:write", "albums:manage"],
+  "department": "engineering"
+}
+```
+
+- `iss` — always the platform IRI (cluster domain)
+- `aud` — the product IRI. A token for `photo-app` is rejected by `user-service`
+- `sub` — the user's platform identity IRI
+- `scope` — space-separated OAuth scopes granted in this token
+- `roles` — product roles assigned to this user
+- `permissions` — flattened permission set from all assigned roles
+- Custom claims — static key-value pairs declared on roles or scopes
+
+### Role declaration
+
+```bicep
+role "viewer" = {
+  product:     "photo-app"
+  description: "Can view photos and albums"
+  permissions: [
+    "photos:read"
+    "albums:read"
+  ]
+  claims: {
+    "access_level": "read-only"
+  }
+}
+
+role "editor" = {
+  product:     "photo-app"
+  description: "Can view and manage photos"
+  inherits:    "viewer"        // inherits all viewer permissions and claims
+  permissions: [
+    "photos:write"
+    "albums:manage"
+  ]
+  claims: {
+    "access_level": "read-write"
+  }
+}
+
+role "admin" = {
+  product:     "photo-app"
+  description: "Full product access"
+  inherits:    "editor"        // transitive — inherits viewer and editor
+  permissions: [
+    "photos:delete"
+    "albums:delete"
+    "users:manage"
+  ]
+  claims: {
+    "access_level": "admin"
+  }
+}
+```
+
+**Role inheritance** uses `rdfs:subClassOf` in the RDF graph — the OWL inference engine (ADR-039) resolves the full permission set transitively. `admin` inherits `editor` which inherits `viewer` — token issuance reads the inferred permission closure, not just the declared permissions.
+
+### Scope declaration
+
+```bicep
+scope "photos:read" = {
+  product:     "photo-app"
+  description: "Read access to photos and albums"
+  claims: {
+    "photos_access": "read"
+  }
+  permissions: ["photos:read", "albums:read"]
+}
+
+scope "photos:write" = {
+  product:     "photo-app"
+  description: "Write access to photos and albums"
+  claims: {
+    "photos_access": "write"
+  }
+  permissions: ["photos:read", "photos:write", "albums:manage"]
+}
+```
+
+Scopes and roles both contribute claims to the token. When a scope and a role declare the same claim key, the role value wins — roles are more specific.
+
+### Token flows
+
+**Flow 1 — User authentication (standard OIDC)**
+
+User authenticates with passkey → platform issues token scoped to the product:
+
+```
+User → OIDC authorization endpoint
+     → passkey authentication
+     → platform resolves user's roles in this product
+     → platform resolves requested scopes
+     → token issued with aud = product IRI
+```
+
+**Flow 2 — On-behalf-of (RFC 8693 token exchange)**
+
+`photo-app` needs to call `user-service` on Alice's behalf. Alice has already authenticated against `photo-app`:
+
+```
+photo-app → POST /token
+  grant_type: urn:ietf:params:oauth:grant-type:token-exchange
+  subject_token: <alice's photo-app token>
+  audience: https://picloud.local/products/user-service
+  scope: users:read
+
+Platform:
+  1. Validates subject_token (aud = photo-app ✓)
+  2. Checks photo-app has permission to act on behalf of users in user-service
+  3. Resolves Alice's roles in user-service
+  4. Issues new token:
+     aud: user-service
+     sub: alice
+     act: { sub: photo-app }    ← actor claim — who is acting on Alice's behalf
+     scope: users:read
+```
+
+The `act` claim preserves the full delegation chain — `user-service` knows both that Alice authorised the request and that `photo-app` is acting for her.
+
+**Flow 3 — M2M client credentials**
+
+A container in `photo-app` calls `user-service`'s SPARQL endpoint using its workload identity:
+
+```
+photo-app/api-server → POST /token
+  grant_type: client_credentials
+  client_id: photo-app
+  client_secret: <app registration secret>
+  scope: users:read
+  audience: https://picloud.local/products/user-service
+
+Platform:
+  1. Validates client credentials (App Registration)
+  2. Checks photo-app M2M permissions for user-service
+  3. Issues token:
+     aud: user-service
+     sub: https://picloud.local/products/photo-app
+     scope: users:read
+```
+
+M2M tokens have `sub` set to the product IRI, not a user IRI. `user-service` can distinguish M2M from delegated user access by checking `sub` type.
+
+### M2M permission declaration
+
+Products declare which other products they allow M2M access from:
+
+```bicep
+m2m-permission "allow-photo-app-read" = {
+  product:      "user-service"
+  client:       "photo-app"
+  scopes:       ["users:read"]
+  description:  "photo-app may read user profiles via M2M"
+}
+```
+
+This resource must exist in `user-service`'s deployment before `photo-app` can request M2M tokens. This is consistent with ADR-022 (inter-product dependencies are declared resources) and ADR-028 (low coupling enforced structurally).
+
+### Audience validation in the SDK
+
+The SDK validates `aud` automatically on every incoming token:
+
+```rust
+// Rust SDK — token validation
+let claims = picloud.iam().validate_token(token, expected_audience)?;
+// Fails if aud != https://picloud.local/products/user-service
+```
+
+```typescript
+// TypeScript SDK
+const claims = await picloud.iam().validateToken(token, expectedAudience);
+```
+
+```csharp
+// .NET SDK
+var claims = await picloud.Iam().ValidateTokenAsync(token, expectedAudience);
+```
+
+### RDF representation
+
+```turtle
+<https://picloud.local/products/photo-app/roles/editor>
+    a pc:Role ;
+    pc:product    <https://picloud.local/products/photo-app> ;
+    rdfs:subClassOf <https://picloud.local/products/photo-app/roles/viewer> ;
+    pc:permission "photos:write" ;
+    pc:permission "albums:manage" ;
+    pc:claim [ pc:claimKey "access_level" ; pc:claimValue "read-write" ] .
+```
+
+Role inheritance is `rdfs:subClassOf` — the OWL inference engine materialises the full permission closure automatically. Token issuance queries the inferred graph, not the raw triples.
+
+**Rationale:**
+- Audience binding (`aud`) prevents token reuse across products — a fundamental JWT security property that is cheap to implement and expensive to lack
+- Role inheritance via `rdfs:subClassOf` reuses the inference engine already in the platform — no custom inheritance logic
+- On-behalf-of (RFC 8693) is the standard OAuth pattern for delegated access — no proprietary token exchange mechanism needed
+- M2M client credentials are standard OAuth — workloads already have App Registration credentials (ADR-017)
+- M2M permission declarations are resources in the target product — consistent with ADR-022, target product controls who can access it
+- Static custom claims cover 90% of real use cases without the token issuance latency of dynamic SPARQL claims (dynamic claims are Phase 3)
+- Custom scopes give API consumers a standard OAuth surface for requesting specific access
+
+**Consequences:**
+- `role`, `scope`, and `m2m-permission` are new product-scoped resource types
+- Token issuance in `picloud-iam` must query the inferred RDF graph for the full permission closure
+- `picloud-iam` must implement RFC 8693 token exchange endpoint
+- The SDK `validateToken` method must check `aud` — this is the most critical SDK method from a security perspective
+- Role inheritance creates a dependency ordering problem at deployment — if `editor` inherits `viewer`, `viewer` must exist before `editor` is created. The platform resolves this via the dependency graph at deploy time.
+- M2M permission resources must exist in the target product before M2M tokens can be issued — cross-product declaration, target wins

@@ -400,6 +400,21 @@ volume 'media-store' = {
 **Durability tiers (MVP):**
 - `full-replication` — data is replicated to every node. Maximum durability. Default for MVP.
 
+**Snapshots — local NAS (ADR-047):**
+Point-in-time immutable copies of a volume stored on a local NAS. Fast recovery from accidental deletion, corruption, or logical failures without internet dependency. Retention policy controls how many daily, weekly, and monthly snapshots are kept. Snapshots are stored separately from cluster NVMe to preserve live storage capacity.
+
+**Offsite backup — S3-compatible (ADR-047):**
+Encrypted, deduplicated, incremental backups to any S3-compatible endpoint (Backblaze B2, Cloudflare R2, self-hosted MinIO). Protects against total cluster loss — fire, flood, or theft. Data is encrypted client-side before upload. The platform manages scheduling, chunking, deduplication, and retention.
+
+**The three layers together:**
+```
+live data:   cluster NVMe  (full-replication across nodes)
+snapshots:   local NAS     (fast recovery, no internet)
+offsite:     S3 endpoint   (disaster recovery, survives total cluster loss)
+```
+
+Replication protects against hardware failure. Snapshots protect against accidental deletion and logical failures. Offsite protects against physical disasters. All three are declared in a single volume resource definition.
+
 **Durability tiers (future phases):**
 - `quorum` — replicated to a majority of nodes
 - `local` — single node, no replication, for ephemeral or cache workloads
@@ -873,7 +888,11 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 - [ ] Secret management — encrypted at rest, workload injection
 - [ ] Cascading deletion — delete Product cascades to all child resources
 - [ ] Per-product event bus
-- [ ] Ingress resource with automatic TLS
+- [ ] Volume snapshots — NAS storage, configurable schedule and retention
+- [ ] Offsite backup — S3-compatible, client-side encryption, incremental deduplication
+- [ ] Snapshot and backup lifecycle events (SnapshotCreated, BackupCompleted, BackupFailed etc.)
+- [ ] Backup failure alert rules (built-in)
+- [ ] CLI: `picloud volume snapshots`, `picloud volume restore`, `picloud volume backup`
 - [ ] Product configuration store — typed key-value with tags, workload override, live reload
 - [ ] Feature flags — version-bound on/off, SDK evaluation, event invalidation
 - [ ] `PICLOUD_PRODUCT_VERSION` injected into all workloads at startup
