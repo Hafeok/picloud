@@ -4,6 +4,8 @@
 /// All commands emit events to the cluster and subscribe to the result stream.
 /// The CLI never imports slice internals — it only talks HTTP to the cluster.
 
+mod new_command;
+
 #[cfg(feature = "fido2")]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 #[cfg(feature = "fido2")]
@@ -103,6 +105,11 @@ enum Commands {
     Docs {
         #[command(subcommand)]
         command: DocsCommands,
+    },
+    /// Generate .picloud resource files (ADR-050)
+    New {
+        #[command(subcommand)]
+        command: NewCommands,
     },
 }
 
@@ -380,6 +387,211 @@ enum DocsCommands {
         /// Output directory
         #[arg(long, default_value = "./docs/resources")]
         output: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum NewCommands {
+    /// Generate a product .picloud file
+    Product {
+        /// Product name
+        #[arg(long)]
+        name: String,
+        /// Product version
+        #[arg(long)]
+        version: String,
+        /// Human-readable description
+        #[arg(long)]
+        description: Option<String>,
+        /// Resource tags (key=value, repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate a container .picloud file
+    Container {
+        /// Container name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Container image
+        #[arg(long)]
+        image: String,
+        /// Workload identity name
+        #[arg(long)]
+        identity: Option<String>,
+        /// Volume mounts (volume:path, repeatable)
+        #[arg(long)]
+        mount: Vec<String>,
+        /// Resource tags (key=value, repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate a binary .picloud file
+    Binary {
+        /// Binary name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Path to executable
+        #[arg(long)]
+        executable: String,
+        /// Workload identity name
+        #[arg(long)]
+        identity: Option<String>,
+        /// Resource tags (key=value, repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate a volume .picloud file
+    Volume {
+        /// Volume name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Volume size in GB
+        #[arg(long)]
+        size: String,
+        /// Durability tier (full-replication, quorum, local, none)
+        #[arg(long)]
+        durability: Option<String>,
+        /// Resource tags (key=value, repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate a feature-flag .picloud file
+    FeatureFlag {
+        /// Flag name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Version constraint
+        #[arg(long)]
+        version: String,
+        /// Whether the flag is enabled
+        #[arg(long)]
+        enabled: bool,
+        /// Human-readable description
+        #[arg(long)]
+        description: Option<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate a config .picloud file
+    Config {
+        /// Config name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Human-readable description
+        #[arg(long)]
+        description: Option<String>,
+        /// Resource tags (key=value, repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate an inference-rule .picloud file
+    InferenceRule {
+        /// Rule name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Human-readable description
+        #[arg(long)]
+        description: Option<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate an ingress .picloud file
+    Ingress {
+        /// Ingress name
+        #[arg(long)]
+        name: String,
+        /// Owning product
+        #[arg(long)]
+        product: String,
+        /// Target container or binary name
+        #[arg(long)]
+        target: String,
+        /// Port number
+        #[arg(long)]
+        port: u16,
+        /// Hostname for host-based routing
+        #[arg(long)]
+        host: Option<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Generate a group .picloud file
+    Group {
+        /// Group name
+        #[arg(long)]
+        name: String,
+        /// Human-readable description
+        #[arg(long)]
+        description: Option<String>,
+        /// Resource tags (key=value, repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Allow overwriting existing files
+        #[arg(long)]
+        overwrite: bool,
     },
 }
 
@@ -1758,6 +1970,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("Documentation generation failed: {}", e);
                         std::process::exit(1);
                     }
+                }
+            }
+        },
+        Commands::New { command } => {
+            use new_command::{NewOptions, build_product, build_container, build_binary,
+                             build_volume, build_feature_flag, build_config,
+                             build_inference_rule, build_ingress, build_group};
+
+            let result = match command {
+                NewCommands::Product { name, version, description, tag, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_product(&name, &version, description.as_deref(), &tag, &opts)
+                }
+                NewCommands::Container { name, product, image, identity, mount, tag, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_container(&name, &product, &image, identity.as_deref(), &mount, &tag, &opts)
+                }
+                NewCommands::Binary { name, product, executable, identity, tag, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_binary(&name, &product, &executable, identity.as_deref(), &tag, &opts)
+                }
+                NewCommands::Volume { name, product, size, durability, tag, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_volume(&name, &product, &size, durability.as_deref(), &tag, &opts)
+                }
+                NewCommands::FeatureFlag { name, product, version, enabled, description, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_feature_flag(&name, &product, &version, enabled, description.as_deref(), &opts)
+                }
+                NewCommands::Config { name, product, description, tag, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_config(&name, &product, description.as_deref(), &tag, &opts)
+                }
+                NewCommands::InferenceRule { name, product, description, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_inference_rule(&name, &product, description.as_deref(), &opts)
+                }
+                NewCommands::Ingress { name, product, target, port, host, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_ingress(&name, &product, &target, port, host.as_deref(), &opts)
+                }
+                NewCommands::Group { name, description, tag, output, overwrite } => {
+                    let opts = NewOptions { output, overwrite };
+                    build_group(&name, description.as_deref(), &tag, &opts)
+                }
+            };
+
+            match result {
+                Ok(path) => println!("Generated: {}", path),
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
                 }
             }
         },
