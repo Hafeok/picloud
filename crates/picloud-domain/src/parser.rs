@@ -21,7 +21,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::{PiCloudError, Result};
-use crate::storage::{DurabilityTier, PerformanceTier, StorageIntent};
+use crate::storage::{
+    BackupFrequency, DurabilityTier, OffsiteBackupConfig, PerformanceTier, SnapshotConfig,
+    SnapshotRetention, SnapshotSchedule, StorageIntent,
+};
 use crate::workload::{
     BinarySpec, ContainerSpec, EnvValue, PortMapping, ResourceLimits, RestartPolicy,
     VolumeMount,
@@ -52,6 +55,11 @@ pub enum ResourceDeclaration {
     Group(GroupDecl),
     #[serde(rename = "inference-rule")]
     InferenceRule(InferenceRuleDecl),
+    /// A product-scoped OAuth scope (ADR-051)
+    Scope(ScopeDecl),
+    /// An M2M permission grant between products (ADR-051)
+    #[serde(rename = "m2m-permission")]
+    M2mPermission(M2mPermissionDecl),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,9 +83,57 @@ pub struct VolumeDecl {
     pub durability: Option<String>,
     #[serde(default)]
     pub performance: Option<String>,
+    /// Snapshot configuration (ADR-047)
+    #[serde(default)]
+    pub snapshots: Option<SnapshotDeclBlock>,
+    /// Offsite backup configuration (ADR-047)
+    #[serde(default)]
+    pub offsite: Option<OffsiteDeclBlock>,
     /// Tags attached to this resource (ADR-036)
     #[serde(default)]
     pub tags: HashMap<String, String>,
+}
+
+/// Snapshot configuration block as declared in a resource file (ADR-047)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotDeclBlock {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_snapshot_schedule")]
+    pub schedule: String,
+    pub storage_secret: String,
+    #[serde(default = "default_retention_daily")]
+    pub retention_daily: u32,
+    #[serde(default = "default_retention_weekly")]
+    pub retention_weekly: u32,
+    #[serde(default)]
+    pub retention_monthly: u32,
+}
+
+fn default_snapshot_schedule() -> String {
+    "daily".to_string()
+}
+fn default_retention_daily() -> u32 {
+    7
+}
+fn default_retention_weekly() -> u32 {
+    4
+}
+
+/// Offsite backup configuration block as declared in a resource file (ADR-047)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OffsiteDeclBlock {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub target_secret: String,
+    #[serde(default = "default_backup_frequency")]
+    pub frequency: String,
+    #[serde(default = "default_true")]
+    pub encryption: bool,
+}
+
+fn default_backup_frequency() -> String {
+    "daily".to_string()
 }
 
 fn default_size_gb() -> u64 {
@@ -161,6 +217,14 @@ pub struct IngressDecl {
     pub path: String,
     #[serde(default = "default_true")]
     pub tls: bool,
+    /// Hostname for host-based routing (e.g. "photos.picloud.local").
+    /// When set, the ingress matches requests with this Host header (ADR-048).
+    #[serde(default)]
+    pub host: Option<String>,
+    /// Internal-only route — reachable only within the cluster mTLS mesh,
+    /// never exposed on the external port (ADR-048).
+    #[serde(default)]
+    pub internal: bool,
     /// Tags attached to this resource (ADR-036)
     #[serde(default)]
     pub tags: HashMap<String, String>,
@@ -264,6 +328,35 @@ pub struct InferenceRuleDecl {
     /// The SPARQL CONSTRUCT query
     pub construct: String,
     /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+/// A product-scoped OAuth scope declaration (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScopeDecl {
+    pub name: String,
+    pub product: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub permissions: Vec<String>,
+    #[serde(default)]
+    pub claims: HashMap<String, String>,
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+/// An M2M permission declaration (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct M2mPermissionDecl {
+    pub name: String,
+    /// The product granting access
+    pub product: String,
+    /// The product being granted access
+    pub client: String,
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default)]
     pub tags: HashMap<String, String>,
 }
@@ -487,6 +580,24 @@ impl ResourceDeclaration {
                 }
                 Ok(())
             }
+            ResourceDeclaration::Scope(s) => {
+                if s.name.is_empty() || s.product.is_empty() {
+                    return Err(validation_err("scope", "name and product cannot be empty"));
+                }
+                if s.permissions.is_empty() {
+                    return Err(validation_err(&s.name, "permissions cannot be empty"));
+                }
+                Ok(())
+            }
+            ResourceDeclaration::M2mPermission(m) => {
+                if m.name.is_empty() || m.product.is_empty() || m.client.is_empty() {
+                    return Err(validation_err("m2m-permission", "name, product, and client cannot be empty"));
+                }
+                if m.scopes.is_empty() {
+                    return Err(validation_err(&m.name, "scopes cannot be empty"));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -505,6 +616,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::FeatureFlag(f) => Some(&f.product),
             ResourceDeclaration::Group(_) => None, // groups are platform-scoped
             ResourceDeclaration::InferenceRule(_) => None, // rules have their own scope field
+            ResourceDeclaration::Scope(s) => Some(&s.product),
+            ResourceDeclaration::M2mPermission(m) => Some(&m.product),
         }
     }
 
@@ -523,6 +636,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::FeatureFlag(f) => &f.name,
             ResourceDeclaration::Group(g) => &g.name,
             ResourceDeclaration::InferenceRule(r) => &r.name,
+            ResourceDeclaration::Scope(s) => &s.name,
+            ResourceDeclaration::M2mPermission(m) => &m.name,
         }
     }
 
@@ -541,6 +656,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::FeatureFlag(f) => &f.tags,
             ResourceDeclaration::Group(g) => &g.tags,
             ResourceDeclaration::InferenceRule(r) => &r.tags,
+            ResourceDeclaration::Scope(s) => &s.tags,
+            ResourceDeclaration::M2mPermission(m) => &m.tags,
         }
     }
 
@@ -559,6 +676,8 @@ impl ResourceDeclaration {
             ResourceDeclaration::FeatureFlag(_) => "feature-flag",
             ResourceDeclaration::Group(_) => "group",
             ResourceDeclaration::InferenceRule(_) => "inference-rule",
+            ResourceDeclaration::Scope(_) => "scope",
+            ResourceDeclaration::M2mPermission(_) => "m2m-permission",
         }
     }
 }
@@ -579,9 +698,36 @@ impl VolumeDecl {
             Some("standard") | None => PerformanceTier::Standard,
             _ => PerformanceTier::Standard,
         };
+        let snapshots = self.snapshots.as_ref().map(|s| SnapshotConfig {
+            enabled: s.enabled,
+            schedule: match s.schedule.as_str() {
+                "hourly" => SnapshotSchedule::Hourly,
+                "weekly" => SnapshotSchedule::Weekly,
+                _ => SnapshotSchedule::Daily,
+            },
+            storage_secret: s.storage_secret.clone(),
+            retention: SnapshotRetention {
+                daily: s.retention_daily,
+                weekly: s.retention_weekly,
+                monthly: s.retention_monthly,
+            },
+        });
+
+        let offsite = self.offsite.as_ref().map(|o| OffsiteBackupConfig {
+            enabled: o.enabled,
+            target_secret: o.target_secret.clone(),
+            frequency: match o.frequency.as_str() {
+                "weekly" => BackupFrequency::Weekly,
+                _ => BackupFrequency::Daily,
+            },
+            encryption: o.encryption,
+        });
+
         StorageIntent {
             durability,
             performance,
+            snapshots,
+            offsite,
         }
     }
 }
@@ -896,6 +1042,8 @@ fn parse_bicep_declaration(
                 size_gb: get_u64_or_default(&kv, "size_gb", 10),
                 durability: get_string_optional(&kv, "durability"),
                 performance: get_string_optional(&kv, "performance"),
+                snapshots: None,
+                offsite: None,
                 tags: get_tags_map(&kv, "tags"),
             }))
         }
@@ -951,6 +1099,8 @@ fn parse_bicep_declaration(
                 port: get_u64_or_default(&kv, "port", 0) as u16,
                 path: get_string_required(&kv, "path", name)?,
                 tls: get_bool_or_default(&kv, "tls", true),
+                host: get_string_optional(&kv, "host"),
+                internal: get_bool_or_default(&kv, "internal", false),
                 tags: get_tags_map(&kv, "tags"),
             }))
         }
@@ -1009,6 +1159,28 @@ fn parse_bicep_declaration(
                 trigger_events,
                 reconciliation: get_bool_or_default(&kv, "reconciliation", false),
                 construct: get_string_required(&kv, "construct", name)?,
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "scope" => {
+            let permissions = get_string_array(&kv, "permissions")?;
+            Ok(ResourceDeclaration::Scope(ScopeDecl {
+                name: name.to_string(),
+                product: get_string_required(&kv, "product", name)?,
+                description: get_string_optional(&kv, "description"),
+                permissions,
+                claims: get_tags_map(&kv, "claims"),
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "m2m-permission" => {
+            let scopes = get_string_array(&kv, "scopes")?;
+            Ok(ResourceDeclaration::M2mPermission(M2mPermissionDecl {
+                name: name.to_string(),
+                product: get_string_required(&kv, "product", name)?,
+                client: get_string_required(&kv, "client", name)?,
+                scopes,
+                description: get_string_optional(&kv, "description"),
                 tags: get_tags_map(&kv, "tags"),
             }))
         }

@@ -131,6 +131,14 @@ pub enum PlatformEvent {
     // --- Node failure / workload rescheduling events ---
     NodeUnreachable(NodeUnreachablePayload),
     WorkloadRescheduled(WorkloadRescheduledPayload),
+
+    // --- Snapshot & backup events (ADR-047) ---
+    SnapshotCreated(SnapshotCreatedPayload),
+    SnapshotFailed(SnapshotFailedPayload),
+    SnapshotDeleted(SnapshotDeletedPayload),
+    BackupStarted(BackupStartedPayload),
+    BackupCompleted(BackupCompletedPayload),
+    BackupFailed(BackupFailedPayload),
 }
 
 // --- Payload types ---
@@ -598,6 +606,74 @@ pub struct ReplayFailedPayload {
     pub events_processed: usize,
 }
 
+// --- Snapshot & backup payloads (ADR-047) ---
+
+/// Payload for SnapshotCreated event.
+/// Emitted when a point-in-time snapshot of a volume is successfully taken.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotCreatedPayload {
+    /// IRI of the volume that was snapshotted
+    pub volume_iri: ResourceIri,
+    /// Path where the snapshot was stored
+    pub snapshot_path: String,
+    /// Snapshot size in bytes
+    pub size_bytes: u64,
+    /// When the snapshot was taken
+    pub created_at: DateTime<Utc>,
+}
+
+/// Payload for SnapshotFailed event.
+/// Emitted when a scheduled snapshot fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotFailedPayload {
+    /// IRI of the volume that was being snapshotted
+    pub volume_iri: ResourceIri,
+    /// Human-readable reason for failure
+    pub reason: String,
+}
+
+/// Payload for SnapshotDeleted event.
+/// Emitted when an old snapshot is removed by the retention policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotDeletedPayload {
+    /// IRI of the volume whose snapshot was deleted
+    pub volume_iri: ResourceIri,
+    /// Path of the deleted snapshot
+    pub snapshot_path: String,
+}
+
+/// Payload for BackupStarted event.
+/// Emitted when an offsite backup begins.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupStartedPayload {
+    /// IRI of the volume being backed up
+    pub volume_iri: ResourceIri,
+    /// The snapshot being backed up offsite
+    pub snapshot_path: String,
+}
+
+/// Payload for BackupCompleted event.
+/// Emitted when an offsite backup finishes successfully.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupCompletedPayload {
+    /// IRI of the volume that was backed up
+    pub volume_iri: ResourceIri,
+    /// Size of the backup in bytes
+    pub size_bytes: u64,
+    /// When the backup completed
+    pub completed_at: DateTime<Utc>,
+}
+
+/// Payload for BackupFailed event.
+/// Emitted when an offsite backup fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupFailedPayload {
+    /// IRI of the volume that was being backed up
+    pub volume_iri: ResourceIri,
+    /// Human-readable reason for failure
+    pub reason: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,5 +836,43 @@ mod tests {
         );
 
         assert!(env.product.is_none());
+    }
+
+    #[test]
+    fn snapshot_created_payload_serde() {
+        let payload = SnapshotCreatedPayload {
+            volume_iri: ResourceIri("https://picloud.local/products/photo-app/volumes/media".to_string()),
+            snapshot_path: "/snapshots/media/2026-04-07T10:00:00Z".to_string(),
+            size_bytes: 1024 * 1024 * 500,
+            created_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert!(json["snapshot_path"].as_str().unwrap().contains("2026"));
+        let back: SnapshotCreatedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.size_bytes, 1024 * 1024 * 500);
+    }
+
+    #[test]
+    fn snapshot_failed_payload_serde() {
+        let payload = SnapshotFailedPayload {
+            volume_iri: ResourceIri("https://picloud.local/products/photo-app/volumes/media".to_string()),
+            reason: "NAS unreachable".to_string(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["reason"], "NAS unreachable");
+        let back: SnapshotFailedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.reason, "NAS unreachable");
+    }
+
+    #[test]
+    fn backup_completed_payload_serde() {
+        let payload = BackupCompletedPayload {
+            volume_iri: ResourceIri("https://picloud.local/products/photo-app/volumes/media".to_string()),
+            size_bytes: 1024 * 1024 * 200,
+            completed_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        let back: BackupCompletedPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.size_bytes, 1024 * 1024 * 200);
     }
 }

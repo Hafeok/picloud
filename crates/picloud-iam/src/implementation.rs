@@ -25,6 +25,7 @@ use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
 use picloud_domain::traits::{IdentityProvider, ValidatedIdentity, WorkloadCertificate};
 
 /// Internal token claims — serialized to JSON then base64-encoded.
+/// Extended with audience, scopes, and permissions for ADR-051 Product IAM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TokenClaims {
     identity_iri: String,
@@ -32,6 +33,18 @@ struct TokenClaims {
     roles: Vec<String>,
     issued_at: i64,
     expires_at: i64,
+    /// Audience — product IRI the token is intended for (ADR-051)
+    #[serde(default)]
+    aud: Option<String>,
+    /// Scopes granted in this token (ADR-051)
+    #[serde(default)]
+    scopes: Vec<String>,
+    /// Flattened permissions from roles (ADR-051)
+    #[serde(default)]
+    permissions: Vec<String>,
+    /// Actor identity — present in on-behalf-of tokens (RFC 8693 / ADR-051)
+    #[serde(default)]
+    actor: Option<String>,
 }
 
 /// A stored identity with its associated roles.
@@ -202,6 +215,79 @@ impl LocalIdentityProvider {
             .unwrap_or_default()
     }
 
+    /// Token exchange (RFC 8693 / ADR-051) — exchange a user token for a
+    /// new token with a specific audience (on-behalf-of flow).
+    pub async fn token_exchange(
+        &self,
+        subject_token: &str,
+        audience: Option<&str>,
+        scope: Option<&str>,
+    ) -> Result<picloud_domain::identity::TokenResponse> {
+        // Validate the incoming subject token
+        let original_claims = self.verify_token(subject_token)?;
+
+        let now = Utc::now();
+        let scopes: Vec<String> = scope
+            .map(|s| s.split_whitespace().map(|x| x.to_string()).collect())
+            .unwrap_or_default();
+
+        let exchanged = TokenClaims {
+            identity_iri: original_claims.identity_iri.clone(),
+            product: original_claims.product.clone(),
+            roles: original_claims.roles.clone(),
+            issued_at: now.timestamp(),
+            expires_at: (now + Duration::seconds(self.token_ttl_secs)).timestamp(),
+            aud: audience.map(|a| a.to_string()),
+            scopes,
+            permissions: original_claims.permissions.clone(),
+            actor: Some(original_claims.identity_iri.clone()),
+        };
+
+        let token = self.sign_token(&exchanged)?;
+        debug!(
+            "Token exchange for {} -> audience {:?}",
+            original_claims.identity_iri, audience
+        );
+
+        Ok(picloud_domain::identity::TokenResponse {
+            access_token: token,
+            token_type: "Bearer".to_string(),
+            expires_in: self.token_ttl_secs,
+            scope: scope.map(|s| s.to_string()),
+        })
+    }
+
+    /// Issue a token with explicit audience and scopes (ADR-051).
+    pub async fn issue_token_with_audience(
+        &self,
+        identity_iri: &ResourceIri,
+        audience: &str,
+        scopes: Vec<String>,
+    ) -> Result<String> {
+        let roles = {
+            let store = self.identities.read().await;
+            store
+                .get(identity_iri.as_str())
+                .map(|s| s.roles.clone())
+                .unwrap_or_default()
+        };
+
+        let now = Utc::now();
+        let claims = TokenClaims {
+            identity_iri: identity_iri.as_str().to_string(),
+            product: None,
+            roles,
+            issued_at: now.timestamp(),
+            expires_at: (now + Duration::seconds(self.token_ttl_secs)).timestamp(),
+            aud: Some(audience.to_string()),
+            scopes,
+            permissions: Vec::new(),
+            actor: None,
+        };
+
+        self.sign_token(&claims)
+    }
+
     /// Register an identity so that tokens issued for it carry the correct roles.
     pub async fn register_identity(&self, iri: ResourceIri, roles: Vec<String>) {
         let key = iri.as_str().to_string();
@@ -271,6 +357,10 @@ impl IdentityProvider for LocalIdentityProvider {
                 .unwrap_or_default()
         };
 
+        let aud = product.map(|p| {
+            format!("https://{}/products/{}", self.cluster_domain.0, p)
+        });
+
         let now = Utc::now();
         let claims = TokenClaims {
             identity_iri: identity_iri.as_str().to_string(),
@@ -278,6 +368,10 @@ impl IdentityProvider for LocalIdentityProvider {
             roles,
             issued_at: now.timestamp(),
             expires_at: (now + Duration::seconds(self.token_ttl_secs)).timestamp(),
+            aud,
+            scopes: Vec::new(),
+            permissions: Vec::new(),
+            actor: None,
         };
 
         debug!("Issuing token for {}", identity_iri);
@@ -292,6 +386,9 @@ impl IdentityProvider for LocalIdentityProvider {
             identity_iri,
             product: claims.product,
             roles: claims.roles,
+            audience: claims.aud,
+            scopes: claims.scopes,
+            permissions: claims.permissions,
         })
     }
 

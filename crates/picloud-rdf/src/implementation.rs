@@ -1201,6 +1201,92 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    // ---- Snapshot & Backup Projection (ADR-047) ----
+
+    /// Project a SnapshotCreated event — update volume snapshot status triples.
+    fn project_snapshot_created(&self, event: &EventEnvelope) -> Result<()> {
+        let volume_iri_str = event.payload["volume_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let snapshot_path = event.payload["snapshot_path"]
+            .as_str()
+            .unwrap_or_default();
+        let ts_fallback2 = event.timestamp.to_rfc3339();
+        let created_at = event.payload["created_at"]
+            .as_str()
+            .unwrap_or(&ts_fallback2);
+
+        // Update lastSnapshotAt on the volume
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}lastSnapshotAt"),
+            Literal::new_simple_literal(created_at).into(),
+        )?;
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}lastSnapshotPath"),
+            Literal::new_simple_literal(snapshot_path).into(),
+        )?;
+
+        // Increment snapshotCount via a query + update
+        let count_sparql = format!(
+            "SELECT ?count WHERE {{ <{volume_iri_str}> <{PICLOUD_NS}snapshotCount> ?count }}"
+        );
+        let current_count = if let Ok(results) = self.execute_query(&count_sparql) {
+            results.bindings.first()
+                .and_then(|row| row.get("count"))
+                .and_then(|v| v.get("value"))
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Remove old count triple and insert new
+        let old_count_str = current_count.to_string();
+        let s = NamedNode::new(volume_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid IRI: {e}")))?;
+        let p = NamedNode::new(format!("{PICLOUD_NS}snapshotCount"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+        let old_quad = Quad::new(
+            s.clone(),
+            p.clone(),
+            Literal::new_simple_literal(&old_count_str),
+            oxigraph::model::GraphName::DefaultGraph,
+        );
+        let _ = self.store.remove(&old_quad);
+
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}snapshotCount"),
+            Literal::new_simple_literal((current_count + 1).to_string()).into(),
+        )?;
+
+        debug!(volume = volume_iri_str, "projected SnapshotCreated");
+        Ok(())
+    }
+
+    /// Project a BackupCompleted event — update volume backup status triples.
+    fn project_backup_completed(&self, event: &EventEnvelope) -> Result<()> {
+        let volume_iri_str = event.payload["volume_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let ts_fallback = event.timestamp.to_rfc3339();
+        let completed_at = event.payload["completed_at"]
+            .as_str()
+            .unwrap_or(&ts_fallback);
+
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}lastBackupAt"),
+            Literal::new_simple_literal(completed_at).into(),
+        )?;
+
+        debug!(volume = volume_iri_str, "projected BackupCompleted");
+        Ok(())
+    }
+
     // ---- RDFS Inference (ADR-039) ----
 
     /// Materialise RDFS subclass inference.
@@ -1598,6 +1684,17 @@ impl StateProjector for OxigraphProjector {
             // Replay lifecycle events are projected for audit (ADR-035)
             "ReplayStarted" | "ReplayProgress" | "ReplayCompleted" | "ReplayFailed" => {
                 debug!(event_type = %event.event_type, "replay lifecycle event — recorded");
+                Ok(())
+            }
+            // Snapshot & backup events (ADR-047) — project status triples
+            "SnapshotCreated" => self.project_snapshot_created(event),
+            "SnapshotDeleted" | "SnapshotFailed" => {
+                debug!(event_type = %event.event_type, "snapshot lifecycle event — recorded");
+                Ok(())
+            }
+            "BackupCompleted" => self.project_backup_completed(event),
+            "BackupStarted" | "BackupFailed" => {
+                debug!(event_type = %event.event_type, "backup lifecycle event — recorded");
                 Ok(())
             }
             // Telemetry events (ADR-045) — no RDF projection needed

@@ -259,6 +259,85 @@ pub struct Role {
     pub name: String,
     pub product: Option<String>,
     pub permissions: Vec<Permission>,
+    /// Parent role name — resolved transitively via OWL inference (rdfs:subClassOf) (ADR-051)
+    #[serde(default)]
+    pub inherits: Option<String>,
+    /// Static key-value claims added to tokens for users with this role (ADR-051)
+    #[serde(default)]
+    pub claims: std::collections::HashMap<String, String>,
+}
+
+/// A product-scoped OAuth scope (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProductScope {
+    pub name: String,
+    pub product: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Permission patterns granted when this scope is requested
+    pub permissions: Vec<String>,
+    /// Static claims added when this scope is granted
+    #[serde(default)]
+    pub claims: std::collections::HashMap<String, String>,
+}
+
+/// M2M permission — declares which products may request client_credentials
+/// tokens against this product (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct M2mPermission {
+    pub name: String,
+    /// The product granting access (the resource owner)
+    pub product: String,
+    /// The product being granted access (the client)
+    pub client: String,
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// The resolved claims for a token — assembled at issuance time
+/// from roles (with inherited permissions), scopes, and custom claims (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedTokenClaims {
+    pub subject: String,
+    pub audience: String,
+    pub issuer: String,
+    pub scopes: Vec<String>,
+    pub roles: Vec<String>,
+    /// Full permission set — flattened from all assigned roles (including inherited)
+    pub permissions: Vec<String>,
+    /// Custom claims — role claims merged with scope claims, role wins on conflict
+    pub custom: std::collections::HashMap<String, String>,
+    /// Actor claim — present in on-behalf-of tokens (RFC 8693)
+    #[serde(default)]
+    pub actor: Option<String>,
+}
+
+/// Token flow type — determines how the token was issued (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenFlow {
+    /// Standard OIDC user authentication
+    UserAuth,
+    /// RFC 8693 on-behalf-of — user delegated to a product
+    OnBehalfOf { actor_product: String },
+    /// OAuth 2.0 client credentials — M2M
+    ClientCredentials { client_product: String },
+}
+
+/// Token exchange request (RFC 8693) (ADR-051)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenExchangeRequest {
+    pub grant_type: String,
+    /// The incoming access token
+    pub subject_token: String,
+    pub subject_token_type: String,
+    /// Target audience (product IRI)
+    #[serde(default)]
+    pub audience: Option<String>,
+    /// Requested scopes
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// A permission — scoped to a resource IRI pattern and an action
@@ -376,5 +455,109 @@ mod tests {
             target_identity: None,
         };
         assert!(!token.is_valid());
+    }
+
+    #[test]
+    fn role_with_inheritance_serde() {
+        let role = Role {
+            name: "editor".to_string(),
+            product: Some("photo-app".to_string()),
+            permissions: vec![Permission {
+                resource_pattern: "https://picloud.local/products/photo-app/*".to_string(),
+                action: PermissionAction::Write,
+            }],
+            inherits: Some("viewer".to_string()),
+            claims: std::collections::HashMap::from([
+                ("tier".to_string(), "premium".to_string()),
+            ]),
+        };
+        let json = serde_json::to_value(&role).unwrap();
+        assert_eq!(json["inherits"], "viewer");
+        assert_eq!(json["claims"]["tier"], "premium");
+        let back: Role = serde_json::from_value(json).unwrap();
+        assert_eq!(back.inherits, Some("viewer".to_string()));
+        assert_eq!(back.claims.get("tier"), Some(&"premium".to_string()));
+    }
+
+    #[test]
+    fn product_scope_serde() {
+        let scope = ProductScope {
+            name: "photos:read".to_string(),
+            product: "photo-app".to_string(),
+            description: Some("Read access to photos".to_string()),
+            permissions: vec!["photos.read".to_string()],
+            claims: std::collections::HashMap::from([
+                ("access_level".to_string(), "read".to_string()),
+            ]),
+        };
+        let json = serde_json::to_value(&scope).unwrap();
+        assert_eq!(json["name"], "photos:read");
+        let back: ProductScope = serde_json::from_value(json).unwrap();
+        assert_eq!(back.permissions, vec!["photos.read"]);
+    }
+
+    #[test]
+    fn m2m_permission_serde() {
+        let perm = M2mPermission {
+            name: "billing-to-photos".to_string(),
+            product: "photo-app".to_string(),
+            client: "billing-app".to_string(),
+            scopes: vec!["photos:read".to_string()],
+            description: Some("Billing reads photo metadata".to_string()),
+        };
+        let json = serde_json::to_value(&perm).unwrap();
+        assert_eq!(json["client"], "billing-app");
+        let back: M2mPermission = serde_json::from_value(json).unwrap();
+        assert_eq!(back.scopes, vec!["photos:read"]);
+    }
+
+    #[test]
+    fn resolved_token_claims_serde() {
+        let claims = ResolvedTokenClaims {
+            subject: "https://picloud.local/identities/alice".to_string(),
+            audience: "https://picloud.local/products/photo-app".to_string(),
+            issuer: "https://picloud.local".to_string(),
+            scopes: vec!["photos:read".to_string()],
+            roles: vec!["editor".to_string()],
+            permissions: vec!["photos.read".to_string(), "photos.write".to_string()],
+            custom: std::collections::HashMap::from([
+                ("tier".to_string(), "premium".to_string()),
+            ]),
+            actor: None,
+        };
+        let json = serde_json::to_value(&claims).unwrap();
+        assert_eq!(json["audience"], "https://picloud.local/products/photo-app");
+        let back: ResolvedTokenClaims = serde_json::from_value(json).unwrap();
+        assert_eq!(back.permissions.len(), 2);
+    }
+
+    #[test]
+    fn token_exchange_request_serde() {
+        let req = TokenExchangeRequest {
+            grant_type: "urn:ietf:params:oauth:grant-type:token-exchange".to_string(),
+            subject_token: "eyJhbGc...".to_string(),
+            subject_token_type: "urn:ietf:params:oauth:token-type:access_token".to_string(),
+            audience: Some("https://picloud.local/products/photo-app".to_string()),
+            scope: Some("photos:read".to_string()),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["grant_type"], "urn:ietf:params:oauth:grant-type:token-exchange");
+        let back: TokenExchangeRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(back.audience, Some("https://picloud.local/products/photo-app".to_string()));
+    }
+
+    #[test]
+    fn token_flow_serde() {
+        let flow = TokenFlow::OnBehalfOf {
+            actor_product: "https://picloud.local/products/billing".to_string(),
+        };
+        let json = serde_json::to_value(&flow).unwrap();
+        let back: TokenFlow = serde_json::from_value(json).unwrap();
+        match back {
+            TokenFlow::OnBehalfOf { actor_product } => {
+                assert!(actor_product.contains("billing"));
+            }
+            _ => panic!("expected OnBehalfOf"),
+        }
     }
 }

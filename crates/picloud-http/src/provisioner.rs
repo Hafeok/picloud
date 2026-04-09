@@ -21,6 +21,7 @@ use picloud_domain::workload::{ContainerSpec, BinarySpec, EnvValue, PortMapping,
 use tracing::{error, info, warn};
 
 use crate::implementation::{IngressRoute, IngressTable};
+use crate::router::{RouteEntry, SharedRouter};
 
 /// Configuration for the resource provisioner.
 pub struct Provisioner {
@@ -31,6 +32,8 @@ pub struct Provisioner {
     secret_store: Arc<dyn SecretStore>,
     iri_builder: IriBuilder,
     ingress_routes: Option<IngressTable>,
+    /// Native ingress router (ADR-048).
+    ingress_router: Option<SharedRouter>,
 }
 
 impl Provisioner {
@@ -51,6 +54,7 @@ impl Provisioner {
             secret_store,
             iri_builder,
             ingress_routes: None,
+            ingress_router: None,
         }
     }
 
@@ -58,6 +62,12 @@ impl Provisioner {
     /// when Ingress resources are declared.
     pub fn with_ingress_table(mut self, table: IngressTable) -> Self {
         self.ingress_routes = Some(table);
+        self
+    }
+
+    /// Set the native ingress router (ADR-048).
+    pub fn with_ingress_router(mut self, router: SharedRouter) -> Self {
+        self.ingress_router = Some(router);
         self
     }
 
@@ -79,6 +89,7 @@ impl Provisioner {
         let scheduler = self.scheduler.clone();
         let secret_store = self.secret_store.clone();
         let ingress_routes = self.ingress_routes.clone();
+        let ingress_router = self.ingress_router.clone();
         let iri_builder = self.iri_builder;
 
         let handle = tokio::spawn(async move {
@@ -94,6 +105,7 @@ impl Provisioner {
                                 &scheduler,
                                 &secret_store,
                                 &ingress_routes,
+                                &ingress_router,
                                 &iri_builder,
                             )
                             .await;
@@ -146,6 +158,7 @@ async fn provision_resource(
     scheduler: &Arc<dyn WorkloadScheduler>,
     secret_store: &Arc<dyn SecretStore>,
     ingress_routes: &Option<IngressTable>,
+    ingress_router: &Option<SharedRouter>,
     iri_builder: &IriBuilder,
 ) {
     let payload = &event.payload;
@@ -187,7 +200,7 @@ async fn provision_resource(
         "Binary" => provision_binary(scheduler, &resource_iri, payload).await,
         "Secret" => provision_secret(secret_store, payload).await,
         "Ingress" => {
-            provision_ingress(ingress_routes, resource_iri_str, payload).await
+            provision_ingress(ingress_routes, ingress_router, resource_iri_str, payload).await
         }
         "EventSubscription" => {
             info!(
@@ -304,9 +317,11 @@ async fn provision_secret(
     Ok(())
 }
 
-/// Provision an ingress by registering the route in the ingress table.
+/// Provision an ingress by registering the route in both the legacy table
+/// and the native ingress router (ADR-048).
 async fn provision_ingress(
     ingress_routes: &Option<IngressTable>,
+    ingress_router: &Option<SharedRouter>,
     resource_iri_str: &str,
     payload: &serde_json::Value,
 ) -> picloud_domain::error::Result<()> {
@@ -327,6 +342,18 @@ async fn provision_ingress(
         .unwrap_or("unknown")
         .to_string();
 
+    let host = payload
+        .get("host")
+        .and_then(|v| v.as_str())
+        .unwrap_or("picloud.local")
+        .to_string();
+
+    let internal = payload
+        .get("internal")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Legacy IngressTable
     if let Some(table) = ingress_routes {
         let route = IngressRoute {
             path: path.clone(),
@@ -335,20 +362,38 @@ async fn provision_ingress(
         };
         let mut routes = table.write().await;
         routes.insert(resource_iri_str.to_string(), route);
-
-        info!(
-            resource_iri = resource_iri_str,
-            path = %path,
-            target_port = target_port,
-            product = %product,
-            "Ingress route registered"
-        );
-    } else {
-        info!(
-            resource_iri = resource_iri_str,
-            "Ingress route not registered — no routing table available"
-        );
     }
+
+    // ADR-048: Native ingress router
+    if let Some(router) = ingress_router {
+        let ingress_iri = picloud_domain::iri::ResourceIri::new(resource_iri_str)
+            .unwrap_or_else(|_| {
+                picloud_domain::iri::ResourceIri::new(format!(
+                    "https://picloud.local/products/{product}/ingresses/unknown"
+                ))
+                .unwrap()
+            });
+
+        let entry = RouteEntry {
+            path_prefix: path.clone(),
+            upstream_addr: "127.0.0.1".to_string(),
+            upstream_port: target_port,
+            product: product.clone(),
+            internal,
+            ingress_iri,
+        };
+        router.upsert_route(host.clone(), entry).await;
+    }
+
+    info!(
+        resource_iri = resource_iri_str,
+        path = %path,
+        host = %host,
+        target_port = target_port,
+        product = %product,
+        internal = internal,
+        "Ingress route registered"
+    );
 
     Ok(())
 }
@@ -1090,6 +1135,7 @@ mod tests {
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
             &(secret_store.clone() as Arc<dyn SecretStore>),
             &None,
+            &None,
             &iri_builder,
         )
         .await;
@@ -1130,6 +1176,7 @@ mod tests {
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
             &(secret_store.clone() as Arc<dyn SecretStore>),
             &None,
+            &None,
             &iri_builder,
         )
         .await;
@@ -1166,6 +1213,7 @@ mod tests {
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
             &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &None,
             &iri_builder,
         )
@@ -1205,6 +1253,7 @@ mod tests {
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
             &(secret_store.clone() as Arc<dyn SecretStore>),
             &Some(ingress_table.clone()),
+            &None,
             &iri_builder,
         )
         .await;
@@ -1248,6 +1297,7 @@ mod tests {
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
             &(secret_store.clone() as Arc<dyn SecretStore>),
             &None,
+            &None,
             &iri_builder,
         )
         .await;
@@ -1281,6 +1331,7 @@ mod tests {
             &(storage.clone() as Arc<dyn StorageBackend>),
             &(scheduler.clone() as Arc<dyn WorkloadScheduler>),
             &(secret_store.clone() as Arc<dyn SecretStore>),
+            &None,
             &None,
             &iri_builder,
         )

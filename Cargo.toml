@@ -11,6 +11,7 @@ members = [
     "crates/picloud-http",
     "crates/picloud-sdk-gen",
     "crates/picloud-cli",
+    "crates/picloud-compiler",
     "src",
 ]
 resolver = "2"
@@ -102,6 +103,7 @@ picloud-network  = { path = "crates/picloud-network" }
 picloud-http     = { path = "crates/picloud-http" }
 picloud-sdk-gen  = { path = "crates/picloud-sdk-gen" }
 picloud-cli      = { path = "crates/picloud-cli" }
+picloud-compiler = { path = "crates/picloud-compiler" }
 
 [profile.release]
 opt-level     = 3

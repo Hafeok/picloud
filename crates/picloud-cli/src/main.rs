@@ -89,6 +89,21 @@ enum Commands {
         #[command(subcommand)]
         command: TelemetryCommands,
     },
+    /// Volume snapshot and backup management (ADR-047)
+    Volume {
+        #[command(subcommand)]
+        command: VolumeCommands,
+    },
+    /// Compile .picloud files to Turtle (ADR-049)
+    Compile {
+        #[command(subcommand)]
+        command: CompileCommands,
+    },
+    /// Generate documentation from resource types (ADR-049)
+    Docs {
+        #[command(subcommand)]
+        command: DocsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -313,6 +328,58 @@ enum TelemetryCommands {
         /// SQL query (future: parsed server-side; for now, ignored)
         #[arg(long)]
         sql: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum VolumeCommands {
+    /// List snapshots for a volume (ADR-047)
+    Snapshots {
+        /// Volume path (product/volumes/name) or full IRI
+        volume: String,
+    },
+    /// List offsite backups for a volume (ADR-047)
+    Backups {
+        /// Volume path (product/volumes/name) or full IRI
+        volume: String,
+    },
+    /// Restore a volume from a snapshot (ADR-047)
+    Restore {
+        /// Volume path (product/volumes/name) or full IRI
+        volume: String,
+        /// Snapshot timestamp to restore from
+        #[arg(long)]
+        snapshot: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CompileCommands {
+    /// Validate .picloud files without compiling
+    Validate {
+        /// Path to directory or file containing .picloud files
+        path: String,
+    },
+    /// Compile .picloud files to deployment.ttl
+    Build {
+        /// Path to directory or file containing .picloud files
+        path: String,
+        /// Output path for the deployment graph (default: deployment.ttl)
+        #[arg(long, default_value = "deployment.ttl")]
+        output: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DocsCommands {
+    /// Generate documentation from resource type definitions
+    Generate {
+        /// Output format: markdown, jsonschema, openapi
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        /// Output directory
+        #[arg(long, default_value = "./docs/resources")]
+        output: String,
     },
 }
 
@@ -1565,6 +1632,135 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         },
+        Commands::Compile { command } => match command {
+            CompileCommands::Validate { path } => {
+                use picloud_compiler::{parser, validator};
+                println!("Validating .picloud files in: {}", path);
+                match parser::parse_directory(&path) {
+                    Ok(files) => {
+                        if files.is_empty() {
+                            println!("No .picloud files found in {}", path);
+                        } else {
+                            println!("Parsed {} file(s)", files.len());
+                            match validator::validate_offline(&files) {
+                                Ok(result) => {
+                                    result.print_report();
+                                    if !result.valid {
+                                        std::process::exit(1);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Validation error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            CompileCommands::Build { path, output } => {
+                use picloud_compiler::{parser, compiler, merger, validator};
+                use picloud_domain::iri::ClusterDomain;
+                println!("Compiling .picloud files in: {}", path);
+                match parser::parse_directory(&path) {
+                    Ok(files) => {
+                        if files.is_empty() {
+                            println!("No .picloud files found in {}", path);
+                            return Ok(());
+                        }
+                        println!("Parsed {} file(s)", files.len());
+
+                        // Validate first
+                        match validator::validate_offline(&files) {
+                            Ok(result) if !result.valid => {
+                                result.print_report();
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                eprintln!("Validation error: {}", e);
+                                std::process::exit(1);
+                            }
+                            _ => {}
+                        }
+
+                        // Compile each file
+                        let domain = ClusterDomain(cli.domain.clone());
+                        let mut compiled = Vec::new();
+                        for file in &files {
+                            match compiler::compile(file, &domain) {
+                                Ok(result) => compiled.push(result),
+                                Err(e) => {
+                                    eprintln!("Compile error in {}: {}", file.path, e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+
+                        // Merge
+                        match merger::merge(compiled, vec![]) {
+                            Ok(graph) => {
+                                match merger::write_deployment(&graph, &output) {
+                                    Ok(()) => {
+                                        println!("Wrote deployment graph to: {}", output);
+                                        println!("  {} resource IRI(s) declared", graph.declared_iris.len());
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to write output: {}", e);
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Merge error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        },
+        Commands::Docs { command } => match command {
+            DocsCommands::Generate { format, output } => {
+                use picloud_compiler::docs::{self, DocFormat};
+                let doc_format = match format.as_str() {
+                    "markdown"   => DocFormat::Markdown,
+                    "jsonschema" => DocFormat::JsonSchema,
+                    "openapi"    => DocFormat::OpenApi,
+                    other => {
+                        eprintln!("Unknown format '{}'. Use: markdown, jsonschema, openapi", other);
+                        std::process::exit(1);
+                    }
+                };
+                println!("Generating {} documentation to: {}", format, output);
+                match docs::generate(doc_format, &output) {
+                    Ok(files) => {
+                        for file in &files {
+                            // Write each generated file
+                            if let Some(parent) = std::path::Path::new(&file.path).parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            match std::fs::write(&file.path, &file.content) {
+                                Ok(()) => println!("  wrote: {}", file.path),
+                                Err(e) => eprintln!("  failed to write {}: {}", file.path, e),
+                            }
+                        }
+                        println!("Generated {} file(s)", files.len());
+                    }
+                    Err(e) => {
+                        eprintln!("Documentation generation failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        },
         Commands::Alerts { command } => match command {
             AlertCommands::List { severity, resource } => {
                 // Query the graph for active picloud:Alert triples (ADR-041)
@@ -1641,9 +1837,129 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         },
+        Commands::Volume { command } => match command {
+            VolumeCommands::Snapshots { volume } => {
+                let volume_iri = resolve_volume_iri(&cli.domain, &volume);
+
+                // Query the RDF graph for snapshot status
+                let sparql = format!(
+                    r#"SELECT ?snapshotCount ?lastSnapshotAt ?lastSnapshotPath
+                       WHERE {{
+                           <{volume_iri}> <https://picloud.local/ontology#snapshotCount> ?snapshotCount .
+                           OPTIONAL {{ <{volume_iri}> <https://picloud.local/ontology#lastSnapshotAt> ?lastSnapshotAt }}
+                           OPTIONAL {{ <{volume_iri}> <https://picloud.local/ontology#lastSnapshotPath> ?lastSnapshotPath }}
+                       }}"#
+                );
+
+                let path = format!("/graph?query={}", urlencoding(&sparql));
+                match client.get(&path).await {
+                    Ok(body) => {
+                        if let Some(bindings) = body.get("bindings").and_then(|v| v.as_array()) {
+                            if bindings.is_empty() {
+                                println!("No snapshots for {}", volume);
+                            } else {
+                                println!("Snapshots for {}:", volume);
+                                for b in bindings {
+                                    let count = b.get("snapshotCount")
+                                        .and_then(|v| v.get("value"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("0");
+                                    let last_at = b.get("lastSnapshotAt")
+                                        .and_then(|v| v.get("value"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("never");
+                                    let last_path = b.get("lastSnapshotPath")
+                                        .and_then(|v| v.get("value"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("n/a");
+                                    println!("  Snapshot count:   {}", count);
+                                    println!("  Last snapshot at: {}", last_at);
+                                    println!("  Last snapshot:    {}", last_path);
+                                }
+                            }
+                        } else {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&body).unwrap_or_default()
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to query snapshots: {}", e),
+                }
+            }
+            VolumeCommands::Backups { volume } => {
+                let volume_iri = resolve_volume_iri(&cli.domain, &volume);
+
+                let sparql = format!(
+                    r#"SELECT ?lastBackupAt
+                       WHERE {{
+                           <{volume_iri}> <https://picloud.local/ontology#lastBackupAt> ?lastBackupAt .
+                       }}"#
+                );
+
+                let path = format!("/graph?query={}", urlencoding(&sparql));
+                match client.get(&path).await {
+                    Ok(body) => {
+                        if let Some(bindings) = body.get("bindings").and_then(|v| v.as_array()) {
+                            if bindings.is_empty() {
+                                println!("No backups for {}", volume);
+                            } else {
+                                println!("Backups for {}:", volume);
+                                for b in bindings {
+                                    let last_at = b.get("lastBackupAt")
+                                        .and_then(|v| v.get("value"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("never");
+                                    println!("  Last backup at: {}", last_at);
+                                }
+                            }
+                        } else {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&body).unwrap_or_default()
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to query backups: {}", e),
+                }
+            }
+            VolumeCommands::Restore { volume, snapshot } => {
+                let volume_iri = resolve_volume_iri(&cli.domain, &volume);
+                println!("Restoring volume {} from snapshot {}", volume, snapshot);
+
+                let payload = json!({
+                    "volume_iri": volume_iri,
+                    "snapshot_timestamp": snapshot,
+                });
+                match client.post_command("VolumeRestore", payload).await {
+                    Ok(_) => {
+                        println!("Volume restore initiated. Subscribe to events to monitor progress.");
+                    }
+                    Err(e) => eprintln!("Restore failed: {}", e),
+                }
+            }
+        },
     }
 
     Ok(())
+}
+
+/// Resolve a volume path or IRI to a full IRI string.
+fn resolve_volume_iri(domain: &str, volume: &str) -> String {
+    if volume.starts_with("http://") || volume.starts_with("https://") {
+        volume.to_string()
+    } else {
+        let parts: Vec<&str> = volume.split('/').collect();
+        if parts.len() == 3 {
+            // product/volumes/name
+            format!("https://{}/products/{}/{}/{}", domain, parts[0], parts[1], parts[2])
+        } else if parts.len() == 2 {
+            // product/volume-name
+            format!("https://{}/products/{}/volumes/{}", domain, parts[0], parts[1])
+        } else {
+            format!("https://{}/volumes/{}", domain, volume)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

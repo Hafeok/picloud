@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 pub struct StorageIntent {
     pub durability: DurabilityTier,
     pub performance: PerformanceTier,
+    /// Point-in-time snapshots stored on a local NAS (ADR-047)
+    pub snapshots: Option<SnapshotConfig>,
+    /// Offsite backup to an S3-compatible endpoint (ADR-047)
+    pub offsite: Option<OffsiteBackupConfig>,
 }
 
 impl Default for StorageIntent {
@@ -19,8 +23,57 @@ impl Default for StorageIntent {
         Self {
             durability: DurabilityTier::FullReplication,
             performance: PerformanceTier::Standard,
+            snapshots: None,
+            offsite: None,
         }
     }
+}
+
+/// Snapshot configuration — point-in-time copies on a local NAS (ADR-047)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotConfig {
+    pub enabled: bool,
+    pub schedule: SnapshotSchedule,
+    /// Secret name containing NAS connection details (NFS/SMB)
+    pub storage_secret: String,
+    pub retention: SnapshotRetention,
+}
+
+/// Snapshot schedule — how often to take a point-in-time copy (ADR-047)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotSchedule {
+    Hourly,
+    Daily,
+    Weekly,
+}
+
+/// How many snapshots to keep per category (ADR-047).
+/// 0 means unlimited.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotRetention {
+    pub daily: u32,
+    pub weekly: u32,
+    pub monthly: u32,
+}
+
+/// Offsite backup configuration — S3-compatible endpoint (ADR-047)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OffsiteBackupConfig {
+    pub enabled: bool,
+    /// Secret name containing S3 connection details
+    pub target_secret: String,
+    pub frequency: BackupFrequency,
+    /// Always encrypt before upload — platform manages the key
+    pub encryption: bool,
+}
+
+/// How often to run an offsite backup (ADR-047)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackupFrequency {
+    Daily,
+    Weekly,
 }
 
 /// How many nodes hold a copy of this data
@@ -123,10 +176,81 @@ mod tests {
         let intent = StorageIntent {
             durability: DurabilityTier::Quorum,
             performance: PerformanceTier::Fast,
+            snapshots: None,
+            offsite: None,
         };
         let json = serde_json::to_string(&intent).unwrap();
         let back: StorageIntent = serde_json::from_str(&json).unwrap();
         assert!(matches!(back.durability, DurabilityTier::Quorum));
         assert!(matches!(back.performance, PerformanceTier::Fast));
+    }
+
+    #[test]
+    fn snapshot_config_serde_round_trip() {
+        let config = SnapshotConfig {
+            enabled: true,
+            schedule: SnapshotSchedule::Daily,
+            storage_secret: "nas-creds".to_string(),
+            retention: SnapshotRetention {
+                daily: 7,
+                weekly: 4,
+                monthly: 3,
+            },
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: SnapshotConfig = serde_json::from_str(&json).unwrap();
+        assert!(back.enabled);
+        assert!(matches!(back.schedule, SnapshotSchedule::Daily));
+        assert_eq!(back.storage_secret, "nas-creds");
+        assert_eq!(back.retention.daily, 7);
+        assert_eq!(back.retention.weekly, 4);
+        assert_eq!(back.retention.monthly, 3);
+    }
+
+    #[test]
+    fn offsite_backup_config_serde_round_trip() {
+        let config = OffsiteBackupConfig {
+            enabled: true,
+            target_secret: "s3-creds".to_string(),
+            frequency: BackupFrequency::Weekly,
+            encryption: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: OffsiteBackupConfig = serde_json::from_str(&json).unwrap();
+        assert!(back.enabled);
+        assert_eq!(back.target_secret, "s3-creds");
+        assert!(matches!(back.frequency, BackupFrequency::Weekly));
+        assert!(back.encryption);
+    }
+
+    #[test]
+    fn storage_intent_with_snapshots_serde() {
+        let intent = StorageIntent {
+            durability: DurabilityTier::FullReplication,
+            performance: PerformanceTier::Standard,
+            snapshots: Some(SnapshotConfig {
+                enabled: true,
+                schedule: SnapshotSchedule::Hourly,
+                storage_secret: "nas-creds".to_string(),
+                retention: SnapshotRetention {
+                    daily: 7,
+                    weekly: 4,
+                    monthly: 12,
+                },
+            }),
+            offsite: Some(OffsiteBackupConfig {
+                enabled: true,
+                target_secret: "s3-creds".to_string(),
+                frequency: BackupFrequency::Daily,
+                encryption: true,
+            }),
+        };
+        let json = serde_json::to_string(&intent).unwrap();
+        let back: StorageIntent = serde_json::from_str(&json).unwrap();
+        assert!(back.snapshots.is_some());
+        assert!(back.offsite.is_some());
+        let snap = back.snapshots.unwrap();
+        assert!(snap.enabled);
+        assert_eq!(snap.retention.monthly, 12);
     }
 }

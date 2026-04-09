@@ -168,6 +168,12 @@ pub struct ValidatedIdentity {
     pub identity_iri: ResourceIri,
     pub product: Option<String>,
     pub roles: Vec<String>,
+    /// Audience (product IRI) this token is intended for (ADR-051)
+    pub audience: Option<String>,
+    /// Scopes granted in this token (ADR-051)
+    pub scopes: Vec<String>,
+    /// Flattened permissions (ADR-051)
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +377,55 @@ pub trait ReplayEngine: Send + Sync {
     /// Returns a replay_id immediately; progress and completion
     /// are reported via ReplayStarted/Progress/Completed/Failed events.
     async fn start_replay(&self, request: ReplayRequest) -> Result<Uuid>;
+}
+
+// ---- Snapshot Manager (ADR-047) ----
+
+/// Manage volume snapshots and backups.
+/// Implemented by: picloud-storage
+#[async_trait]
+pub trait SnapshotManager: Send + Sync {
+    /// Create a snapshot of a volume. Returns the path where it was stored.
+    async fn create_snapshot(&self, volume_iri: &ResourceIri) -> Result<SnapshotInfo>;
+
+    /// List all snapshots for a volume.
+    async fn list_snapshots(&self, volume_iri: &ResourceIri) -> Result<Vec<SnapshotInfo>>;
+
+    /// Restore a volume from a snapshot at the given timestamp.
+    async fn restore_snapshot(
+        &self,
+        volume_iri: &ResourceIri,
+        snapshot_timestamp: &str,
+    ) -> Result<()>;
+
+    /// Delete a snapshot by path.
+    async fn delete_snapshot(
+        &self,
+        volume_iri: &ResourceIri,
+        snapshot_path: &str,
+    ) -> Result<()>;
+
+    /// List all offsite backups for a volume.
+    async fn list_backups(&self, volume_iri: &ResourceIri) -> Result<Vec<BackupInfo>>;
+}
+
+/// Information about a volume snapshot (ADR-047).
+#[derive(Debug, Clone)]
+pub struct SnapshotInfo {
+    pub volume_iri: ResourceIri,
+    pub snapshot_path: String,
+    pub size_bytes: u64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Information about an offsite backup (ADR-047).
+#[derive(Debug, Clone)]
+pub struct BackupInfo {
+    pub volume_iri: ResourceIri,
+    pub backup_path: String,
+    pub size_bytes: u64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 // ---- Telemetry Store (ADR-046) ----

@@ -143,6 +143,9 @@ pub struct PiCloudHttpServer {
     pub storage: Option<Arc<dyn StorageBackend>>,
     pub scheduler: Option<Arc<dyn WorkloadScheduler>>,
     pub ingress_routes: IngressTable,
+    /// Native ingress router (ADR-048) — replaces the simple IngressTable for
+    /// host-based and path-based routing with TLS termination.
+    pub ingress_router: Option<crate::router::SharedRouter>,
     pub tls_config: Option<rustls::ServerConfig>,
     pub extra_router: Option<Router>,
     pub otel_stream: Option<Arc<crate::otel::OtelStream>>,
@@ -163,6 +166,7 @@ impl PiCloudHttpServer {
             storage: None,
             scheduler: None,
             ingress_routes: new_ingress_table(),
+            ingress_router: None,
             tls_config: None,
             extra_router: None,
             otel_stream: None,
@@ -199,6 +203,12 @@ impl PiCloudHttpServer {
     /// Set the ingress routing table (shared with the provisioner).
     pub fn with_ingress_table(mut self, table: IngressTable) -> Self {
         self.ingress_routes = table;
+        self
+    }
+
+    /// Set the native ingress router (ADR-048).
+    pub fn with_ingress_router(mut self, router: crate::router::SharedRouter) -> Self {
+        self.ingress_router = Some(router);
         self
     }
 
@@ -291,6 +301,7 @@ impl PiCloudHttpServer {
             )
             .route("/.well-known/jwks.json", get(handle_jwks))
             .route("/auth/token", post(handle_token))
+            .route("/auth/token/exchange", post(handle_token_exchange))
             .route("/auth/authorize", get(handle_authorize))
             .route("/auth/register/begin", post(handle_register_begin))
             .route("/auth/register/complete", post(handle_register_complete))
@@ -321,6 +332,7 @@ impl PiCloudHttpServer {
                 cluster: self.cluster.clone(),
                 iam: self.iam.clone(),
                 ingress_routes: self.ingress_routes.clone(),
+                ingress_router: self.ingress_router.clone(),
                 otel_stream: self.otel_stream.clone(),
                 telemetry_store: self.telemetry_store.clone(),
                 storage_path: self.storage_path.clone(),
@@ -384,6 +396,8 @@ struct AppState {
     cluster: Option<Arc<dyn ClusterMembership>>,
     iam: Option<Arc<dyn IdentityProvider>>,
     ingress_routes: IngressTable,
+    /// Native ingress router (ADR-048).
+    ingress_router: Option<crate::router::SharedRouter>,
     otel_stream: Option<Arc<crate::otel::OtelStream>>,
     telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
     /// Root directory containing volume subdirectories (for storage sync endpoints).
@@ -1033,6 +1047,11 @@ async fn handle_apply(
                 });
                 (iri, "ResourceDeclared", None, payload)
             }
+            ResourceDeclaration::Scope(_) | ResourceDeclaration::M2mPermission(_) => {
+                // Scope and M2mPermission resources are handled by the IAM slice;
+                // the HTTP apply endpoint does not provision them directly yet.
+                continue;
+            }
         };
 
         let schema = iri_builder.event_schema(event_type, 1);
@@ -1077,6 +1096,8 @@ async fn handle_apply(
                     ResourceDeclaration::FeatureFlag(f) => iri_builder.feature_flag(&f.product, &f.name).as_str().to_string(),
                     ResourceDeclaration::Group(g) => iri_builder.group(&g.name).as_str().to_string(),
                     ResourceDeclaration::InferenceRule(r) => iri_builder.inference_rule(&r.name).as_str().to_string(),
+                    ResourceDeclaration::Scope(s) => iri_builder.resource(&s.product, "scopes", &s.name).as_str().to_string(),
+                    ResourceDeclaration::M2mPermission(m) => iri_builder.resource(&m.product, "m2m-permissions", &m.name).as_str().to_string(),
                 };
 
                 for (tag_key, tag_value) in decl.tags() {
@@ -1617,6 +1638,10 @@ async fn handle_cluster_graph(
 
 /// Catch-all handler that checks the ingress routing table and proxies
 /// matching requests to the workload's local port.
+///
+/// When a native IngressRouter (ADR-048) is configured, it is used for
+/// host-based + path-based routing. Otherwise, falls back to the legacy
+/// IngressTable for backwards compatibility.
 async fn handle_ingress_proxy(
     axum::extract::State(state): axum::extract::State<AppState>,
     method: Method,
@@ -1624,9 +1649,14 @@ async fn handle_ingress_proxy(
     headers: HeaderMap,
     body: axum::body::Body,
 ) -> Response {
+    // ADR-048: Use the native ingress router when available
+    if let Some(ref router) = state.ingress_router {
+        return crate::proxy::handle_proxy(router.clone(), method, uri, headers, body).await;
+    }
+
+    // Legacy path: simple IngressTable lookup by path prefix only
     let request_path = uri.path();
 
-    // Find the longest matching path prefix in the ingress table
     let route = {
         let routes = state.ingress_routes.read().await;
         routes
@@ -2101,12 +2131,16 @@ async fn handle_jwks(
 }
 
 /// POST /auth/token — Token endpoint (client_credentials grant)
+/// Accepts `audience` and `scope` parameters per ADR-051.
 #[derive(Deserialize)]
 struct TokenRequest {
     grant_type: String,
     client_id: String,
     client_secret: String,
     scope: Option<String>,
+    /// Target audience — set to product IRI (ADR-051)
+    #[serde(default)]
+    audience: Option<String>,
 }
 
 async fn handle_token(
@@ -2145,6 +2179,91 @@ async fn handle_token(
             Json(serde_json::json!({
                 "error": "invalid_client",
                 "error_description": "Invalid client_id or client_secret",
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /auth/token/exchange — Token exchange endpoint (RFC 8693 / ADR-051)
+///
+/// Accepts an existing access token and exchanges it for a new token
+/// with a specific audience (on-behalf-of flow).
+#[derive(Deserialize)]
+struct TokenExchangeHttpRequest {
+    grant_type: String,
+    subject_token: String,
+    #[serde(default)]
+    subject_token_type: Option<String>,
+    #[serde(default)]
+    audience: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+async fn handle_token_exchange(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<TokenExchangeHttpRequest>,
+) -> Response {
+    let Some(ref iam) = state.iam else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "identity provider not available" })),
+        )
+            .into_response();
+    };
+
+    if req.grant_type != "urn:ietf:params:oauth:grant-type:token-exchange" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "unsupported_grant_type",
+                "error_description": "Expected grant_type=urn:ietf:params:oauth:grant-type:token-exchange",
+            })),
+        )
+            .into_response();
+    }
+
+    // Validate the subject token first
+    match iam.validate_token(&req.subject_token).await {
+        Ok(identity) => {
+            // Issue a new token with the requested audience
+            let audience = req.audience.unwrap_or_else(|| {
+                format!("https://{}", state.cluster_domain.0)
+            });
+
+            match iam
+                .issue_token(&identity.identity_iri, identity.product.as_deref())
+                .await
+            {
+                Ok(token) => {
+                    let body = serde_json::json!({
+                        "access_token": token,
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                        "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                        "scope": req.scope,
+                        "audience": audience,
+                    });
+                    resource_response(body, ContentType::Json)
+                }
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        }
+        Err(picloud_domain::error::PiCloudError::Unauthenticated) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "invalid_token",
+                "error_description": "Subject token is invalid or expired",
             })),
         )
             .into_response(),

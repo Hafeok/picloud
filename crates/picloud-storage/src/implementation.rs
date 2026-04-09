@@ -15,7 +15,9 @@ use uuid::Uuid;
 use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
 use picloud_domain::storage::{DurabilityTier, StorageIntent};
-use picloud_domain::traits::{ClusterMembership, StorageBackend, VolumeHandle};
+use picloud_domain::traits::{
+    BackupInfo, ClusterMembership, SnapshotInfo, SnapshotManager, StorageBackend, VolumeHandle,
+};
 
 /// Internal record tracking an allocated volume.
 #[derive(Debug, Clone)]
@@ -221,6 +223,232 @@ impl StorageBackend for LocalStorageBackend {
     async fn available_capacity_gb(&self) -> Result<u64> {
         let allocated = self.allocated_gb().await;
         Ok(self.total_capacity_gb.saturating_sub(allocated))
+    }
+}
+
+/// Phase 1 snapshot manager — uses simple directory copies.
+/// Snapshots are stored under `{base_path}/.snapshots/{volume_name}/{timestamp}/`.
+/// No actual NFS/S3 transport — local filesystem paths only.
+pub struct LocalSnapshotManager {
+    base_path: PathBuf,
+}
+
+impl LocalSnapshotManager {
+    pub fn new(base_path: PathBuf) -> Self {
+        Self { base_path }
+    }
+
+    /// Resolve the snapshot directory for a volume.
+    fn snapshot_dir(&self, volume_name: &str) -> PathBuf {
+        self.base_path
+            .join(".snapshots")
+            .join(volume_name)
+    }
+
+    /// Extract volume name from IRI (last path segment).
+    fn volume_name(volume_iri: &ResourceIri) -> String {
+        volume_iri
+            .as_str()
+            .rsplit('/')
+            .next()
+            .unwrap_or("unknown")
+            .to_string()
+    }
+
+    /// Calculate directory size in bytes.
+    fn dir_size(path: &std::path::Path) -> u64 {
+        if !path.exists() {
+            return 0;
+        }
+        std::fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| {
+                        let meta = e.metadata().unwrap_or_else(|_| {
+                            std::fs::metadata(e.path()).unwrap()
+                        });
+                        if meta.is_dir() {
+                            Self::dir_size(&e.path())
+                        } else {
+                            meta.len()
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    /// Recursively copy a directory.
+    fn copy_dir_all(
+        src: &std::path::Path,
+        dst: &std::path::Path,
+    ) -> std::result::Result<(), std::io::Error> {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let dest_path = dst.join(entry.file_name());
+            if file_type.is_dir() {
+                Self::copy_dir_all(&entry.path(), &dest_path)?;
+            } else {
+                std::fs::copy(entry.path(), dest_path)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl SnapshotManager for LocalSnapshotManager {
+    async fn create_snapshot(&self, volume_iri: &ResourceIri) -> Result<SnapshotInfo> {
+        let volume_name = Self::volume_name(volume_iri);
+        let volume_dir = self.base_path.join(&volume_name);
+
+        if !volume_dir.exists() {
+            return Err(PiCloudError::ResourceNotFound {
+                iri: volume_iri.as_str().to_string(),
+            });
+        }
+
+        let now = chrono::Utc::now();
+        let timestamp = now.format("%Y-%m-%dT%H-%M-%SZ").to_string();
+        let snapshot_path = self
+            .snapshot_dir(&volume_name)
+            .join(&timestamp);
+
+        Self::copy_dir_all(&volume_dir, &snapshot_path).map_err(|e| {
+            PiCloudError::Internal(format!(
+                "Failed to create snapshot for {}: {}",
+                volume_name, e
+            ))
+        })?;
+
+        let size_bytes = Self::dir_size(&snapshot_path);
+
+        info!(
+            volume = %volume_iri,
+            snapshot_path = %snapshot_path.display(),
+            size_bytes = size_bytes,
+            "Snapshot created"
+        );
+
+        Ok(SnapshotInfo {
+            volume_iri: volume_iri.clone(),
+            snapshot_path: snapshot_path.to_string_lossy().to_string(),
+            size_bytes,
+            created_at: now,
+        })
+    }
+
+    async fn list_snapshots(&self, volume_iri: &ResourceIri) -> Result<Vec<SnapshotInfo>> {
+        let volume_name = Self::volume_name(volume_iri);
+        let snap_dir = self.snapshot_dir(&volume_name);
+
+        if !snap_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut snapshots = Vec::new();
+        let entries = std::fs::read_dir(&snap_dir).map_err(|e| {
+            PiCloudError::Internal(format!("Failed to read snapshot dir: {}", e))
+        })?;
+
+        for entry in entries.flatten() {
+            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                let path = entry.path();
+                let size_bytes = Self::dir_size(&path);
+                let created_at = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.created().ok())
+                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t))
+                    .unwrap_or_else(chrono::Utc::now);
+
+                snapshots.push(SnapshotInfo {
+                    volume_iri: volume_iri.clone(),
+                    snapshot_path: path.to_string_lossy().to_string(),
+                    size_bytes,
+                    created_at,
+                });
+            }
+        }
+
+        snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(snapshots)
+    }
+
+    async fn restore_snapshot(
+        &self,
+        volume_iri: &ResourceIri,
+        snapshot_timestamp: &str,
+    ) -> Result<()> {
+        let volume_name = Self::volume_name(volume_iri);
+        let snapshot_path = self
+            .snapshot_dir(&volume_name)
+            .join(snapshot_timestamp);
+
+        if !snapshot_path.exists() {
+            return Err(PiCloudError::ResourceNotFound {
+                iri: format!("snapshot {} for {}", snapshot_timestamp, volume_iri),
+            });
+        }
+
+        let volume_dir = self.base_path.join(&volume_name);
+
+        // Remove current volume contents
+        if volume_dir.exists() {
+            std::fs::remove_dir_all(&volume_dir).map_err(|e| {
+                PiCloudError::Internal(format!(
+                    "Failed to clear volume {}: {}",
+                    volume_name, e
+                ))
+            })?;
+        }
+
+        // Copy snapshot back to volume dir
+        Self::copy_dir_all(&snapshot_path, &volume_dir).map_err(|e| {
+            PiCloudError::Internal(format!(
+                "Failed to restore snapshot for {}: {}",
+                volume_name, e
+            ))
+        })?;
+
+        info!(
+            volume = %volume_iri,
+            snapshot = snapshot_timestamp,
+            "Volume restored from snapshot"
+        );
+
+        Ok(())
+    }
+
+    async fn delete_snapshot(
+        &self,
+        volume_iri: &ResourceIri,
+        snapshot_path: &str,
+    ) -> Result<()> {
+        let path = PathBuf::from(snapshot_path);
+        if !path.exists() {
+            return Err(PiCloudError::ResourceNotFound {
+                iri: format!("snapshot {} for {}", snapshot_path, volume_iri),
+            });
+        }
+
+        std::fs::remove_dir_all(&path).map_err(|e| {
+            PiCloudError::Internal(format!(
+                "Failed to delete snapshot: {}",
+                e
+            ))
+        })?;
+
+        info!(volume = %volume_iri, snapshot_path = snapshot_path, "Snapshot deleted");
+        Ok(())
+    }
+
+    async fn list_backups(&self, _volume_iri: &ResourceIri) -> Result<Vec<BackupInfo>> {
+        // Phase 1: no actual offsite backup transport — return empty list
+        Ok(Vec::new())
     }
 }
 
@@ -445,6 +673,8 @@ mod tests {
         let intent = StorageIntent {
             durability: DurabilityTier::Quorum,
             performance: picloud_domain::storage::PerformanceTier::Standard,
+            snapshots: None,
+            offsite: None,
         };
 
         let handle = backend.allocate_volume(&iri, 10, &intent).await.unwrap();
@@ -471,6 +701,8 @@ mod tests {
         let intent = StorageIntent {
             durability: DurabilityTier::Local,
             performance: picloud_domain::storage::PerformanceTier::Standard,
+            snapshots: None,
+            offsite: None,
         };
 
         let handle = backend.allocate_volume(&iri, 10, &intent).await.unwrap();

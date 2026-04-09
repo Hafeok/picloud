@@ -11,4 +11,5 @@ pub mod implementation;
 pub mod replication;
 
 pub use implementation::LocalStorageBackend;
+pub use implementation::LocalSnapshotManager;
 pub use replication::StorageReplicator;

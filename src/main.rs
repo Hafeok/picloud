@@ -606,8 +606,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // 11. Create shared ingress routing table
+    // 11. Create shared ingress routing table and native ingress router (ADR-048)
     let ingress_table = picloud_http::new_ingress_table();
+    let ingress_router: picloud_http::SharedRouter =
+        std::sync::Arc::new(picloud_http::IngressRouter::new());
+    let tls_state: picloud_http::SharedTls =
+        std::sync::Arc::new(picloud_http::TlsState::new());
 
     // 12. Start resource provisioner (background task)
     {
@@ -620,7 +624,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             secret_store.clone(),
             iri_builder,
         )
-        .with_ingress_table(ingress_table.clone());
+        .with_ingress_table(ingress_table.clone())
+        .with_ingress_router(ingress_router.clone());
         provisioner
             .start()
             .await
@@ -690,6 +695,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // 12d. Create ingress event handler (ADR-048)
+    let _ingress_handler = picloud_http::IngressEventHandler::new(
+        ingress_router.clone(),
+        tls_state,
+    );
+    // The ingress_handler will be wired into the event subscription loop
+    // when the full event stream infrastructure is connected.
+
     // 13. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
     let mut http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
@@ -702,6 +715,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             scheduler.clone(),
         )
         .with_ingress_table(ingress_table)
+        .with_ingress_router(ingress_router.clone())
         .with_extra_router(raft_router)
         .with_otel(otel_stream.clone(), telemetry_store_trait.clone())
         .with_storage_path(config.storage_path.clone());
