@@ -1,0 +1,34 @@
+# PiCloud Test Cluster Configuration
+#
+# Copy this file and fill in your cluster's actual IPs before use:
+#   cp cluster.toml cluster-local.toml
+#   # edit cluster-local.toml with real IPs
+#   picloud-test run --config cluster-local.toml
+
+[cluster]
+domain = "picloud.local"
+http_port = 7443
+platform_version = "auto"
+
+[operator]
+hostname = "management"
+ip = ""           # e.g. "192.168.1.10"
+ssh_user = "admin"
+
+[[nodes]]
+hostname = "worker01"
+ip = ""           # e.g. "192.168.1.21"
+role = "Worker"
+ssh_user = "admin"
+
+[[nodes]]
+hostname = "worker02"
+ip = ""           # e.g. "192.168.1.20"
+role = "Worker"
+ssh_user = "admin"
+
+[[nodes]]
+hostname = "node3"
+ip = ""           # e.g. "192.168.1.22"
+role = "Build"
+ssh_user = "admin"

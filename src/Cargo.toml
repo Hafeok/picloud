@@ -23,6 +23,7 @@ picloud-workload = { workspace = true }
 picloud-network  = { workspace = true }
 picloud-http     = { workspace = true }
 picloud-sdk-gen  = { workspace = true }
+picloud-registry = { workspace = true }
 
 tokio              = { workspace = true }
 tracing            = { workspace = true }
@@ -32,3 +33,5 @@ serde_json         = { workspace = true }
 uuid               = { workspace = true }
 chrono             = { workspace = true }
 openraft           = { workspace = true }
+clap               = { workspace = true }
+toml               = { workspace = true }

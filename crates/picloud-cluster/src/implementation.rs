@@ -405,6 +405,7 @@ mod tests {
             domain: ClusterDomain::default(),
             created_at: chrono::Utc::now(),
             ca_fingerprint: "sha256:abc123".to_string(),
+            enrollment_mode: picloud_domain::identity::EnrollmentMode::default(),
         };
         store.initialize(identity.clone()).await.unwrap();
 
@@ -421,6 +422,7 @@ mod tests {
             domain: ClusterDomain::default(),
             created_at: chrono::Utc::now(),
             ca_fingerprint: "sha256:abc".to_string(),
+            enrollment_mode: picloud_domain::identity::EnrollmentMode::default(),
         };
         store.initialize(identity.clone()).await.unwrap();
         // Second init must fail
@@ -437,6 +439,7 @@ mod tests {
             domain: ClusterDomain::default(),
             created_at: chrono::Utc::now(),
             ca_fingerprint: "sha256:abc".to_string(),
+            enrollment_mode: picloud_domain::identity::EnrollmentMode::default(),
         };
         store.initialize(identity).await.unwrap();
 
@@ -454,6 +457,7 @@ mod tests {
             domain: ClusterDomain::default(),
             created_at: chrono::Utc::now(),
             ca_fingerprint: "sha256:abc".to_string(),
+            enrollment_mode: picloud_domain::identity::EnrollmentMode::default(),
         };
         store.initialize(identity).await.unwrap();
 
@@ -472,6 +476,7 @@ mod tests {
             domain: ClusterDomain::default(),
             created_at: chrono::Utc::now(),
             ca_fingerprint: "sha256:correct".to_string(),
+            enrollment_mode: picloud_domain::identity::EnrollmentMode::default(),
         };
         store.initialize(identity).await.unwrap();
 

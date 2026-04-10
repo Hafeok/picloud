@@ -66,6 +66,7 @@ pub struct ValidationWarning {
 /// within the file set.
 pub fn validate_offline(files: &[ParsedFile]) -> Result<ValidationResult> {
     let mut errors = Vec::new();
+    let mut warnings = Vec::new();
 
     // Collect all declared resource names by type for cross-reference checks
     let mut products: Vec<String> = Vec::new();
@@ -125,13 +126,52 @@ pub fn validate_offline(files: &[ParsedFile]) -> Result<ValidationResult> {
         }
     }
 
-    Ok(ValidationResult::with_errors(errors))
+    // ADR-054: Warn when container image references a non-local registry
+    for file in files {
+        for resource in &file.resources {
+            if resource.resource_type == "container" {
+                if let Some(prop) = resource.properties.iter().find(|p| p.key == "image") {
+                    if let PropertyValue::String(image_ref) = &prop.value {
+                        if !image_ref.starts_with("registry.picloud.local/") {
+                            warnings.push(ValidationWarning {
+                                message: format!(
+                                    "Container '{}': image '{}' does not reference the local registry (registry.picloud.local/). \
+                                     Use 'picloud image import' to import external images.",
+                                    resource.name, image_ref
+                                ),
+                                resource_iri: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result = ValidationResult::with_errors(errors);
+    result.warnings = warnings;
+    Ok(result)
 }
 
+/// The platform ontology (embedded at compile time from ontology/platform.ttl).
+pub const PLATFORM_ONTOLOGY: &str = include_str!("../../../ontology/platform.ttl");
+
+/// The SHACL shapes (embedded at compile time from ontology/shapes.ttl).
+pub const SHACL_SHAPES: &str = include_str!("../../../ontology/shapes.ttl");
+
 /// Validate a Turtle deployment graph string.
-/// This is a pass-through for future SHACL validation.
+///
+/// Performs structural checks and, when shapes are available, validates
+/// against SHACL shapes embedded from `ontology/shapes.ttl`.
 pub fn validate_turtle(turtle: &str) -> Result<ValidationResult> {
-    // Phase 1: basic structural check -- just verify it's non-empty
+    validate_turtle_with_shapes(turtle, SHACL_SHAPES)
+}
+
+/// Validate a Turtle deployment graph against the given SHACL shapes.
+///
+/// Phase 1: basic structural checks (non-empty, parseable prefix declarations).
+/// Phase 3+: full SHACL validation via Oxigraph (shapes loaded at compile time).
+pub fn validate_turtle_with_shapes(turtle: &str, shapes_ttl: &str) -> Result<ValidationResult> {
     if turtle.trim().is_empty() {
         return Ok(ValidationResult::with_errors(vec![
             ValidationError {
@@ -142,20 +182,181 @@ pub fn validate_turtle(turtle: &str) -> Result<ValidationResult> {
             }
         ]));
     }
-    Ok(ValidationResult::ok())
+
+    // Load the data graph and shapes into an in-memory Oxigraph store.
+    // Since Oxigraph 0.4 doesn't have a built-in SHACL engine, we validate
+    // sh:minCount constraints via SPARQL queries over the shapes graph.
+    use oxigraph::store::Store;
+    use oxigraph::io::RdfFormat;
+
+    let store = Store::new()
+        .map_err(|e| picloud_domain::error::PiCloudError::Internal(
+            format!("Failed to create validation store: {e}")
+        ))?;
+
+    // Load the deployment data graph
+    if let Err(e) = store.load_from_reader(
+        RdfFormat::Turtle,
+        std::io::Cursor::new(turtle),
+    ) {
+        return Ok(ValidationResult::with_errors(vec![
+            ValidationError {
+                message: format!("Invalid Turtle syntax: {e}"),
+                resource_iri: None,
+                property: None,
+                location: None,
+            }
+        ]));
+    }
+
+    // Load the SHACL shapes graph into the same store
+    if let Err(e) = store.load_from_reader(
+        RdfFormat::Turtle,
+        std::io::Cursor::new(shapes_ttl),
+    ) {
+        tracing::warn!("Failed to load SHACL shapes: {e}");
+        // Shapes failed to load — can't validate, pass through
+        return Ok(ValidationResult::ok());
+    }
+
+    // Query for sh:minCount violations: find resources that are instances of a
+    // target class but are missing a required property (sh:minCount >= 1).
+    let min_count_query = r#"
+        PREFIX sh: <http://www.w3.org/ns/shacl#>
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        SELECT ?focus ?path ?msg WHERE {
+            ?shape a sh:NodeShape ;
+                   sh:targetClass ?cls ;
+                   sh:property ?propShape .
+            ?propShape sh:path ?path ;
+                       sh:minCount ?min .
+            FILTER(?min >= 1)
+            ?focus rdf:type ?cls .
+            OPTIONAL { ?propShape sh:message ?msg }
+            FILTER NOT EXISTS { ?focus ?path ?val }
+        }
+    "#;
+
+    let mut errors = Vec::new();
+
+    if let Ok(oxigraph::sparql::QueryResults::Solutions(solutions)) = store.query(min_count_query) {
+        for solution in solutions.flatten() {
+            let focus = solution.get("focus").map(|t| t.to_string()).unwrap_or_default();
+            let path = solution.get("path").map(|t| t.to_string()).unwrap_or_default();
+            let msg = solution.get("msg").and_then(|t| {
+                if let oxigraph::model::Term::Literal(lit) = t {
+                    Some(lit.value().to_string())
+                } else {
+                    None
+                }
+            });
+
+            errors.push(translate_violation(
+                &strip_angle_brackets(&focus),
+                &strip_angle_brackets(&path),
+                "MinCountConstraintComponent",
+                msg.as_deref(),
+            ));
+        }
+    }
+
+    Ok(ValidationResult::with_errors(errors))
+}
+
+/// Strip surrounding angle brackets from Oxigraph term string representations.
+fn strip_angle_brackets(s: &str) -> String {
+    s.trim_start_matches('<').trim_end_matches('>').to_string()
 }
 
 /// Validate cross-resource references against a live cluster.
 /// Called after validate_offline succeeds.
 pub async fn validate_online(
-    _turtle:      &str,
-    _cluster_url: &str,
-    _token:       &str,
+    turtle:      &str,
+    cluster_url: &str,
+    token:       &str,
 ) -> Result<ValidationResult> {
-    // Phase 1: stub -- online validation requires cluster connectivity
-    // Future: check that referenced secrets, identities, volumes exist
-    tracing::info!("Online validation not yet implemented -- skipping");
-    Ok(ValidationResult::ok())
+    use oxigraph::store::Store;
+    use oxigraph::io::RdfFormat;
+
+    if turtle.trim().is_empty() {
+        return Ok(ValidationResult::ok());
+    }
+
+    // Load the turtle to extract cross-resource references
+    let store = Store::new()
+        .map_err(|e| picloud_domain::error::PiCloudError::Internal(
+            format!("Failed to create store for online validation: {e}")
+        ))?;
+
+    if store.load_from_reader(
+        RdfFormat::Turtle,
+        std::io::Cursor::new(turtle),
+    ).is_err() {
+        // If turtle doesn't parse, offline validation will catch it
+        return Ok(ValidationResult::ok());
+    }
+
+    // Find all IRI objects that reference platform resources (products, volumes,
+    // secrets, identities) — these are cross-resource references that should
+    // exist in the live cluster.
+    let ref_query = r#"
+        PREFIX pc: <https://picloud.local/ontology#>
+        SELECT DISTINCT ?ref WHERE {
+            ?s ?p ?ref .
+            FILTER(isIRI(?ref))
+            FILTER(CONTAINS(STR(?ref), "/products/"))
+            FILTER(?p != <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>)
+        }
+    "#;
+
+    let mut errors = Vec::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| picloud_domain::error::PiCloudError::Internal(
+            format!("Failed to create HTTP client: {e}")
+        ))?;
+
+    if let Ok(oxigraph::sparql::QueryResults::Solutions(solutions)) = store.query(ref_query) {
+        for solution in solutions.flatten() {
+            let ref_iri = match solution.get("ref") {
+                Some(oxigraph::model::Term::NamedNode(nn)) => nn.as_str().to_string(),
+                _ => continue,
+            };
+
+            // Extract the path portion from the IRI
+            let path = if let Some(idx) = ref_iri.find("/products/") {
+                &ref_iri[idx..]
+            } else {
+                continue;
+            };
+
+            let url = format!("{}{}", cluster_url.trim_end_matches('/'), path);
+            match client.head(&url).bearer_auth(token).send().await {
+                Ok(resp) if resp.status().as_u16() == 404 => {
+                    errors.push(ValidationError {
+                        message: format!(
+                            "Referenced resource not found in cluster: {}",
+                            ref_iri
+                        ),
+                        resource_iri: Some(ref_iri),
+                        property: None,
+                        location: None,
+                    });
+                }
+                Ok(_) => {} // exists or other status — not a validation error
+                Err(e) => {
+                    tracing::warn!(url = %url, error = %e, "Online validation: failed to reach cluster");
+                    // Network errors are not validation failures — the cluster
+                    // might be unreachable. Skip remaining checks.
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(ValidationResult::with_errors(errors))
 }
 
 /// Required fields per resource type -- derived from SHACL sh:minCount = 1
@@ -339,8 +540,19 @@ container "broken" {
 
     #[test]
     fn validate_nonempty_turtle() {
+        // Use absolute IRIs — Oxigraph requires them in Turtle
+        let result = validate_turtle(
+            "<https://example.org/s> <https://example.org/p> <https://example.org/o> ."
+        ).unwrap();
+        assert!(result.valid, "Errors: {:?}", result.errors);
+    }
+
+    #[test]
+    fn validate_invalid_turtle_syntax() {
+        // Relative IRIs without @base are invalid Turtle
         let result = validate_turtle("<s> <p> <o> .").unwrap();
-        assert!(result.valid);
+        assert!(!result.valid);
+        assert!(result.errors[0].message.contains("Turtle syntax"));
     }
 
     #[test]

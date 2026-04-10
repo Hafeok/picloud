@@ -111,6 +111,16 @@ enum Commands {
         #[command(subcommand)]
         command: NewCommands,
     },
+    /// Manage container images in the embedded registry (ADR-054)
+    Image {
+        #[command(subcommand)]
+        command: ImageCommands,
+    },
+    /// Registry administration (ADR-054)
+    Registry {
+        #[command(subcommand)]
+        command: RegistryCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -595,6 +605,55 @@ enum NewCommands {
     },
 }
 
+// --- OCI Registry CLI commands (ADR-054) ---
+
+#[derive(Subcommand)]
+enum ImageCommands {
+    /// Push a local image to the embedded registry
+    Push {
+        /// Image reference (e.g. registry.picloud.local/photo-app/api:1.0)
+        image: String,
+        /// Target product
+        #[arg(long)]
+        product: String,
+        /// Tag for the image
+        #[arg(long)]
+        tag: Option<String>,
+    },
+    /// Import an image from an external registry
+    Import {
+        /// External image reference (e.g. docker.io/library/nginx:1.25)
+        image: String,
+        /// Target product in the local registry
+        #[arg(long)]
+        product: String,
+    },
+    /// List images in a product's registry
+    List {
+        /// Product name
+        #[arg(long)]
+        product: String,
+    },
+    /// Inspect image details (tags, digest, size)
+    Inspect {
+        /// Image reference (repo:tag or repo@sha256:digest)
+        image: String,
+    },
+    /// Delete an image tag
+    Delete {
+        /// Full image reference (e.g. registry.picloud.local/photo-app/api:1.0)
+        image: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RegistryCommands {
+    /// Run garbage collection to free unreferenced blobs
+    Gc,
+    /// Show registry storage status
+    Status,
+}
+
 /// HTTP client for communicating with the PiCloud cluster
 struct ClusterClient {
     base_url: String,
@@ -720,6 +779,27 @@ impl ClusterClient {
             return Err(format!("HTTP {} — {}", status, text).into());
         }
         let body = response.json::<serde_json::Value>().await?;
+        Ok(body)
+    }
+
+    /// Send a DELETE request to a cluster endpoint.
+    async fn delete(&self, path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let mut request = self
+            .client
+            .delete(format!("{}{}", self.base_url, path))
+            .header("Accept", "application/json");
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("HTTP {} — {}", status, text).into());
+        }
+        let body = response.json::<serde_json::Value>().await.unwrap_or_default();
         Ok(body)
     }
 
@@ -2200,6 +2280,93 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("Volume restore initiated. Subscribe to events to monitor progress.");
                     }
                     Err(e) => eprintln!("Restore failed: {}", e),
+                }
+            }
+        },
+        Commands::Image { command } => match command {
+            ImageCommands::Push { image, product, tag } => {
+                let tag_str = tag.as_deref().unwrap_or("latest");
+                let repo = format!("{}/{}", product, image.split('/').last().unwrap_or(&image).split(':').next().unwrap_or(&image));
+                println!("Pushing {} to registry.picloud.local/{repo}:{tag_str}", image);
+                let payload = json!({
+                    "repository": repo,
+                    "tag": tag_str,
+                    "source": image,
+                });
+                match client.post_command("ImagePush", payload).await {
+                    Ok(_) => println!("Image push initiated"),
+                    Err(e) => eprintln!("Push failed: {e}"),
+                }
+            }
+            ImageCommands::Import { image, product } => {
+                println!("Importing {} into product {}", image, product);
+                let payload = json!({
+                    "source": image,
+                    "product": product,
+                });
+                match client.post_command("ImageImport", payload).await {
+                    Ok(_) => println!("Import initiated"),
+                    Err(e) => eprintln!("Import failed: {e}"),
+                }
+            }
+            ImageCommands::List { product } => {
+                let path = format!("/v2/{product}/tags/list");
+                match client.get(&path).await {
+                    Ok(body) => {
+                        if let Some(tags) = body.get("tags").and_then(|v| v.as_array()) {
+                            println!("Images in {product}:");
+                            for tag in tags {
+                                println!("  {}", tag.as_str().unwrap_or("?"));
+                            }
+                            if tags.is_empty() {
+                                println!("  (none)");
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to list images: {e}"),
+                }
+            }
+            ImageCommands::Inspect { image } => {
+                // Parse repo:tag from image reference
+                let (repo, reference) = if let Some((r, t)) = image.rsplit_once(':') {
+                    (r, t)
+                } else {
+                    (image.as_str(), "latest")
+                };
+                let repo = repo.strip_prefix("registry.picloud.local/").unwrap_or(repo);
+                let path = format!("/v2/{repo}/manifests/{reference}");
+                match client.get(&path).await {
+                    Ok(body) => println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default()),
+                    Err(e) => eprintln!("Failed to inspect image: {e}"),
+                }
+            }
+            ImageCommands::Delete { image } => {
+                let (repo, reference) = if let Some((r, t)) = image.rsplit_once(':') {
+                    (r, t)
+                } else {
+                    (image.as_str(), "latest")
+                };
+                let repo = repo.strip_prefix("registry.picloud.local/").unwrap_or(repo);
+                let path = format!("/v2/{repo}/manifests/{reference}");
+                match client.delete(&path).await {
+                    Ok(_) => println!("Tag deleted: {}:{}", repo, reference),
+                    Err(e) => eprintln!("Delete failed: {e}"),
+                }
+            }
+        },
+        Commands::Registry { command } => match command {
+            RegistryCommands::Gc => {
+                println!("Running registry garbage collection...");
+                let payload = json!({"action": "gc"});
+                match client.post_command("RegistryGC", payload).await {
+                    Ok(_) => println!("GC initiated"),
+                    Err(e) => eprintln!("GC failed: {e}"),
+                }
+            }
+            RegistryCommands::Status => {
+                match client.get("/v2/").await {
+                    Ok(_) => println!("Registry: online"),
+                    Err(_) => println!("Registry: offline"),
                 }
             }
         },

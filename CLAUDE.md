@@ -190,12 +190,14 @@ Products are hermetically sealed (ADR-016, ADR-018, ADR-028):
 
 ## Build and Test
 
+### Local (x86_64)
+
 ```bash
 # Build everything
 cargo build --workspace
 
-# Build for ARM64 (Pi5 target)
-cargo build --workspace --target aarch64-unknown-linux-gnu --release
+# Test everything (438 tests across 14 crates)
+cargo test --workspace
 
 # Test a specific slice
 cargo test -p picloud-domain
@@ -203,6 +205,33 @@ cargo test -p picloud-events
 
 # Check without building
 cargo check --workspace
+
+# Release build
+cargo build --workspace --release
+```
+
+### Pi Cluster (aarch64)
+
+The project builds natively on Raspberry Pi 5 nodes. Use the **build node** (see `/picloud-e2e` skill for IPs and SSH details). Build once there, then copy binaries to the other nodes.
+
+Node IPs, SSH users, and cluster topology are **not checked into the repo** — they live in:
+- The `/picloud-e2e` skill (for build/deploy/test workflows)
+- The `/picloud-implement` skill (for implementation context)
+- `crates/picloud-test/cluster.toml` is a **template** — fill in IPs before use
+
+```bash
+# General workflow (substitute <BUILD_NODE> with actual IP from skill):
+# 1. Sync source to build node
+rsync -az --delete --exclude='target/' --exclude='.git/' ./ admin@<BUILD_NODE>:~/picloud/
+
+# 2. Build + test on build node
+ssh admin@<BUILD_NODE> "source ~/.cargo/env && cd ~/picloud && cargo test --workspace"
+ssh admin@<BUILD_NODE> "source ~/.cargo/env && cd ~/picloud && cargo build --workspace --release"
+
+# 3. Copy release binaries to worker nodes
+scp admin@<BUILD_NODE>:~/picloud/target/release/picloud-server /tmp/
+scp admin@<BUILD_NODE>:~/picloud/target/release/picloud /tmp/
+scp /tmp/picloud-server /tmp/picloud admin@<WORKER_NODE>:~/
 ```
 
 ---

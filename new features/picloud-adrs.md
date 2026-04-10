@@ -25,6 +25,22 @@
 - **Go** — first instinct for systems tooling, but the key dependencies (Oxigraph, youki) are Rust-native. Go would require FFI bridges or inferior alternatives. Also, GC pauses are undesirable in storage hot paths.
 - **C++** — memory safety is not guaranteed. Adds risk without benefit given Rust's maturity.
 
+**Test coverage:**
+
+Scenario tests:
+- `binary_compiles.rs` — `cargo build --release --target aarch64-unknown-linux-gnu` completes with zero errors and zero warnings. The resulting binary is a single ELF file with no dynamic library dependencies beyond `libc`.
+- `no_runtime_panics.rs` — the full scenario harness runs to completion. Any Rust `panic!` in the binary is captured by the test runner and counted as a test failure.
+
+Invariants:
+- The binary has no dynamic dependencies other than `libc`. Verified by `ldd picloud` — any line other than `linux-vdso` or `libc` is a failure.
+- No `unsafe` block in the codebase triggers undefined behaviour. Verified by running the full test suite under AddressSanitizer in CI on each PR.
+
+Exit criteria:
+- `cargo build --release` completes in < 15 minutes on a Raspberry Pi 5 (cold cache).
+- Binary size < 100 MB (stripped).
+- Zero `panic` calls reachable from production code paths (enforced via `#![deny(clippy::unwrap_used)]` in CI).
+- `ldd` reports zero unexpected dynamic dependencies.
+
 ---
 
 ## ADR-002: openraft for Cluster Consensus
@@ -45,6 +61,27 @@
 **Rejected alternatives:**
 - **hashicorp/raft** — Go only. Ruled out by ADR-001.
 - **Custom Raft implementation** — Raft is notoriously subtle. The cost of correctness is too high for a project that should be building on top of consensus, not debugging it.
+
+**Test coverage:**
+
+Scenario tests:
+- `raft_leader_election.rs` — bootstrap a two-node cluster. Assert exactly one node carries `picloud:hasRole picloud:Leader` in the RDF graph within 10 seconds of init.
+- `raft_leader_failover.rs` — kill the current Raft leader process via SIGKILL. Assert a new leader is elected and the `picloud:Leader` triple updated within 5 seconds. Assert the cluster continues accepting commands.
+- `raft_learner_join.rs` — add a third node as a Raft learner. Assert it appears in the RDF graph as `picloud:Learner` before being promoted to voter.
+
+Invariants:
+- Exactly one node holds `picloud:hasRole picloud:Leader` at all times. Checked every 1 second during Chaos runs. Any 2-second window with zero or two leaders is a failure.
+- The Raft log index is strictly monotonically increasing on the leader. Checked by querying the internal Raft state API on all nodes every 5 seconds.
+
+Chaos scenarios:
+- Kill leader → assert re-election in < 5 seconds.
+- Kill follower → assert cluster continues operating, leader unchanged.
+- Kill both followers in a three-node cluster → assert leader steps down (no quorum), resigns `picloud:Leader` triple within 10 seconds.
+
+Exit criteria:
+- Leader election after SIGKILL: < 5 seconds, measured across 20 consecutive kill cycles.
+- Zero split-brain events (two simultaneous leaders) across 20 kill cycles.
+- Log index never decreases — verified across 100 consecutive Raft appends.
 
 ---
 
@@ -79,6 +116,26 @@ This means external DNS is not a separate concern. The same mDNS mechanism that 
 - **Bootstrap token with known seed address** — requires knowing at least one node's address. Adds operational friction.
 - **Consul/etcd for discovery** — external infrastructure dependency. Violates single-binary goal.
 
+**Test coverage:**
+
+Scenario tests:
+- `dns_resolution.rs` — after `cluster init`, assert `picloud.local` resolves to a cluster node IP from an external client on the same broadcast domain within 2 seconds.
+- `node_join_dns.rs` — after a third node joins, assert its hostname (`{node-id}.picloud.local`) resolves within 60 seconds of the `NodeJoined` event appearing in the RDF graph.
+- `product_fqdn_dns.rs` — after `resource apply` for a Product, assert the product FQDN resolves correctly from a client that was connected before the product was deployed (tests cache invalidation path).
+
+Invariants:
+- `picloud.local` must resolve to an active node at all times. Probed every 5 seconds during Chaos runs. An unresolvable gap > 30 seconds is a test failure.
+- mDNS responses must conform to RFC 6762: PTR record present, TTL ≥ 4500 seconds, no truncated responses. Verified via `dns-sd` capture.
+
+Protocol probes:
+- RFC 6762 compliance: query `picloud.local A` from macOS (native resolver), Linux (avahi-daemon), and Windows 10+ (native mDNS). Assert all three return the same IP.
+- Assert no CNAME loops and no NXDOMAIN on any resource that has been applied and confirmed via the event stream.
+
+Exit criteria:
+- `picloud.local` resolves within 2 seconds of `cluster init` completing.
+- New node hostname resolves within 60 seconds of `NodeJoined` event.
+- Zero DNS resolution failures during a 5-minute Chaos run with one node killed and restored every 60 seconds (30-second gap tolerance applies).
+
 ---
 
 ## ADR-004: Event Sourcing as Platform State Foundation
@@ -105,6 +162,24 @@ This means external DNS is not a separate concern. The same mDNS mechanism that 
 **Rejected alternatives:**
 - **etcd as state store** — external dependency, eventual consistency is hidden, no inherent audit trail
 - **Embedded key-value store (sled, rocksdb)** — strong consistency possible but loses event history, audit trail, and time-travel queries
+
+**Test coverage:**
+
+Scenario tests:
+- `event_log_replay.rs` — apply a set of resources, record the RDF graph state via SPARQL, wipe the Oxigraph projection, replay the event log from index 0, assert the resulting graph is byte-identical to the recorded snapshot.
+- `projection_consistency.rs` — after every `resource apply`, assert that the resulting RDF state (SPARQL ASK) matches the declared resource definition within the projection latency budget.
+- `event_ordering.rs` — apply 50 resources in parallel from two CLI clients, assert the event log index is strictly monotonic and the final RDF graph reflects all 50 resources with no duplicates or gaps.
+
+Invariants:
+- The event log index must be strictly monotonically increasing on all nodes at all times. Any non-monotonic index is an immediate test failure.
+- The RDF graph triple count must be identical on all nodes within 60 seconds of quorum being restored after a partition. Checked by running `SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }` on all nodes and comparing.
+- No event must be lost during a Raft leader change. Verified by writing a sentinel event immediately before killing the leader and asserting the sentinel appears in the graph after the new leader is elected.
+
+Exit criteria:
+- Event-to-projection latency: p50 < 200 ms, p99 < 2000 ms under normal conditions.
+- Full log replay (empty graph → current state) completes in < 30 seconds for a log of 10,000 events.
+- Zero events lost across 20 consecutive leader-kill-and-restore cycles.
+- RDF graph convergence after a 60-second network partition heals: < 60 seconds.
 
 ---
 
@@ -133,6 +208,22 @@ This means external DNS is not a separate concern. The same mDNS mechanism that 
 - **SQLite as read model** — relational model is less natural for graph-shaped cluster state. Joins become complex. No semantic discovery.
 - **In-memory hash maps** — fast but not queryable, not persistent, not observable from outside the process.
 
+**Test coverage:**
+
+Scenario tests:
+- `rdf_projection_roundtrip.rs` — apply a product with containers, volumes, and identities. Assert every declared resource appears as typed triples in the graph via SPARQL ASK. Wipe Oxigraph, replay the event log, assert the graph is identical.
+- `sparql_query_types.rs` — execute SELECT, ASK, CONSTRUCT, and DESCRIBE queries against the platform graph. Assert correct result formats and non-empty results for known-populated graphs.
+- `graph_isolation.rs` — assert that a SPARQL query against the platform graph does not return triples from a product named graph, and vice versa (named graph isolation).
+
+Invariants:
+- All state reads are served from the RDF projection, never from the raw event log. Verified by asserting that disabling Oxigraph read access causes all status queries to fail — no fallback to raw log replay.
+- Triple count on all nodes is identical within 60 seconds after any network partition heals.
+
+Exit criteria:
+- SPARQL ASK for any applied resource returns `true` within the projection latency budget (p99 < 2 s).
+- Graph triple count consistent across all cluster nodes within 60 seconds of partition recovery.
+- Named graph isolation: zero cross-contamination between platform and any product graph, verified by 100 randomised SPARQL queries.
+
 ---
 
 ## ADR-006: Oxigraph as Embedded Triplestore
@@ -154,6 +245,22 @@ This means external DNS is not a separate concern. The same mDNS mechanism that 
 - **Apache Jena** — JVM dependency. Ruled out.
 - **RDFox** — not open source.
 - **External triplestore (Fuseki, Stardog)** — external process dependency. Violates single-binary goal.
+
+**Test coverage:**
+
+Scenario tests:
+- `oxigraph_sparql_compliance.rs` — execute a representative set of SPARQL 1.1 queries (SELECT with FILTER, ASK, CONSTRUCT, DESCRIBE, SPARQL Update INSERT, DELETE) against the embedded Oxigraph instance. Assert correct results for each.
+- `named_graph_isolation.rs` — write triples to three named graphs, assert that each named graph query returns only its own triples, and that the default graph union query returns all.
+- `oxigraph_persistence.rs` — write triples, restart the `picloud-server` process, assert triples are still present (verifies persistence across process restart).
+
+Protocol probes:
+- SPARQL 1.1 Protocol: POST to the SPARQL endpoint with correct Content-Type. Assert 200 with `application/sparql-results+json`. Submit malformed SPARQL, assert 400.
+
+Exit criteria:
+- All SPARQL 1.1 query types return correct results with zero errors.
+- Named graph isolation verified — zero cross-graph leakage.
+- Triples survive process restart (persistent storage working).
+- SPARQL protocol: malformed query returns 400, not 500.
 
 ---
 
@@ -179,6 +286,18 @@ This means external DNS is not a separate concern. The same mDNS mechanism that 
 - **HCL (Terraform)** — well-designed but requires a large parser. Bicep is simpler and more readable.
 - **Custom DSL** — unnecessary complexity. Bicep-inspired syntax covers all requirements.
 - **JSON** — not human-writable at scale.
+
+**Test coverage:**
+
+Scenario tests:
+- `picloud_syntax_parse.rs` — parse a representative set of `.picloud` files covering all resource types. Assert zero parse errors on valid inputs.
+- `invalid_syntax_rejection.rs` — submit `.picloud` files with deliberate syntax errors (missing braces, invalid property names, wrong types). Assert each returns a human-readable error, not a panic or 500.
+- `symbolic_reference_resolution.rs` — declare a container that references a volume by symbolic name. Assert the compiler resolves the reference and produces correct Turtle with the volume IRI.
+
+Exit criteria:
+- Parsing all valid `.picloud` files in the test corpus: zero errors.
+- Invalid syntax: each error case returns a non-empty, human-readable error message within 1 second (no timeout, no panic).
+- Symbolic references compile to correct Turtle IRIs deterministically — same input always produces the same output.
 
 ---
 
@@ -212,6 +331,20 @@ $ picloud resource apply ./photo-app/
 **Rejected alternatives:**
 - **Synchronous request-response** — incompatible with event-sourced architecture. Would require a separate synchronous state store.
 
+**Test coverage:**
+
+Scenario tests:
+- `command_correlation.rs` — emit `picloud resource apply` with a known correlation ID. Subscribe to the result stream. Assert the terminal event (`ResourceReady` or `ResourceFailed`) carries the same correlation ID and arrives within 30 seconds.
+- `progress_streaming.rs` — apply a multi-resource product. Assert that intermediate progress events (`ResourceDeclared`, `ResourceProvisioning`) stream to the CLI before the terminal event.
+- `concurrent_commands.rs` — emit 10 `resource apply` commands concurrently from separate CLI processes. Assert all 10 terminal events arrive with matching correlation IDs and no events are cross-contaminated.
+
+Invariants:
+- Every emitted command event must have a corresponding terminal result event within 60 seconds under normal conditions. Any command without a terminal event after 60 seconds is a test failure.
+
+Exit criteria:
+- CLI-to-terminal-event latency: p50 < 500 ms, p99 < 5 s for single-resource apply under normal conditions.
+- Concurrent 10-command burst: all 10 terminal events received with correct correlation IDs, zero cross-contamination.
+
 ---
 
 ## ADR-009: Standalone IAM — Users and Workload Identities
@@ -237,6 +370,26 @@ $ picloud resource apply ./photo-app/
 - **External OIDC provider (Authentik, Keycloak)** — external infrastructure dependency. Requires another service to be running before PiCloud can function.
 - **mTLS only (no OIDC)** — sufficient for workload-to-workload but does not cover human authentication or application-level user management.
 
+**Test coverage:**
+
+Scenario tests:
+- `human_identity_lifecycle.rs` — create a human identity, issue a token via CLI device flow, decode the JWT, assert `iss`, `sub`, `aud`, `exp`, `iat` claims are present and correct.
+- `workload_identity_injection.rs` — deploy a container with a workload identity. Assert the container process receives an injected credential and can use it to request a token from the IAM endpoint. Assert the token `sub` matches the workload identity IRI.
+- `token_expiry_enforcement.rs` — issue a token, wait for it to expire, present it to an IAM-gated endpoint, assert 401 with `WWW-Authenticate` header.
+
+Protocol probes:
+- OIDC `.well-known/openid-configuration`: assert all required fields present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`). Assert `issuer` matches the cluster domain.
+- JWKS endpoint: assert `kid` present, `alg` is RS256 or ES256, no `none` algorithm in the key set.
+
+Invariants:
+- Tokens issued before a Raft leader change are still cryptographically valid after the change. Verified by issuing a token, killing the leader, then validating the token against the JWKS of the new leader.
+
+Exit criteria:
+- Token issuance: < 500 ms p99.
+- JWT claims: all required claims present and correct on 100 consecutive issuances.
+- OIDC `.well-known` response: all required fields present, validates against OpenID Connect Discovery spec.
+- Expired token: 100% rejection rate at IAM-gated endpoints.
+
 ---
 
 ## ADR-010: OCI Containers and Raw Binaries as Workload Primitives
@@ -258,6 +411,21 @@ $ picloud resource apply ./photo-app/
 - **WebAssembly** — interesting but tooling is immature for production workloads. Future consideration.
 - **Containers only** — excludes lightweight native workloads and makes dogfooding harder.
 
+**Test coverage:**
+
+Scenario tests:
+- `container_schedule.rs` — apply a container resource. Assert `ResourceReady` event emitted, container running (via `youki state`), and RDF graph reflects `picloud:status picloud:Running`.
+- `binary_workload.rs` — schedule a raw ARM64 binary. Assert it starts, receives injected `PICLOUD_WORKLOAD_IDENTITY` environment variable, and is reachable via its internal DNS name.
+- `workload_identity_injection.rs` — assert that both container and binary workloads receive the same identity injection, secret injection, and volume mount treatment. Compare environment variables between the two workload types.
+
+Invariants:
+- Scheduled workloads remain in `picloud:Running` state through a Raft leader change. Checked by polling the RDF graph every 5 seconds during a leader-kill scenario — any `picloud:Failed` state that is not subsequently recovered is a test failure.
+
+Exit criteria:
+- OCI container startup: < 30 seconds from `resource apply` to `ResourceReady`.
+- Raw binary startup: < 10 seconds from `resource apply` to `ResourceReady`.
+- Identity injection verified in both workload types: 100% of test runs.
+
 ---
 
 ## ADR-011: Block Storage Before RDF Application Storage
@@ -274,6 +442,14 @@ $ picloud resource apply ./photo-app/
 - Phasing reduces the surface area of Phase 1 to the minimum needed for a working cluster
 - RDF application storage builds on the same block storage primitives — no rework required
 
+**Test coverage:**
+
+Scenario tests:
+- `phase_dependency_order.rs` — assert that the block storage scenario suite (`volume_mount.rs`, `replication_coverage.rs`) passes before the RDF store scenario suite (`product_sparql.rs`) is executed. The test runner enforces this ordering and fails the RDF store suite immediately if any block storage test has failed in the same run.
+
+Exit criteria:
+- Phase gate enforced: RDF store tests do not run if block storage tests are failing. Zero exceptions to this ordering rule.
+
 ---
 
 ## ADR-012: Mounted and Raw Block Device Support
@@ -288,6 +464,21 @@ $ picloud resource apply ./photo-app/
 - Mounted volumes cover the majority of use cases
 - Raw block devices are required for databases (PostgreSQL, RocksDB) that manage their own storage layout
 - Both types use the same allocation and replication mechanisms — no storage layer duplication
+
+**Test coverage:**
+
+Scenario tests:
+- `mounted_volume.rs` — allocate a mounted volume, attach it to a container at `/data`, write a sentinel file inside the container, restart the container, assert the sentinel file is present.
+- `raw_block_device.rs` — allocate a raw block device volume. Assert the block device node (e.g. `/dev/xvdb`) is present inside the container. Write a known pattern to the device, read it back, assert byte-identical.
+- `volume_mount_restart.rs` — restart the `picloud-server` process on the node hosting the volume. Assert the volume remains mounted and the sentinel file is still readable after restart.
+
+Invariants:
+- Mounted volumes survive Raft leader change without data loss. Verified by writing sentinel files before and reading after a leader kill cycle.
+
+Exit criteria:
+- Zero data loss for mounted volumes across 10 node-kill-restore cycles.
+- Raw block device accessible inside container: verified on 100% of test runs.
+- Volume remounted after node restart: sentinel file readable within 60 seconds of process restart.
 
 ---
 
@@ -307,6 +498,19 @@ $ picloud resource apply ./photo-app/
 
 **Future:** Additional durability tiers (quorum, local) will be added in Phase 4 as the storage implementation matures.
 
+**Test coverage:**
+
+Scenario tests:
+- `full_replication_coverage.rs` — allocate a `full-replication` volume on a three-node cluster. Write known data from node A. Assert the data is readable from node B and node C without contacting node A.
+- `replication_on_node_join.rs` — allocate a volume on a two-node cluster. Add a third node. Assert the volume is replicated to the new node within 120 seconds of the `NodeJoined` event.
+
+Invariants:
+- A `full-replication` volume must be readable from every node in the cluster at all times. Verified during Chaos runs by reading from a different node than the writer after each kill event.
+
+Exit criteria:
+- Zero data loss when any single node is killed, for a `full-replication` volume. Verified across 10 kill-restore cycles on a three-node cluster.
+- Replication to a new node completes within 120 seconds of `NodeJoined`.
+
 ---
 
 ## ADR-014: Service Discovery and Internal DNS in MVP
@@ -321,6 +525,19 @@ $ picloud resource apply ./photo-app/
 - Without service discovery, containers cannot find each other — the platform is not useful
 - Internal DNS is a small implementation surface relative to its impact
 - Automatic registration means operators never configure DNS manually
+
+**Test coverage:**
+
+Scenario tests:
+- `internal_dns_resolution.rs` — deploy two containers in the same product. From container A, resolve `{resource-B}.{product}.picloud.internal`. Assert it resolves to container B's IP within 10 seconds of `ResourceReady`.
+- `cross_product_isolation.rs` — assert that a container in `product-A` cannot resolve `{resource}.{product-B}.picloud.internal` (internal DNS is scoped to the product namespace).
+
+Invariants:
+- Every `ResourceReady` event must result in a resolvable internal DNS name within 10 seconds. Verified by probing DNS from a sibling workload after each scheduling event.
+
+Exit criteria:
+- Internal DNS resolution: < 10 seconds after `ResourceReady` event, 100% of test runs.
+- Cross-product name isolation: NXDOMAIN for cross-product `.internal` queries, 100% of test runs.
 
 ---
 
@@ -346,6 +563,20 @@ $ picloud resource apply ./photo-app/
 **Rejected alternatives:**
 - **Declarative-convergent (Kubernetes model)** — requires a reconciliation loop, desired-state storage, and a diffing engine. Significant complexity for a system that prioritises simplicity.
 
+**Test coverage:**
+
+Scenario tests:
+- `idempotent_apply.rs` — apply the same resource file twice in succession. Assert the second apply produces zero new events in the event log (idempotency key deduplicated).
+- `partial_failure_reapply.rs` — kill the cluster midway through a `resource apply`. Re-apply after recovery. Assert the final state is correct and no resources are duplicated.
+- `idempotency_key_uniqueness.rs` — assert that two different apply operations (different files) produce distinct idempotency keys and are not deduplicated.
+
+Invariants:
+- Re-running `resource apply` on an unchanged file must never produce new events in the event log.
+
+Exit criteria:
+- Zero new events on second apply of unchanged file: 100% of test runs.
+- Post-failure reapply reaches correct final state: 100% of 20 kill-midway tests.
+
 ---
 
 ## ADR-016: Product as Native Deployment Unit
@@ -362,6 +593,20 @@ $ picloud resource apply ./photo-app/
 - IAM scoping per Product means access control is at the application level, not the resource level
 - Cascading deletion prevents orphaned resources
 - One active version per Product prevents version sprawl and simplifies the operational model
+
+**Test coverage:**
+
+Scenario tests:
+- `product_full_lifecycle.rs` — apply a product with container, volume, and identity. Assert `ProductReady` event. Delete the product. Assert `ProductDeleted` event and all child resources removed from the RDF graph within 60 seconds.
+- `cascading_delete.rs` — apply a product with 5 child resources. Delete the product. Assert all 5 child resource IRIs return SPARQL `ASK { ?s ?p ?o }` = false within 60 seconds.
+- `orphan_prevention.rs` — delete a product. Query the RDF graph for any resource whose IRI contains the deleted product's path. Assert the result set is empty.
+
+Invariants:
+- No resource can exist in the RDF graph with a product IRI that has been deleted. Checked after every cascading delete.
+
+Exit criteria:
+- Cascading delete of a 10-resource product completes within 60 seconds.
+- Zero orphaned resources in the graph after product deletion: 100% of test runs.
 
 ---
 
@@ -382,6 +627,23 @@ $ picloud resource apply ./photo-app/
 - Token signing keys are stored in the platform's encrypted secret store
 - Key rotation must not invalidate active sessions (JWKS must serve both old and new keys during rotation)
 - All OIDC endpoints must be served over TLS
+
+**Test coverage:**
+
+Scenario tests:
+- `oidc_authorization_code.rs` — initiate OIDC authorization code flow against a deployed Product. Complete passkey authentication. Assert ID token received with correct `iss`, `aud`, `sub`, and `exp` claims.
+- `oidc_client_credentials.rs` — execute client credentials grant for an App Registration. Assert access token received, token type is Bearer, and `expires_in` is present.
+- `jwks_key_rotation.rs` — trigger key rotation. Assert JWKS endpoint serves both old and new keys during the rotation window. Assert tokens issued under the old key are still valid during the window.
+
+Protocol probes:
+- `GET /.well-known/openid-configuration` — assert all required OpenID Connect Discovery fields present. Assert `issuer` value matches cluster domain exactly.
+- JWKS endpoint — assert `kid` present and matches token header, `alg` is RS256 or ES256, `none` algorithm absent.
+- Token endpoint — assert `access_token`, `token_type: Bearer`, `expires_in` in response. Assert missing `client_secret` returns 401.
+
+Exit criteria:
+- All required OIDC Discovery fields present: 100% of probes.
+- Key rotation: tokens issued before rotation remain valid throughout the rotation window.
+- Token issuance via client credentials: < 500 ms p99.
 
 ---
 
@@ -404,6 +666,20 @@ $ picloud resource apply ./photo-app/
 - Cross-product data consistency is eventual, not immediate
 - Teams building Products must design their domain events carefully — event schemas are a public API
 
+**Test coverage:**
+
+Scenario tests:
+- `inter_product_event_delivery.rs` — product A emits an event to the platform bus. Product B has a declared `event-subscription` resource for that event type. Assert product B's workload receives the event within 5 seconds. Assert event appears in the RDF graph.
+- `direct_network_blocked.rs` — attempt a direct TCP connection from a container in product A to a container in product B on any port other than the declared ingress. Assert the connection is refused (no route exists).
+- `event_bus_burst.rs` — product A emits 1000 events in a 10-second burst. Assert all 1000 are received by product B's subscriber with zero loss. Assert event IDs match.
+
+Invariants:
+- The only inter-product network paths are the platform event bus and declared SPARQL endpoints. Verified by asserting that `picloud.internal` names for product B's resources are NXDOMAIN from product A's containers.
+
+Exit criteria:
+- Inter-product event delivery: < 5 seconds latency, zero loss in 1000-event burst test.
+- Direct network blocking: 100% rejection rate for non-bus, non-SPARQL cross-product connections.
+
 ---
 
 ## ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure
@@ -420,6 +696,20 @@ $ picloud resource apply ./photo-app/
 - Ontology files are the schema contract for a Product's graph — consumers can understand the domain before querying
 - Binding ontology to Product version means consumers always know which schema they are querying
 
+**Test coverage:**
+
+Scenario tests:
+- `product_sparql_endpoint.rs` — deploy a product with `rdf-store`. Run a SPARQL SELECT against the product's SPARQL endpoint with a valid workload token. Assert 200 and correct results.
+- `sparql_iam_enforcement.rs` — query the product SPARQL endpoint with no token (assert 401), with an expired token (assert 401), with a token for a different product (assert 403), and with a valid scoped token (assert 200).
+- `ontology_served.rs` — GET the product's ontology IRI. Assert 200 with `text/turtle` content type and non-empty Turtle body containing the declared ontology.
+
+Protocol probes:
+- SPARQL 1.1 Protocol at the product endpoint: SELECT returns `application/sparql-results+json`, CONSTRUCT returns `text/turtle`, malformed SPARQL returns 400.
+
+Exit criteria:
+- IAM enforcement: 100% of no-token and wrong-token requests rejected, 100% of valid-token requests accepted.
+- SPARQL protocol compliance at product endpoint matches platform graph compliance.
+
 ---
 
 ## ADR-020: Cluster Graph as Semantic Service Registry
@@ -435,6 +725,16 @@ $ picloud resource apply ./photo-app/
 - LLMs can query the cluster graph to understand the deployed system before generating code
 - New Products can discover existing Products' interfaces through graph queries
 - Consistent with RDF as the universal data model for the platform
+
+**Test coverage:**
+
+Scenario tests:
+- `cluster_registry_discovery.rs` — deploy three products with different event types, SPARQL endpoints, and ontologies. Query the cluster-level SPARQL endpoint for all products, their event schemas, and their ontology IRIs. Assert all three products discoverable in a single query.
+- `registry_version_binding.rs` — deploy product v1, then upgrade to v2. Assert the cluster graph reflects the new version and the old version's resources are no longer present.
+
+Exit criteria:
+- All deployed products discoverable via a single cluster-level SPARQL query within 30 seconds of deployment.
+- Version change reflected in cluster registry within one projection cycle (< 2 seconds).
 
 ---
 
@@ -454,6 +754,20 @@ $ picloud resource apply ./photo-app/
 
 **Upgrade path:** Deploying a new Product version is an atomic cutover. The platform provisions all resources for the new version in full. Only when every resource reaches `ResourceReady` does the platform cut traffic over to the new version and tear down the old one. If any resource fails to reach `ResourceReady`, the deployment is aborted and the old version remains live. There is no partial cutover — the cluster is never in a state where two versions are simultaneously serving traffic.
 
+**Test coverage:**
+
+Scenario tests:
+- `atomic_version_cutover.rs` — deploy product v1, then apply v2. Monitor the RDF graph and the product's ingress throughout the upgrade. Assert there is no window where both v1 and v2 containers are simultaneously tagged `picloud:Running` under the product IRI.
+- `failed_upgrade_rollback.rs` — deploy product v1, then apply v2 where one required resource is deliberately misconfigured. Assert v2 deployment fails, v1 resources remain `picloud:Running`, and no v2 resources are left in the graph.
+- `one_active_version_invariant.rs` — query `SELECT DISTINCT ?version WHERE { <product-iri> picloud:activeVersion ?version }` after any deployment. Assert the result always contains exactly one row.
+
+Invariants:
+- At no point during an upgrade does the RDF graph show two active versions for the same product.
+
+Exit criteria:
+- Atomic cutover: zero windows with two simultaneous active versions across 20 upgrade cycles.
+- Failed upgrade: v1 remains live in 100% of deliberate-failure tests.
+
 ---
 
 ## ADR-022: Inter-Product Event Subscriptions as First-Class Resources
@@ -469,6 +783,17 @@ $ picloud resource apply ./photo-app/
 - The platform can enforce that a subscription's source Product and event type exist before provisioning
 - Consistent with the IaC-as-only-interface principle — everything exists in a file
 
+**Test coverage:**
+
+Scenario tests:
+- `event_subscription_provisioning.rs` — declare an `event-subscription` resource in a product file. Apply it. Assert the subscription IRI appears in the RDF graph and events from the source product are delivered.
+- `undeclared_subscription_rejection.rs` — attempt to subscribe to a product's events at runtime via the SDK without a declared `event-subscription` resource. Assert the platform returns 403.
+- `subscription_lifecycle.rs` — delete the `event-subscription` resource. Assert events from the source product are no longer delivered and the subscription IRI is removed from the graph.
+
+Exit criteria:
+- Declared subscription: events flow within 5 seconds of provisioning.
+- Undeclared runtime subscription: rejected with 403, 100% of attempts.
+
 ---
 
 ## ADR-023: Ontology Files Bound to Product Version
@@ -483,6 +808,17 @@ $ picloud resource apply ./photo-app/
 - Schema and implementation are versioned together — no schema/implementation drift
 - Consumers can discover the exact schema for any Product version from the cluster graph
 - SHACL files provide validation shapes — the platform can optionally validate graph updates against them
+
+**Test coverage:**
+
+Scenario tests:
+- `ontology_version_binding.rs` — deploy product v1 with an ontology resource. Assert the ontology IRI is versioned (`/ontology/v1`) and resolves with the correct Turtle body. Deploy v2 with an updated ontology. Assert the v2 IRI resolves with the new body and the v1 IRI still resolves with the original body.
+- `ontology_shacl_validation.rs` — add a triple that violates the product's SHACL ontology to the product graph. Assert the platform rejects the update with a SHACL validation error.
+
+Exit criteria:
+- Ontology IRI resolves within 5 seconds of product deployment.
+- Old ontology IRIs remain resolvable after version upgrade: 100% of probes.
+- SHACL violations rejected: 100% of deliberately invalid graph updates.
 
 ---
 
@@ -511,6 +847,16 @@ $ picloud resource apply ./photo-app/
 - Operators express requirements, not implementation details — consistent with the cloud abstraction model
 - Platform can make better placement decisions than operators (which nodes have capacity, which nodes are healthy)
 - Adding new storage tiers in Phase 4 does not require changes to Product resource files — only the platform implementation changes
+
+**Test coverage:**
+
+Scenario tests:
+- `storage_intent_full_replication.rs` — declare a volume with `durability: full-replication`. Apply it. Query the RDF graph and assert the volume's replication state shows N replicas for an N-node cluster.
+- `intent_translated_to_implementation.rs` — query `picloud:replicationFactor` and `picloud:replicationNodes` on the volume IRI after allocation. Assert both match the cluster's current node count.
+
+Exit criteria:
+- `full-replication` volume replicated to all N nodes within 60 seconds of allocation, verified via SPARQL.
+- Operator never needs to specify a replication factor — zero such fields accepted in the volume resource definition.
 
 ---
 
@@ -547,6 +893,22 @@ $ picloud resource apply ./photo-app/
 - **SSH keys only** — suitable for CLI but does not cover browser-based OIDC flows for applications.
 - **TOTP/OTP** — second factor only, still requires a primary credential. Adds complexity without eliminating passwords.
 
+**Test coverage:**
+
+Scenario tests:
+- `passkey_registration.rs` — bootstrap a fresh cluster. Complete the WebAuthn registration ceremony using a hardware FIDO2 key. Assert the admin identity is created, the passkey is registered, and no password is present anywhere in the platform event log or RDF graph.
+- `fido2_cli_auth.rs` — authenticate the CLI using a FIDO2 hardware key via the device flow. Assert a valid token is issued with the correct `sub` and `iss` claims. Assert the token payload contains no password-derived fields.
+- `webauthn_challenge_replay_rejection.rs` — capture a WebAuthn challenge response, attempt to replay it. Assert the platform rejects the replayed assertion.
+
+Protocol probes:
+- WebAuthn Level 2 ceremony: assert the challenge is random (≥ 16 bytes), the origin is bound to the cluster domain, and the `rpId` matches the cluster domain.
+- Assert no `password` field in any token, identity resource, or event in the platform log.
+
+Exit criteria:
+- Passkey registration and first login: completes within 60 seconds of `cluster init`.
+- Challenge replay attack: rejected 100% of the time.
+- Zero passwords in any platform-managed data structure: verified by full RDF graph scan.
+
 ---
 
 ## ADR-026: Bootstrap Token Exchange and Three-Tier Passkey Recovery
@@ -571,6 +933,19 @@ $ picloud resource apply ./photo-app/
 - Backup key enforcement ensures Tier 1 (admin reset) is always available as long as at least one admin is accessible
 - The same token exchange mechanism is reused across bootstrap and all recovery tiers — one implementation, multiple use cases
 - All recovery operations are auditable events in the platform event log
+
+**Test coverage:**
+
+Scenario tests:
+- `bootstrap_token_single_use.rs` — use a bootstrap token to register the first admin. Attempt to reuse the same token. Assert the second use returns 401.
+- `bootstrap_token_expiry.rs` — generate a bootstrap token with a 1-minute TTL. Wait 90 seconds. Attempt to use the token. Assert rejection with a clear expiry error.
+- `tier1_admin_reset.rs` — admin A initiates a passkey reset for user B via `picloud identity reset-passkey`. User B re-enrolls. Assert old passkey is revoked (old credential rejected), new passkey accepted.
+- `tier3_physical_recovery.rs` — simulate all admin accounts being inaccessible. Run `picloud cluster recover` directly on a node (local-only, no network). Assert a new bootstrap token is generated and the recovery event appears as a high-severity audit entry in the platform event log.
+
+Exit criteria:
+- Bootstrap token: single-use enforced 100%, expiry enforced 100%.
+- Tier 1 reset: old credential rejected within 5 seconds of re-enrollment completion.
+- Tier 3 recovery: recovery event present in log with severity `critical`, new bootstrap token works exactly once.
 
 ---
 
@@ -597,6 +972,23 @@ $ picloud resource apply ./photo-app/
 **Rejected alternatives:**
 - **All traffic via platform** — creates a platform bottleneck for SPARQL queries. High-frequency graph reads would saturate the platform's routing layer.
 - **Direct connections without mTLS** — unacceptable. All workload communication must be mutually authenticated and encrypted.
+
+**Test coverage:**
+
+Scenario tests:
+- `mtls_enforcement.rs` — attempt to connect to the platform API with no client certificate: assert TLS handshake fails with `certificate_required` alert. Attempt with a self-signed cert not issued by the cluster CA: assert rejection. Connect with a valid platform-issued certificate: assert 200.
+- `workload_cert_injection.rs` — start a container workload. Assert the workload receives its mTLS certificate as an injected file. Assert the certificate chains to the cluster CA.
+- `sparql_direct_mtls.rs` — query a product SPARQL endpoint directly from a workload using its injected mTLS certificate (no platform proxy hop). Assert 200 and correct query results.
+
+Protocol probes:
+- RFC 8446 TLS 1.3: assert mutual authentication required on all inter-node connections. Assert TLS version is 1.3 (1.2 rejected). Assert cipher suite is acceptable (no RC4, no export ciphers).
+- Assert `certificate_required` alert on no-cert connections, not a generic TLS error.
+
+Exit criteria:
+- No-cert connection: rejected 100% of attempts.
+- Wrong-CA cert: rejected 100% of attempts.
+- Valid cert: accepted 100% of attempts.
+- mTLS enforcement verified on all three connection types: node-to-node, workload-to-platform, workload-to-SPARQL.
 
 ---
 
@@ -627,6 +1019,19 @@ $ picloud resource apply ./photo-app/
 
 **This principle is the architectural north star for PiCloud.** When a new feature or capability is being designed, the first question is: does this increase coupling between Products, or does it preserve their independence? If it increases coupling, the design should be reconsidered.
 
+**Test coverage:**
+
+Scenario tests:
+- `slice_dependency_enforcement.rs` — for each slice crate, run `cargo build -p {crate}` with all other slices removed from the workspace. Assert each slice compiles independently with only `picloud-domain` as an internal dependency.
+- `no_cross_slice_imports.rs` — run `cargo deny` or a custom lint that scans `Cargo.toml` for any `picloud-*` dependency in any slice other than `picloud-domain`. Assert zero violations.
+
+Invariants:
+- `cargo tree -p picloud-{slice}` shows `picloud-domain` as the only internal dependency for every non-server slice. This is run in CI on every PR.
+
+Exit criteria:
+- Zero cross-slice imports detected across the full workspace.
+- Every slice compiles independently within 5 minutes on Pi5 hardware.
+
 ---
 
 ## ADR-030: Platform-Generated CA with BYO-CA Support
@@ -656,6 +1061,28 @@ $ picloud resource apply ./photo-app/
 - External clients (operator laptops, browsers, RDF tools) must trust the platform CA to connect to `picloud.local` over HTTPS — one-time operation via `picloud ca export`
 - In BYO-CA mode, the external CA must be accessible during node join and certificate rotation operations
 - The platform CA private key is the most sensitive secret in the cluster — its storage and replication must be treated with the highest security priority
+
+**Test coverage:**
+
+Scenario tests:
+- `platform_ca_export.rs` — run `picloud ca export`. Trust the exported CA in a test client's OS trust store. Connect to `https://picloud.local`. Assert 200 with no TLS warning.
+- `byo_ca.rs` — init a cluster with `--ca-cert ./test-ca.pem --ca-key ./test-ca-key.pem`. Verify all issued node certificates chain to the provided CA, not a platform-generated one.
+- `cert_chain_validation.rs` — extract a node certificate and verify the full chain: leaf → cluster CA (or BYO CA). Assert the chain is valid and the CA fingerprint in the `Issuer` field matches the cluster identity.
+
+Protocol probes:
+- X.509 chain validation: leaf cert → CA cert → verify signature at each step.
+- Assert no self-signed leaf certificates — all certs must chain to the platform CA.
+- Assert cert SANs match the node hostname and IP.
+- Assert cert expiry > 30 days from test run date (catches near-expiry before it becomes an outage).
+
+Exit criteria:
+- Exported CA trusted by external client within 60 seconds of `cluster init`.
+- BYO-CA: all certs chain to provided CA, zero certs issued by a platform-generated CA.
+- Full chain validation: passes for 100% of issued certificates.
+
+---
+
+## ADR-029: IRI-Based Resource Addressing
 
 **Status:** Accepted
 
@@ -700,6 +1127,22 @@ Accept: text/html              → Human-readable view (future portal)
 - The internal DNS resolver must resolve `picloud.local` to the cluster ingress
 - TLS certificates must be issued for `picloud.local` by the platform's built-in CA — external clients need to trust this CA
 - Resource IRIs must be assigned at declaration time and remain stable for the lifetime of the resource
+
+**Test coverage:**
+
+Scenario tests:
+- `iri_dereferencing.rs` — GET the IRI of every known resource type (cluster root, node, product, container, volume, identity). Assert 200 and non-empty body for each content type.
+- `content_negotiation.rs` — GET a resource IRI with `Accept: text/turtle`, then with `Accept: application/ld+json`, then with `Accept: application/json`. Assert correct Content-Type in each response and that the body is valid for the declared type.
+- `iri_stability.rs` — apply a container resource, record its IRI. Reschedule the container to a different node. Assert the IRI is unchanged and still dereferenceable.
+
+Protocol probes:
+- HTTP content negotiation per RFC 7231: assert `Accept: text/turtle` returns `Content-Type: text/turtle`, assert `Accept: application/ld+json` returns `Content-Type: application/ld+json`.
+- Assert all resource IRIs are path-based and rooted at the cluster domain — no subdomains, no opaque IDs.
+
+Exit criteria:
+- All resource IRIs dereferenceable: 100% of applied resources.
+- Content negotiation correct for all four Accept types: 100% of probes.
+- IRI stable across workload reschedule: verified on 20 reschedule cycles.
 
 ---
 
@@ -750,6 +1193,18 @@ Each schema IRI returns a JSON Schema or SHACL document describing the event pay
 - Schema definitions must be written before the events that use them — schemas are deployed as part of platform releases
 - Projectors accumulate handlers over time as schemas evolve — this is intentional and explicit rather than hidden
 
+**Test coverage:**
+
+Scenario tests:
+- `schema_iri_resolution.rs` — emit a platform event (e.g. `ResourceReady`). Extract the `schema` field from the event envelope. GET the schema IRI. Assert 200 and a valid JSON Schema body.
+- `schema_evolution.rs` — emit 100 events under schema v1. Deploy a v2 projector that handles both v1 and v2. Replay the log. Assert the v2 projector correctly processes all v1 events.
+- `schema_iri_permanence.rs` — deploy a new platform version that introduces schema v2 for an event type. Assert the v1 schema IRI still resolves and returns the original v1 schema body.
+
+Exit criteria:
+- All schema IRIs resolve to valid JSON Schema: 100% of emitted event types.
+- Old schema IRIs remain valid after platform version upgrade: verified on every platform release.
+- V1 events correctly processed by a v2 projector: 100% of 100 replayed events.
+
 ---
 
 ## ADR-032: Product Event Store as First-Class Storage Primitive
@@ -792,6 +1247,22 @@ Event schemas are declared as `.ttl` or `.shacl` files deployed with the Product
 - The platform must support multi-tenant event log partitioning — platform events and Product events coexist but are scoped separately
 - Custom projectors (for non-standard projection logic) are a future concern — Phase 3 ships automatic projection only
 - Product event stores add to the Raft replication load — large, high-frequency event stores may require tuning
+
+**Test coverage:**
+
+Scenario tests:
+- `event_store_append_read.rs` — declare an `event-store` resource with a Photo aggregate. Append 10 `PhotoCreated` events. Read the aggregate stream. Assert all 10 events returned in order with correct payloads.
+- `event_store_rdf_projection.rs` — append aggregate events. Assert the product's SPARQL endpoint reflects the projected aggregate state within the projection latency budget.
+- `event_store_replay.rs` — deploy a product with a deliberate projector bug that projects incorrect triples. Fix the projector in v2. Deploy v2 and replay the event store. Assert the RDF graph now reflects the correct state.
+- `event_store_survivor.rs` — append 100 events, kill the Raft leader, assert all 100 events readable after leader failover.
+
+Invariants:
+- The event store log index is monotonically increasing. Verified continuously during Chaos runs.
+
+Exit criteria:
+- Append latency: < 10 ms p99 under normal conditions.
+- Event store replay of 1000 events: < 30 seconds.
+- Zero events lost across 10 leader-kill-restore cycles.
 
 ---
 
@@ -841,6 +1312,18 @@ The .NET SDK ships a companion `PiCloud.Sdk.Aspire` package. PiCloud resources a
 - The SDK generator is a significant piece of platform tooling — it must handle three target languages from one ontology source
 - SDK versioning is coupled to platform versioning — breaking platform changes are breaking SDK changes
 - The generator must be part of the platform's own CI from day one — not an afterthought
+
+**Test coverage:**
+
+Scenario tests:
+- `sdk_generation.rs` — run `picloud sdk generate` against a live cluster. Assert the generated Rust crate compiles (`cargo build`), the TypeScript package compiles (`tsc`), and the .NET package builds (`dotnet build`).
+- `sdk_publish.rs` — run `picloud sdk publish` against a live cluster configured with a local test registry. Assert packages appear in the test registry within 5 minutes.
+- `sdk_ontology_sync.rs` — add a new resource type to the platform ontology. Re-run `picloud sdk generate`. Assert the new type appears in all three generated SDKs with correct property types.
+
+Exit criteria:
+- All three SDKs compile without errors after generation from a live cluster ontology.
+- SDK generation completes within 5 minutes on Pi5 hardware.
+- Ontology changes reflected in SDK within one generation cycle.
 
 ---
 
@@ -895,6 +1378,19 @@ The dependency rule is enforced by `Cargo.toml` — slices literally cannot impo
 - Slices communicate via injected trait implementations, not direct calls
 - The composition root in `src/main.rs` grows as slices are added — this is expected and correct
 - LLMs can be given a single slice plus `picloud-domain` as context and make meaningful progress without understanding the full platform
+
+**Test coverage:**
+
+Scenario tests:
+- `per_slice_build.rs` — for each slice in the workspace, build it independently: `cargo build -p picloud-{slice}`. Assert each compiles without requiring other slices to be present.
+- `composition_root_only.rs` — assert that only `picloud-server/src/main.rs` references more than one non-domain slice crate. Any other crate referencing multiple slices is a dependency violation.
+
+Invariants:
+- `cargo deny` configuration blocks any `picloud-*` dependency in any slice `Cargo.toml` other than `picloud-domain`. Checked on every PR.
+
+Exit criteria:
+- Every slice compiles independently: 100% of slices, verified on every PR.
+- Zero cross-slice imports detected: verified by `cargo deny` and `cargo tree` on every PR.
 
 ---
 
@@ -1019,6 +1515,22 @@ All replay events are written to the platform log and projected into the cluster
 - `ReplayProgress` events should be emitted frequently enough to be useful but not so frequently that they flood the event log — every 100 events processed is a reasonable default
 - Subscribers that perform irreversible side effects (email, payment, external API calls) must inspect the `replay.is_replay` field — this should be documented prominently in the SDK
 
+**Test coverage:**
+
+Scenario tests:
+- `platform_replay_full.rs` — emit 500 known events, record the RDF graph state. Clear Oxigraph. Trigger `picloud cluster replay --from epoch`. Assert the resulting graph is byte-identical to the recorded snapshot.
+- `shadow_swap_live_traffic.rs` — trigger a platform replay while the cluster is serving live SPARQL queries (load: 10 queries/second). Assert zero query errors during replay. Assert the shadow swap is atomic — no queries return partial state.
+- `replay_marked_flag.rs` — replay 100 events. Inspect the re-emitted events. Assert every replayed event carries `replay.is_replay: true` and a `replay.replay_id` that groups all events from the same replay operation.
+- `aggregate_replay.rs` — replay a single aggregate (Photo ID `abc123`) from a product event store. Assert only that aggregate's events are re-emitted. Assert other aggregates are unaffected.
+
+Invariants:
+- The live graph is unchanged during replay until the atomic swap. Verified by comparing `SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }` before and during replay (count must not change until the swap).
+
+Exit criteria:
+- Full platform replay (10,000 events): < 30 seconds.
+- Shadow swap: zero live query errors during replay, verified across 10 replay runs.
+- Aggregate-scoped replay: only the target aggregate's events re-emitted, 100% of test runs.
+
 ---
 
 ## ADR-036: Universal Tagging System
@@ -1073,6 +1585,19 @@ picloud tag find environment=production          # all resources with this tag
 - `Tag` becomes a domain type in `picloud-domain` used by all resource types
 - Tag events must be emitted whenever tags change, including on initial resource creation
 - Tag keys should be namespaced by convention (`team:`, `environment:`, `tier:`) to avoid collisions — enforced by documentation, not by the platform
+
+**Test coverage:**
+
+Scenario tests:
+- `tag_add_event.rs` — add a tag to a resource via `picloud tag add`. Assert a `TagAdded` event appears in the event log with the correct key, value, and resource IRI.
+- `tag_rdf_projection.rs` — add a tag. Query the resource IRI via SPARQL. Assert the `picloud:tag` triple with correct `picloud:tagKey` and `picloud:tagValue` is present within the projection latency budget.
+- `tag_remove.rs` — remove a tag. Assert `TagRemoved` event in log and tag triple absent from graph within projection latency budget.
+- `tag_sparql_queryable.rs` — run `picloud tag find environment=production`. Assert all tagged resources returned. Run the equivalent SPARQL query directly and assert identical results.
+
+Exit criteria:
+- Tag added to graph within projection latency budget (p99 < 2 s).
+- Tag removal reflected in graph within projection latency budget.
+- `picloud tag find` and direct SPARQL query return identical result sets: 100% of test runs.
 
 ---
 
@@ -1151,6 +1676,22 @@ inference-rule 'backend-group-membership' = {
 - A user can be in multiple groups — role sets are additive
 - Circular group membership (group A contains group B contains group A) must be detected and rejected
 
+**Test coverage:**
+
+Scenario tests:
+- `group_membership_via_inference.rs` — create a user, add tag `team:backend`. Assert a `GroupMembershipChanged` event is emitted and the user appears as `picloud:hasMember` on the `backend-developers` group within one event cycle (< 2 seconds).
+- `group_membership_removal.rs` — remove the `team:backend` tag. Assert the membership triple is retracted from the graph and the user's next issued token lacks the `product-developer` role.
+- `circular_group_rejection.rs` — attempt to create a group membership rule where group A contains group B and group B contains group A. Assert the platform rejects the cycle at resource apply time.
+- `group_role_inheritance.rs` — assign a group to a role, assert all group members receive the role's permissions in their tokens.
+
+Invariants:
+- Token issuance always reflects the current group membership from the RDF graph. Any token issued after a `GroupMembershipChanged` event must reflect the new state.
+
+Exit criteria:
+- Tag → group membership propagation: < 2 seconds (one event cycle).
+- Token reflects new roles within 5 seconds of `GroupMembershipChanged`.
+- Circular membership: rejected at apply time, 100% of attempts.
+
 ---
 
 ## ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources
@@ -1220,6 +1761,19 @@ Every 10 minutes, all rules with `reconciliation: true` are evaluated regardless
 - Expensive CONSTRUCT queries on large graphs must be bounded — rule authors should use graph scoping and LIMIT where appropriate
 - One active reconciliation pass at a time — concurrent passes are not permitted
 
+**Test coverage:**
+
+Scenario tests:
+- `inference_rule_lifecycle.rs` — deploy an `inference-rule` resource. Trigger the condition (inject a matching `MetricRecorded` event). Assert produced triples appear in the graph and the correct assertion event is emitted.
+- `inference_retraction.rs` — clear the condition. Assert the produced triples are retracted from the graph and the corresponding resolved event is emitted within 2 seconds.
+- `reconciliation_pass.rs` — deliberately skip the triggering event during a 10-minute window. Assert the reconciliation pass fires and the inferred triples appear within 10 minutes ± 30 seconds. Assert `ReconciliationCompleted` event in log.
+- `rule_idempotency.rs` — trigger the same inference rule 3 times with the same graph state. Assert only one set of triples is produced — no duplicates.
+
+Exit criteria:
+- Event-triggered inference evaluation: < 2 seconds from triggering event to produced triples.
+- Reconciliation pass: runs every 10 minutes ± 30 seconds, verified over a 2-hour observation window.
+- Idempotency: zero duplicate triples produced across 100 repeated rule evaluations with identical inputs.
+
 ---
 
 ## ADR-039: Embedded RDFS/OWL Inference via Oxigraph
@@ -1262,6 +1816,18 @@ Any permission check for `picloud:OperatorRole` automatically applies to admins.
 - Product ontology authors must understand RDFS/OWL 2 RL — this is documented in the SDK
 - Inferred triples increase graph size — Oxigraph's materialisation must be monitored
 - Ontology changes (new subclass declarations) take effect immediately on deployment
+
+**Test coverage:**
+
+Scenario tests:
+- `rdfs_subclass_inference.rs` — declare `picloud:ProductionContainer rdfs:subClassOf picloud:Container` in an ontology. Query `SELECT ?x WHERE { ?x a picloud:Container }`. Assert instances of `picloud:ProductionContainer` are returned.
+- `owl_transitivity.rs` — declare `picloud:dependsOn rdf:type owl:TransitiveProperty`. Assert that if `A dependsOn B` and `B dependsOn C`, then `A dependsOn C` is inferred and queryable.
+- `ontology_deploy_immediate.rs` — deploy a product with a new subclass declaration. Assert the inference is materialised and queryable within 5 seconds of `ProductDeployed` event.
+
+Exit criteria:
+- RDFS subclass inference active immediately after ontology deployment.
+- OWL transitive closure inferred correctly for depth-3 chains.
+- Inference materialised within 5 seconds of ontology deployment: 100% of test runs.
 
 ---
 
@@ -1328,6 +1894,21 @@ Workloads emit domain metrics (request count, error rate, latency) as events to 
 - The metrics collection interval is configurable per deployment
 - Temperature collection requires reading `/sys/class/thermal/` — Linux-specific, consistent with target platform (ADR-004)
 - Metric projection overwrites previous triples — the projector must handle this correctly (upsert, not append)
+
+**Test coverage:**
+
+Scenario tests:
+- `metrics_collection_interval.rs` — start a node. Wait 30 seconds. Assert at least 2 `MetricRecorded` events in the log for that node, each containing CPU usage, memory usage, disk usage, and CPU temperature.
+- `metrics_rdf_projection.rs` — after a `MetricRecorded` event, query the node IRI via SPARQL. Assert `picloud:cpuUsagePercent`, `picloud:memoryUsedMb`, `picloud:memoryTotalMb`, `picloud:cpuTempCelsius`, and `picloud:metricsUpdatedAt` are present.
+- `metrics_upsert.rs` — wait for two consecutive `MetricRecorded` events from the same node. Assert the graph holds only the latest metric values (not a growing list of historical values).
+
+Invariants:
+- `MetricRecorded` events emitted every 15 seconds ± 2 seconds from every live node. A gap > 20 seconds from any live node is a test failure.
+
+Exit criteria:
+- First `MetricRecorded` within 20 seconds of node join.
+- Consistent 15-second interval maintained over a 30-minute observation window: zero gaps > 20 seconds.
+- Latest-value-only projection: graph holds exactly one set of metric triples per node, verified after 10 consecutive metric events.
 
 ---
 
@@ -1430,6 +2011,19 @@ ORDER BY DESC(?timestamp)
 - Built-in platform alert rules are shipped as `.ttl` files in the platform binary and loaded at startup
 - `picloud:Alert` becomes a well-known class in the platform ontology — documented in the SDK
 
+**Test coverage:**
+
+Scenario tests:
+- `alert_fired.rs` — inject a `MetricRecorded` event with `cpu_temp_celsius: 85.0` (above the 80°C critical threshold). Assert `AlertFired` event emitted within 30 seconds. Assert an `picloud:Alert` triple present in the graph with correct `alertType`, `alertSeverity`, and `alertResource`.
+- `alert_resolved.rs` — after `AlertFired`, inject a subsequent `MetricRecorded` event with `cpu_temp_celsius: 65.0` (below threshold). Assert `AlertResolved` event emitted and `picloud:Alert` triple retracted within 30 seconds.
+- `alert_dampening.rs` — fire an alert, resolve it, re-fire within 60 seconds. Assert the second `AlertFired` is suppressed (dampening window enforced). Wait 60 seconds, re-trigger. Assert `AlertFired` now emitted.
+- `all_builtin_rules.rs` — for each built-in alert rule (CPU temp, memory, disk, node unreachable, workload failed), trigger the threshold condition and assert the correct `AlertFired` event type and severity.
+
+Exit criteria:
+- `AlertFired` within 30 seconds of threshold breach across all built-in rules.
+- `AlertResolved` within 30 seconds of threshold clearing.
+- Dampening: second `AlertFired` within 60-second window suppressed, 100% of test runs.
+
 ---
 
 ## ADR-042: Tenant Identity — Domain and Cluster ID as Dual Boundary
@@ -1506,6 +2100,21 @@ When running multiple tenants, each cluster is fully independent — separate ev
 - The cluster domain must be embedded in the cluster CA certificate (SAN field) — this is how mTLS clients verify they are talking to the right cluster
 - Changing a cluster's domain after init is not supported — the domain is part of the cluster's cryptographic identity
 - `picloud cluster init` output must clearly display the cluster ID, domain, and CA fingerprint so operators can verify they are managing the right cluster
+
+**Test coverage:**
+
+Scenario tests:
+- `dual_cluster_mDNS_isolation.rs` — init two clusters on the same network with different domains (`picloud.local` and `lab.local`). Assert that nodes from cluster A do not appear in cluster B's node list (SPARQL query), and vice versa.
+- `cross_cluster_join_rejection.rs` — generate an enrollment token from cluster A. Attempt to use it to join cluster B. Assert a `NodeEnrollmentRejected` event in cluster B's log and the node is not added to cluster B's Raft.
+- `iri_namespace_uniqueness.rs` — assert that every resource IRI in cluster A contains `picloud.local` and no IRI contains `lab.local`, and vice versa.
+
+Invariants:
+- Zero cross-cluster node discovery in a 5-minute observation window with two clusters on the same network.
+- Cross-cluster join always results in `NodeEnrollmentRejected`, never `NodeEnrolled`.
+
+Exit criteria:
+- Cross-cluster isolation: zero false discoveries across 50 mDNS query cycles.
+- Cross-cluster join: rejected 100% of 20 attempts.
 
 ---
 
@@ -1596,6 +2205,18 @@ When a config entry changes, the platform emits `ConfigChanged`. Workloads subsc
 - `ConfigChanged` is a new platform event
 - The SDK config client maintains a local cache and subscription — see ADR-044 for SDK integration
 - Secrets are not config entries — sensitive values use the existing secret resource (they are injected, not polled)
+
+**Test coverage:**
+
+Scenario tests:
+- `config_api_lifecycle.rs` — apply a `config` resource with 5 entries. GET each entry via the HTTP API. Assert correct key, value, and type for each.
+- `config_live_reload.rs` — update a config entry via the API. Assert `ConfigChanged` event emitted. Assert the workload SDK reflects the new value within 5 seconds without a process restart.
+- `workload_config_override.rs` — declare a product-level config entry and a workload-level override for the same key. Assert the workload's effective config (via the merged endpoint) returns the workload value, not the product value.
+- `config_secret_separation.rs` — assert that secret values are never stored in the config store. Attempt to set a config entry with the key `password`. Assert the platform rejects any config key flagged as sensitive.
+
+Exit criteria:
+- `ConfigChanged` event delivered to workload SDK within 5 seconds, no workload restart required.
+- Workload-level override: effective config resolution correct in 100% of test runs.
 
 ---
 
@@ -1727,6 +2348,19 @@ When a flag changes (`enabled` toggled, version expression updated), the platfor
 - The SDK flag client must know the running Product version to evaluate expressions — this is injected by the platform as an environment variable at workload startup (`PICLOUD_PRODUCT_VERSION`)
 - When a Product version changes (upgrade), `FeatureFlagChanged` events are emitted for all flags whose active state changes as a result of the version change
 
+**Test coverage:**
+
+Scenario tests:
+- `flag_version_evaluation.rs` — deploy flag `new-upload-flow` with `version: = 2`. Deploy workload at version 2. Assert flag evaluates as active. Deploy another workload at version 1. Assert flag evaluates as inactive.
+- `flag_live_update.rs` — toggle a flag from `enabled: true` to `enabled: false` via `resource apply`. Assert `FeatureFlagChanged` event emitted and SDK reflects the new state within 5 seconds without workload restart.
+- `flag_version_range.rs` — deploy flag with `version: 2..4`. Assert active for versions 2, 3, 4 and inactive for versions 1 and 5.
+- `flag_in_process_evaluation.rs` — after SDK initialisation, measure flag evaluation latency. Assert all evaluations are in-process (zero network round-trips) after initial load.
+
+Exit criteria:
+- Flag evaluation latency after SDK init: < 1 ms (in-process cache, no network call).
+- `FeatureFlagChanged` propagation to SDK: < 5 seconds.
+- Version range evaluation correct across all six operators: 100% of test cases.
+
 ---
 
 ## ADR-045: OpenTelemetry as the Observability Standard
@@ -1838,6 +2472,21 @@ otel-export 'grafana' = {
 - Raw OTel data is stored in the time-series layer (ADR-046) — not in the event log
 - The aggregator must handle metric cardinality carefully — aggregate by resource IRI, not by individual request
 - `PICLOUD_PRODUCT_VERSION` (ADR-044) and OTel resource attributes are injected together at workload startup
+
+**Test coverage:**
+
+Scenario tests:
+- `otlp_trace_ingestion.rs` — POST a valid OTLP trace payload to `https://picloud.local/otel/v1/traces`. Assert 200. Assert the trace appears in the Parquet time-series store within 30 seconds (verified via DataFusion query).
+- `cli_trace_propagation.rs` — run `picloud resource apply`. Query the Parquet store for the trace ID from the CLI output. Assert end-to-end spans: CLI root → Raft append → RDF projection → workload start.
+- `otel_does_not_starve_raft.rs` — generate 10,000 OTel spans per second for 60 seconds. During this burst, measure Raft append latency. Assert Raft p99 append latency does not increase by more than 20% compared to baseline.
+
+Protocol probes:
+- OTLP/HTTP: POST with `Content-Type: application/x-protobuf` → assert 200. POST with wrong `Content-Type` → assert 415. POST with invalid protobuf → assert 400.
+
+Exit criteria:
+- OTLP ingestion latency: < 5 ms p99.
+- Traces appear in Parquet within 30 seconds of ingestion.
+- OTel burst does not degrade Raft append latency beyond 20%: verified across 3 burst runs.
 
 ---
 
@@ -1976,6 +2625,19 @@ Delta Lake is built on Parquet and adds ACID transactions, schema evolution, and
 - For cluster-wide telemetry queries, the aggregated summaries in Oxigraph are the right layer — raw Parquet queries are per-node
 - Write throughput must be benchmarked on Pi5 NVMe — Parquet writes are batched, not per-span
 - The `arrow`, `parquet`, and `datafusion` crates add significant compile time — acceptable given the capability they provide
+
+**Test coverage:**
+
+Scenario tests:
+- `parquet_write_read.rs` — ingest 1,000 OTel spans via the OTLP endpoint. Wait for Parquet flush. Run a DataFusion SQL query: `SELECT COUNT(*) FROM traces WHERE service_name = 'test-service'`. Assert count = 1000.
+- `retention_enforcement.rs` — write Parquet partitions with timestamps older than the configured retention window. Run the hourly retention cleanup task. Assert old partition directories are deleted and newer ones remain.
+- `datafusion_time_range.rs` — query traces for a known 1-hour window using `WHERE start_time BETWEEN ? AND ?`. Assert only traces within the window are returned. Measure query time on 7 days of data.
+- `parquet_portability.rs` — copy a Parquet file off-node. Open it with `pyarrow` on an external machine. Assert the schema and data are readable without any PiCloud tools.
+
+Exit criteria:
+- 1,000-span write and flush: < 2 seconds.
+- DataFusion query over 7-day trace window on Pi5: < 5 seconds.
+- Retention cleanup: old partitions deleted within 5 minutes of the hourly cleanup tick.
 
 ---
 
@@ -2154,6 +2816,21 @@ inference-rule 'backup-failed-alert' = {
 - Snapshot quiescing requires coordination with the workload — containers receive `SIGTSTP` during snapshot, `SIGCONT` after. Duration should be milliseconds.
 - A volume with both snapshots and offsite backup enabled uses three storage locations: cluster NVMe (live), NAS (snapshots), S3 (offsite). All three are declared in one resource definition.
 
+**Test coverage:**
+
+Scenario tests:
+- `snapshot_create_verify.rs` — declare a volume with daily snapshots and a NAS target. Trigger a snapshot (via `picloud volume snapshot now`). Assert `SnapshotCreated` event emitted and the snapshot file is present on the NAS at the expected path.
+- `snapshot_restore.rs` — write a known sentinel file to a volume. Take a snapshot. Overwrite the sentinel. Restore from snapshot. Assert the original sentinel is present.
+- `snapshot_retention.rs` — take 35 daily snapshots (accelerated in CI with a short schedule). Run the retention enforcement. Assert exactly 30 daily snapshots remain (retention policy: `daily: 30`).
+- `offsite_backup_complete.rs` — declare a volume with S3 offsite backup. Trigger a backup. Assert `BackupCompleted` event, backup metadata in RDF graph, and backup object present in the configured S3 bucket.
+- `backup_failure_alert.rs` — configure an invalid S3 endpoint. Trigger a backup. Assert `BackupFailed` event and `AlertFired` (type: `BackupFailed`, severity: `critical`) within 30 seconds.
+
+Exit criteria:
+- Snapshot completes within 5 seconds of scheduled time.
+- Snapshot restore completes within 60 seconds for a 10 GB volume.
+- `BackupFailed` → `AlertFired` within 30 seconds.
+- Retention policy enforcement: exact snapshot count matches policy after 35-snapshot test.
+
 ---
 
 ## ADR-048: Native Ingress Router in picloud-http
@@ -2317,6 +2994,23 @@ picloud-http/src/
 - The router must handle the case where an upstream is temporarily unreachable (container restarting) — return 503 with a `Retry-After` header
 - WebSocket and HTTP/2 proxying require explicit support in the hyper proxy layer — add in Phase 2
 - The router runs on every node — requests are handled locally where possible, forwarded to the correct node when the target container runs elsewhere
+
+**Test coverage:**
+
+Scenario tests:
+- `ingress_host_routing.rs` — declare an ingress resource with `host: photos.picloud.local`. Send an HTTP request to that host. Assert it is routed to the correct container and the correct response is returned.
+- `workload_reschedule_routing.rs` — reschedule the container targeted by an ingress to a different node. Assert HTTP requests continue succeeding within 30 seconds of the `WorkloadRescheduled` event (routing table updated without manual intervention).
+- `internal_port_isolation.rs` — declare an ingress with `internal: true`. From an external client, attempt to connect to the ingress hostname. Assert connection refused. From a workload inside the cluster, assert connection succeeds.
+- `sni_cert_selection.rs` — declare two ingresses for two different hostnames. Connect to each hostname. Assert each connection receives the correct TLS certificate (SNI-based selection working).
+
+Protocol probes:
+- TLS SNI: assert `photos.picloud.local` and `api.picloud.local` receive different certificates, both issued by the platform CA.
+- Assert 503 with `Retry-After` header when upstream container is restarting (not a hard failure).
+
+Exit criteria:
+- Routing update after workload reschedule: < 30 seconds, verified across 10 reschedule cycles.
+- Internal port: unreachable from external client, 100% of attempts.
+- SNI certificate selection: correct cert per hostname, 100% of TLS handshakes.
 
 ---
 
@@ -2584,6 +3278,20 @@ picloud-compiler/
 - All resource type additions require updating the platform ontology and SHACL shapes before implementation
 - The compiler's IRI generation rules must be stable — changing them would break existing deployments
 
+**Test coverage:**
+
+Scenario tests:
+- `compiler_roundtrip.rs` — compile a representative set of `.picloud` files covering all resource types. Assert the output is valid Turtle (parseable by an RDF library), passes SHACL validation, and contains zero blank nodes.
+- `iri_determinism.rs` — compile the same `.picloud` file twice. Assert the two compiled Turtle outputs are byte-identical (deterministic IRI generation).
+- `shacl_validation_errors.rs` — submit `.picloud` files with deliberate violations (missing required field, wrong type, invalid version expression). Assert each returns a human-readable error message matching the SHACL violation translation table.
+- `offline_validation.rs` — run `picloud resource validate` on a valid deployment with no cluster connection. Assert exit code 0 and zero errors.
+
+Exit criteria:
+- Offline validation of any `.picloud` file: < 1 second.
+- IRI generation deterministic: same output across 1000 compilation runs of the same input.
+- SHACL validation errors: human-readable message returned for 100% of deliberate violations.
+- Zero blank nodes in compiled Turtle: verified on full resource type corpus.
+
 ---
 
 ## ADR-050: Builder Pattern CLI for Resource Generation
@@ -2643,6 +3351,19 @@ picloud new container --product photo-app --name api-server --overwrite
 - `picloud new` is implemented in `picloud-cli` using the `picloud-compiler` crate for generation and validation
 - The builder must know which fields are required vs optional for each resource type — derived from SHACL `sh:minCount` constraints
 - The interactive prompt library must handle Ctrl+C gracefully and not leave partial files
+
+**Test coverage:**
+
+Scenario tests:
+- `new_resource_flags.rs` — run `picloud new container` with all required flags specified. Assert a `.picloud` file is generated, is valid (auto-validation passes), and the content matches the specified flags.
+- `new_resource_partial.rs` — run `picloud new container --product photo-app` without other required flags. Assert the CLI prompts for missing required fields only. Provide values. Assert a valid file is generated.
+- `overwrite_protection.rs` — generate a file. Run `picloud new container` targeting the same output path without `--overwrite`. Assert the CLI refuses with a clear error and the original file is unchanged.
+- `auto_validation_failure.rs` — generate a resource that references a non-existent volume (deliberate). Assert post-generation validation reports the cross-reference error clearly.
+
+Exit criteria:
+- Fully-specified `picloud new`: generates a valid file with zero prompts, 100% of test runs.
+- Overwrite protection: original file unchanged in 100% of overwrite-without-flag attempts.
+- Post-generation validation: always runs and reports errors before the user can accidentally apply an invalid file.
 
 ---
 
@@ -2875,3 +3596,749 @@ Role inheritance is `rdfs:subClassOf` — the OWL inference engine materialises 
 - The SDK `validateToken` method must check `aud` — this is the most critical SDK method from a security perspective
 - Role inheritance creates a dependency ordering problem at deployment — if `editor` inherits `viewer`, `viewer` must exist before `editor` is created. The platform resolves this via the dependency graph at deploy time.
 - M2M permission resources must exist in the target product before M2M tokens can be issued — cross-product declaration, target wins
+
+**Test coverage:**
+
+Scenario tests:
+- `role_inheritance_claims.rs` — assign the `editor` role (which inherits `viewer`). Issue a token. Assert the token's `permissions` array contains both `editor`-level and `viewer`-level permissions (transitive inheritance via OWL inference).
+- `audience_enforcement.rs` — issue a token for `photo-app`. Present the token to `user-service`'s SPARQL endpoint. Assert 403 (wrong audience).
+- `token_exchange_on_behalf_of.rs` — execute RFC 8693 token exchange: `photo-app` acts on behalf of Alice against `user-service`. Assert the new token has `aud: user-service`, `sub: alice`, and an `act` claim containing `photo-app`.
+- `m2m_permission_required.rs` — attempt M2M client credentials from `photo-app` to `user-service` without an `m2m-permission` resource in `user-service`. Assert 403 and a clear error.
+
+Protocol probes:
+- JWT claims: assert `iss`, `aud`, `sub`, `exp`, `iat`, `scope`, `roles`, `permissions` all present and correctly typed in issued tokens.
+- RFC 8693 token exchange: assert `act` claim present, `aud` updated to target product.
+
+Exit criteria:
+- Transitive role permissions: inferred correctly via OWL in 100% of test runs.
+- Audience mismatch: rejected with 403 in 100% of attempts.
+- Token exchange (RFC 8693): `act` claim present and correct in 100% of exchange responses.
+
+---
+
+## ADR-052: Integrated DNS Server — Authoritative for Tenant Domain
+
+**Status:** Accepted
+
+**Context:** Every workload, ingress hostname, node, and product in PiCloud has a canonical IRI and a known network address — all of it already projected into the Oxigraph RDF graph. Clients on the local network need to resolve these hostnames without manual DNS record management. The platform is the authoritative source of truth for its own domain — the DNS server is just a query interface over data that already exists.
+
+**Decision:** Every `picloud-server` node runs an authoritative DNS server on port 53 (UDP and TCP). It is authoritative for the cluster's tenant domain only (e.g. `picloud.local` or a custom domain configured at `cluster init`). It answers queries from the RDF graph. It does not recurse, forward, or resolve external names. External DNS resolution is delegated to the operator's existing infrastructure (Pi-hole + Unbound in the reference setup). Clients are configured to forward the tenant domain to any PiCloud node — one conditional forwarding rule in Pi-hole.
+
+### Integration with existing DNS infrastructure
+
+```
+Client device
+  → Pi-hole + Unbound (handles all external resolution)
+    → *.picloud.local → forwarded to PiCloud DNS (192.168.x.x:53)
+    → everything else → resolved normally via Unbound
+
+# Pi-hole conditional forwarding — one rule:
+picloud.local → 192.168.1.101  # any cluster node
+```
+
+PiCloud DNS only ever answers for its own domain. Pi-hole never needs to know about PiCloud internals.
+
+### Records served
+
+**A records** — IPv4 address for a hostname:
+
+| Query | Answer | Source in graph |
+|---|---|---|
+| `picloud.local` | Cluster leader ingress IP | `pc:isLeader true` node |
+| `pi-node-01.picloud.local` | Node IP | `pc:nodeAddress` on `pc:Node` |
+| `photo-app.picloud.local` | Product ingress IP | `pc:ingressAddress` on `pc:Product` |
+| `photos.picloud.local` | Ingress target IP | `pc:hostname` on `pc:Ingress` |
+| `staging.photo-api.picloud.local` | Staging ingress IP | Ephemeral ingress resource |
+
+**SRV records** — service discovery by type:
+
+| Query | Answer |
+|---|---|
+| `_sparql._tcp.photo-app.picloud.local` | SPARQL endpoint port and host |
+| `_events._tcp.photo-app.picloud.local` | Event stream SSE endpoint |
+| `_https._tcp.picloud.local` | Cluster HTTPS ingress |
+
+**TXT records** — semantic metadata for a service:
+
+| Query | Answer |
+|---|---|
+| `photo-app.picloud.local` | `"ontology=https://picloud.local/products/photo-app/ontology version=1.0.0"` |
+| `picloud.local` | `"cluster-id={uuid} platform-version=0.1.0"` |
+
+**PTR records** — reverse DNS (IP → hostname):
+Registered for node addresses and ingress IPs so tools like `nmap` and `traceroute` show meaningful names.
+
+**NXDOMAIN** — for any hostname not found in the graph. No fallthrough, no recursion.
+
+### Query model
+
+Every DNS query resolves in two steps:
+
+1. **Cache lookup** — in-memory cache keyed by `(qtype, qname)`. If present and not expired, return immediately.
+2. **Graph query** — if cache miss, query Oxigraph with a SPARQL SELECT. Cache the result with TTL = 30 seconds.
+
+```sparql
+# A record lookup for an ingress hostname
+SELECT ?address WHERE {
+  {
+    # Ingress hostname match
+    ?ingress a pc:Ingress ;
+             pc:hostname "{qname}" ;
+             pc:targetAddress ?address .
+  } UNION {
+    # Node hostname match
+    ?node a pc:Node ;
+          pc:hostname "{qname}" ;
+          pc:nodeAddress ?address .
+  } UNION {
+    # Product hostname match
+    ?product a pc:Product ;
+             pc:hostname "{qname}" ;
+             pc:ingressAddress ?address .
+  }
+}
+LIMIT 1
+```
+
+### TTL and cache invalidation
+
+**TTL: 30 seconds** — short enough that clients re-query frequently, long enough to avoid hammering Oxigraph on every request.
+
+**Event-driven cache invalidation** — the DNS server subscribes to platform events and invalidates affected cache entries immediately, without waiting for TTL expiry:
+
+| Event | Cache entries invalidated |
+|---|---|
+| `WorkloadRescheduled` | All A records for that workload's hostname |
+| `IngressCreated` | New entry added immediately |
+| `IngressUpdated` | A, SRV, TXT records for that ingress hostname |
+| `IngressDeleted` | Entry removed, subsequent queries return NXDOMAIN |
+| `NodeJoined` | New PTR and A record for node hostname |
+| `NodeLeft` | A and PTR records for that node removed |
+| `ProductDeployed` | TXT record updated with new version |
+| `StagingDeploymentReady` | Ephemeral staging A record added |
+| `StagingTeardownCompleted` | Ephemeral staging A record removed |
+
+This means workload reschedules are visible to DNS clients within seconds — the TTL is a fallback, not the primary invalidation mechanism.
+
+### Multi-node consistency
+
+Every node runs its own DNS server with its own in-memory cache. Caches are not synchronised across nodes — each node independently queries Oxigraph, which is consistent across the cluster via Raft. Since all nodes read from the same RDF graph, responses are consistent. Cache entries expire and refresh independently on each node within the 30-second TTL window.
+
+Clients can point at any node's IP as their DNS server. If a node goes down, Pi-hole's conditional forwarding retries against another node (standard DNS retry behaviour).
+
+### Implementation in picloud-network
+
+The DNS server lives in `picloud-network` — the crate already responsible for mDNS, TLS, and certificate management.
+
+```
+picloud-network/src/
+├── dns/
+│   ├── server.rs      — UDP/TCP listener on port 53, query dispatch
+│   ├── resolver.rs    — cache lookup → SPARQL query → response assembly
+│   ├── cache.rs       — in-memory TTL cache with event-driven invalidation
+│   ├── records.rs     — A, SRV, TXT, PTR record construction from RDF data
+│   └── events.rs      — platform event subscription, cache invalidation
+```
+
+**DNS library:** `hickory-dns` (formerly trust-dns) — pure Rust, actively maintained, supports authoritative server mode, compiles to ARM64.
+
+### Pi-hole configuration
+
+One conditional forwarding rule points the tenant domain at any cluster node:
+
+```
+# Pi-hole Admin → Settings → DNS → Conditional Forwarding
+Domain: picloud.local
+DNS Server: 192.168.1.101  # any node IP — others used as fallback
+```
+
+For clusters with a custom domain at init time:
+```
+Domain: acme.local
+DNS Server: 192.168.1.101
+```
+
+No other Pi-hole configuration needed. Pi-hole continues to handle all external resolution, ad blocking, and DHCP as before.
+
+### Rationale
+- The RDF graph already contains every hostname and address — DNS is a read-only projection of existing data, not a new data store
+- Authoritative-only design keeps the implementation minimal — no recursive resolver, no upstream forwarder, no root hint management
+- Delegating external resolution to Pi-hole + Unbound respects the operator's existing investment and keeps concerns separated
+- Event-driven cache invalidation means workload reschedules are visible to clients within seconds without requiring zero-TTL records
+- `hickory-dns` is the only pure Rust DNS library with authoritative server support — consistent with ADR-001
+- Every node runs DNS independently — no single point of failure, no leader election needed for DNS
+
+**Consequences:**
+- `picloud-network` gains a `dns/` module
+- `hickory-dns` is added as a workspace dependency
+- Port 53 must be open on all cluster nodes (added to `deploy/setup-node.sh`)
+- The platform ontology gains `pc:hostname` as a property on `pc:Ingress`, `pc:Node`, and `pc:Product`
+- `picloud cluster init` output should include the conditional forwarding rule to paste into Pi-hole
+- DNS queries are logged as OTel spans — slow Oxigraph queries surface in telemetry
+
+**Test coverage:**
+
+Scenario tests:
+- `dns_a_records.rs` — query A records for the cluster root (`picloud.local`), a node hostname, a product hostname, and an ingress hostname. Assert each returns the correct IPv4 address matching the RDF graph.
+- `dns_srv_records.rs` — query `_sparql._tcp.photo-app.picloud.local`. Assert the SRV record returns the correct host and port for the product's SPARQL endpoint.
+- `dns_txt_records.rs` — query `photo-app.picloud.local` TXT record. Assert it contains the ontology IRI and product version.
+- `dns_cache_invalidation.rs` — reschedule a container workload to a different node. Assert the DNS A record for the workload's ingress hostname updates to the new node's IP within 30 seconds (well before TTL expiry).
+- `dns_nxdomain.rs` — query a hostname that does not exist in the cluster. Assert NXDOMAIN response with no fallthrough.
+
+Protocol probes:
+- RFC 1034/1035 DNS protocol compliance: assert response format is valid DNS wire format. Assert NXDOMAIN for unknown names (no recursion, no fallthrough).
+- Assert response TTL = 30 seconds for all positive answers.
+
+Exit criteria:
+- DNS query response: < 5 ms on cache hit, < 50 ms on cache miss (SPARQL lookup).
+- Cache invalidation after `WorkloadRescheduled`: < 30 seconds.
+- NXDOMAIN for unknown names: 100% of attempts, zero recursion.
+
+---
+
+## ADR-053: Node Certificate Issuance and Enrollment
+
+**Status:** Accepted
+
+**Context:** Every node in a PiCloud cluster communicates over mTLS (ADR-027). A new node needs a certificate signed by the cluster CA to participate. The CA private key lives in the cluster — only the cluster can issue node certificates. This creates a bootstrap problem: a node needs a cert to join, but needs to join to get a cert.
+
+Two operational contexts have different security requirements:
+
+- **Home lab / trusted network** — the network is the trust boundary. Auto-enrolling any node that appears on the network is acceptable and eliminates operational friction entirely.
+- **Secured environment** — network presence alone is not sufficient. A token must be pre-provisioned to authorise each new node.
+
+**Decision:** PiCloud supports two enrollment modes configured at `cluster init`. Both use the same two-phase join and the same CA infrastructure. The mode is a cluster-wide setting — it applies to all nodes.
+
+### The two-phase join (both modes)
+
+**Phase 1 — Pre-auth enrollment (plain TLS, no client cert required)**
+
+The cluster leader exposes a dedicated enrollment endpoint at `https://picloud.local/enroll`. This endpoint accepts plain TLS (server cert only — clients present no client cert). It does exactly one thing: issue node certificates.
+
+```
+New node (no cert yet)
+  → discovers cluster via mDNS
+  → generates ephemeral keypair locally
+  → POST https://picloud.local/enroll
+      { csr: <DER-encoded CSR>, token: <enrollment_token | null> }
+  → cluster validates (mode-dependent — see below)
+  → cluster CA signs CSR with node identity
+  → returns signed certificate + cluster CA certificate
+  → node stores cert and CA cert on disk
+  → enrollment token invalidated (token mode only)
+```
+
+**Phase 2 — Full join (cert in hand)**
+
+```
+New node (cert issued)
+  → connects to leader via mTLS ✓
+  → presents cluster CA cert for server verification ✓
+  → Raft join proceeds ✓
+  → NodeJoined event emitted ✓
+```
+
+### Mode A — Auto-enroll (default)
+
+Any node that discovers the cluster via mDNS and presents a valid CSR receives a certificate. No token required. Network presence is the authorisation.
+
+```bash
+picloud cluster init --domain picloud.local
+# Auto-enroll is the default — no additional flags needed
+```
+
+**Security model:** The local network is the trust boundary. Any device on the network can join the cluster. Suitable when the network is controlled (home lab, dedicated VLAN, isolated switch).
+
+**Safeguard:** Even in auto-enroll mode, the cluster ID and CA fingerprint are checked on every subsequent connection. A rogue node that somehow gets a cert can only participate if it also passes Raft membership — which requires the existing cluster to accept it. The cluster can revoke a node certificate at any time via `picloud node remove`.
+
+### Mode B — Token enrollment
+
+A node must present a valid enrollment token to receive a certificate. Tokens are single-use, time-limited, and issued by an existing cluster admin.
+
+```bash
+picloud cluster init --domain acme.local --enrollment-mode token
+```
+
+**Generating an enrollment token:**
+```bash
+picloud node enrollment-token --ttl 2h
+→ Token: picloud-enroll-a3f9b2c1d4e5f6...
+→ Expires: 2025-07-01T14:00:00Z
+→ Single use — invalidated after first use
+```
+
+**Distributing the token to a new node:**
+The token is placed in the node's config before boot. Two delivery mechanisms:
+
+```bash
+# Option 1 — environment variable in systemd service override
+sudo systemctl edit picloud
+# Add:
+[Service]
+Environment=PICLOUD_ENROLLMENT_TOKEN=picloud-enroll-a3f9b2c1...
+
+# Option 2 — config file
+echo "enrollment_token = picloud-enroll-a3f9b2c1..." \
+  > /home/ubuntu/picloud/config.toml
+```
+
+On startup, `picloud-server` reads the token, uses it once to enroll, then removes it from config. The token is never stored after use.
+
+### CA architecture
+
+**The CA lives in the cluster, replicated via Raft.**
+
+The CA private key is generated at `cluster init`, encrypted at rest with the cluster's master key, and stored in Raft state. Every node has a copy of the encrypted CA key — if the leader fails, the new leader has the key and can continue issuing certificates immediately.
+
+The CA certificate is embedded in the cluster identity (ADR-042) alongside the cluster ID. Every node knows the CA certificate at join time — it is returned in the enrollment response.
+
+**Certificate lifetime:**
+- Node certificates: 90 days, auto-renewed 7 days before expiry
+- Workload certificates: 24 hours, auto-renewed 1 hour before expiry
+- Ingress/TLS certificates: 90 days, auto-renewed 14 days before expiry
+
+**Auto-renewal:** The platform tracks certificate expiry in the RDF graph. An inference rule (ADR-038) fires an `AlertFired` event when any certificate is within its renewal window. The certificate management component in `picloud-network` subscribes to this event and initiates renewal automatically.
+
+### Certificate revocation
+
+When a node is removed from the cluster (`picloud node remove`):
+1. `NodeRemoved` event emitted
+2. Node's certificate added to an in-memory CRL (Certificate Revocation List) stored in Raft state
+3. All other nodes refresh their CRL from Raft state
+4. The removed node's mTLS connections are rejected within one Raft heartbeat cycle
+
+### Enrollment endpoint security
+
+The `/enroll` endpoint is the most sensitive surface in the platform:
+
+- Served over TLS with the cluster's CA certificate — clients can verify they are talking to the legitimate cluster
+- Rate limited — maximum 5 enrollment attempts per minute per IP
+- In auto-enroll mode: logs every enrollment as a `NodeEnrolled` event with the node's address
+- In token mode: token is single-use and time-limited
+- CSR validation: the CSR must contain only the node's hostname in the Subject — no wildcard SANs, no IP SANs other than the node's own address
+- Enrollment is always logged as a platform event — `NodeEnrolled` or `NodeEnrollmentRejected`
+
+### Node identity in certificates
+
+Every node certificate carries:
+```
+Subject: CN=pi-node-01.picloud.local
+SAN: DNS:pi-node-01.picloud.local, IP:192.168.1.101
+Issuer: CN=PiCloud CA, O=picloud.local, cluster-id={uuid}
+```
+
+The cluster ID is embedded in the Issuer — a certificate issued by a different cluster (different cluster ID) is rejected even if it chains to the same CA.
+
+### Implementation in picloud-network
+
+```
+picloud-network/src/
+├── ca/
+│   ├── mod.rs         — CA module root
+│   ├── authority.rs   — CA key management, certificate signing
+│   ├── enrollment.rs  — enrollment endpoint handler, CSR validation
+│   ├── renewal.rs     — certificate expiry tracking, auto-renewal
+│   └── revocation.rs  — CRL management, Raft-replicated
+└── dns/               — (existing)
+```
+
+**Crates used:**
+- `rcgen` — pure Rust certificate generation and CSR handling (already in workspace)
+- `x509-parser` — certificate parsing and validation (already in workspace)
+- `rustls` — TLS configuration (already in workspace)
+
+No new dependencies required.
+
+### CLI commands
+
+```bash
+# Generate enrollment token (token mode only)
+picloud node enrollment-token --ttl 2h
+
+# List active enrollment tokens
+picloud node enrollment-tokens
+
+# Revoke an enrollment token
+picloud node revoke-token <token-id>
+
+# Remove a node and revoke its certificate
+picloud node remove pi-node-05
+
+# List all node certificates and their expiry
+picloud node certs
+
+# Manually trigger certificate renewal for a node
+picloud node renew-cert pi-node-01
+```
+
+### Configuration at cluster init
+
+```bash
+# Auto-enroll (default — for trusted networks)
+picloud cluster init --domain picloud.local
+
+# Token enrollment (for secured environments)
+picloud cluster init --domain acme.local --enrollment-mode token
+
+# Token enrollment with BYO CA
+picloud cluster init \
+  --domain acme.local \
+  --enrollment-mode token \
+  --ca-cert ./ca.pem \
+  --ca-key  ./ca-key.pem
+```
+
+**Rationale:**
+- Two modes with a clear default eliminates friction for the primary use case (home lab) while making the secure path available without custom implementation
+- Same two-phase join in both modes means one code path, one security model — only the authorisation check differs
+- CA in Raft state means no single point of failure for certificate issuance — any node that becomes leader can immediately issue certs
+- All enrollment events in the platform log — `NodeEnrolled`, `NodeEnrollmentRejected` — mean the cluster always knows who joined and when
+- `rcgen` and `x509-parser` are already in the workspace — zero new dependencies
+- Auto-renewal via inference rules and event subscriptions means certificate expiry is handled the same way as any other platform alert — consistently and observably
+
+**Consequences:**
+- `picloud-network` gains a `ca/` module
+- The enrollment endpoint must be started before Raft join — it is the first HTTP endpoint brought up at node startup
+- In auto-enroll mode, the cluster should log a prominent warning at init time so operators know the security model
+- Certificate expiry tracking adds `pc:certExpiresAt` and `pc:certFingerprint` to the node's RDF triples
+- The master key used to encrypt the CA private key at rest must be derived from the cluster ID — losing the cluster ID means losing access to the CA
+
+**Test coverage:**
+
+Scenario tests:
+- `auto_enroll_mode.rs` — configure a cluster in auto-enroll mode. Power on a new node. Assert `NodeEnrolled` event within 30 seconds of mDNS discovery, correct node certificate issued, node participates in Raft.
+- `token_enroll_single_use.rs` — generate an enrollment token. Use it once to enroll a node. Assert `NodeEnrolled` event. Attempt to reuse the token on a second node. Assert `NodeEnrollmentRejected` event.
+- `token_enroll_expiry.rs` — generate a token with a 30-second TTL. Wait 45 seconds. Attempt enrollment. Assert `NodeEnrollmentRejected` with an expiry reason.
+- `cert_revocation.rs` — remove a node via `picloud node remove`. Assert a `NodeRemoved` event, the CRL updated in Raft, and the removed node's subsequent mTLS connections rejected within 5 seconds (one heartbeat cycle).
+- `csr_wildcard_rejection.rs` — submit a CSR with a wildcard SAN (`*.picloud.local`). Assert the enrollment endpoint returns 400 and no certificate is issued.
+
+Protocol probes:
+- X.509 CSR validation: assert CSR Subject contains only the node hostname. Assert no wildcard SANs accepted. Assert IP SAN matches only the enrolling node's address.
+
+Exit criteria:
+- Auto-enroll: node joined and participating in Raft within 30 seconds of power-on.
+- Token single-use: second use rejected 100% of the time.
+- Revocation: rejected mTLS connections within 5 seconds of `NodeRemoved` event.
+- Wildcard CSR: rejected 100% of the time.
+
+---
+
+## ADR-054: Test-Augmented ADR Template
+
+**Status:** Accepted
+
+**Context:** PiCloud is a distributed platform with no external dependencies and a strong engineering culture of measuring and validating everything on real hardware. As the system grows, architectural decisions made early become invisible assumptions. Without explicit testability defined at decision time, test coverage is added retroactively (or not at all), and the tests that are added tend to test the implementation rather than the decision.
+
+The three test suite designs established alongside this document — Scenario Harness, Chaos + Invariants, and Protocol Compliance — provide a structured vocabulary for expressing what "working correctly" means for any decision. This vocabulary must be applied at the point of making a decision, not after the fact.
+
+**Decision:** Every ADR must include a `Test coverage` section. This section is mandatory for all new ADRs and must be present in all existing ADRs before the feature they govern enters implementation.
+
+**Template — the `Test coverage` section must contain:**
+
+- **Scenario tests** — one or more named scenarios from the Scenario Harness that validate the happy path and key edge cases for this decision. Each entry names the scenario file and states what it asserts.
+- **Invariants** — properties that must hold continuously, including during and after faults. Each invariant is a falsifiable statement with a defined check method (SPARQL query, DNS probe, or metric threshold).
+- **Protocol probes** *(only for decisions that introduce a protocol boundary)* — which RFC or specification the probe validates, and the specific assertions made.
+- **Exit criteria** — measurable, pass/fail thresholds. These are the criteria that must be green before the feature is considered complete. Vague criteria such as "DNS works" are not acceptable. Every criterion must end with a number or a percentage.
+
+**Consequences:**
+- New ADRs cannot be merged without a `Test coverage` section.
+- The test coverage section is the primary input for the `picloud-test` scenario catalogue. Tests are not invented separately — they are derived from ADRs.
+- If a decision is difficult to test, that is a signal the decision is underspecified. Rewrite the decision, not the tests.
+- All existing ADRs have been retrofitted with test coverage sections as part of this ADR's introduction.
+
+**Rejected alternatives:**
+- **Test coverage in the PRD** — PRD sections are feature-level. Test logic for a specific technical decision is too specific to live at that level and would be orphaned from the rationale it validates.
+- **Separate test specification document** — a separate doc drifts from the decisions it covers. Co-location ensures the tests are updated when the decision is revised.
+- **Tests only in code** — code-level tests are correct for unit and integration coverage but lack the narrative context of why a test exists. The ADR section is the human-readable contract; the code is the enforcement of it.
+
+**Test coverage:**
+
+Scenario tests:
+- `adr_test_coverage_completeness.rs` — parse all ADRs in the repository. Assert every ADR that has a status of `Accepted` contains a `Test coverage` section with at least one scenario test and at least one exit criterion.
+- `scenario_catalogue_sync.rs` — parse the scenario catalogue in `picloud-test/scenarios/`. Assert every scenario named in an ADR `Test coverage` section has a corresponding `.rs` file in the catalogue.
+
+Exit criteria:
+- 100% of Accepted ADRs contain a `Test coverage` section.
+- 100% of ADR-named scenarios have a corresponding file in the `picloud-test` catalogue.
+
+---
+
+## ADR-055: Staged Platform Upgrade via Isolated Staging Cluster
+
+**Status:** Accepted
+
+**Context:** PiCloud is a stateful distributed platform with a permanent, append-only event log. Upgrading the platform binary on a live cluster carries risk: a projector bug in the new version could corrupt the RDF graph, a schema change could make old events unreadable, or a Raft protocol change could disrupt quorum. There is no rollback mechanism for a corrupted event log. Platform upgrades must be validated before reaching production.
+
+**Decision:** Every platform release is validated against a dedicated two-node staging cluster before being promoted to production. The staging cluster runs on separate hardware (or shared hardware with port isolation per ADR-056), uses a distinct domain (`staging.picloud.local`), and is fully isolated from production by the tenant boundary established in ADR-042. The `picloud-test` suite is the promotion gate — production is only upgraded if the full staging test run exits green.
+
+**Upgrade sequence:**
+1. Build the new platform binary from the release branch.
+2. Rolling-upgrade the staging cluster via `picloud-test --config cluster-staging.toml upgrade --binary ...`. Followers are upgraded first. Each node must rejoin Raft (verified by SPARQL query) before the next node is upgraded. The Raft leader is upgraded last.
+3. Run the full `picloud-test` suite against staging, including the `upgrade_compatibility` scenario.
+4. If all suites pass: rolling-upgrade production in the same order.
+5. Run compliance probes against production to confirm clean landing.
+6. If any suite fails on staging: stop. Production is never touched until staging is green.
+
+**Event log compatibility is the primary gate.** A new binary that cannot correctly project events written by the previous binary fails `upgrade_compatibility.rs` and blocks promotion. Schema IRIs (ADR-031) are the mechanism that makes compatibility achievable; the scenario proves it worked for the specific release.
+
+**Staging hardware:** two Pi 5 nodes (4 GB RAM, 256 GB NVMe sufficient). Tests requiring three-node quorum are tagged `requires_three_nodes` and skipped on staging — they run on production post-upgrade as final verification.
+
+**Rationale:**
+- The event log is permanent and cannot be rolled back — production upgrade failures are potentially destructive, not just inconvenient
+- Staging reuses ADR-042 tenant isolation — no special infrastructure, just the existing boundary applied deliberately
+- Two-node staging validates Raft behaviour, rolling upgrade sequencing, and mTLS — the scenarios most likely to reveal upgrade regressions
+- Test results from both clusters flow into production telemetry — upgrade history is queryable alongside operational history
+
+**Consequences:**
+- `picloud-test` gains an `upgrade` subcommand implementing rolling upgrade with Raft rejoin verification
+- Scenarios requiring three-node quorum are tagged and conditionally skipped via `skip_tags` in `cluster.toml`
+- `upgrade_compatibility.rs` must run after every staging upgrade, not just on initial deployment
+- Two dedicated staging nodes are required as a permanent lab fixture (may share hardware with production nodes per ADR-056)
+
+**Test coverage:**
+
+Scenario tests:
+- `upgrade_compatibility.rs` — upgrade staging from v(N) to v(N+1). Assert the v(N+1) projector produces an identical RDF graph triple count to the pre-upgrade snapshot. Assert all resource IRIs remain dereferenceable after upgrade.
+- `rolling_upgrade_sequence.rs` — assert followers are upgraded before the leader. Assert no quorum gap during the upgrade window — at least one leader role holder at all times, verified via SPARQL every second.
+- `upgrade_gate_enforcement.rs` — deliberately fail a staging scenario. Assert the upgrade pipeline halts and does not invoke the production upgrade subcommand.
+
+Invariants:
+- At least one node holds `picloud:hasRole picloud:Leader` at all times during a rolling upgrade. Polled every 1 second.
+- Triple count in the graph must not decrease after upgrade. Any decrease indicates the new projector dropped historical events.
+
+Exit criteria:
+- `upgrade_compatibility`: triple count identical pre/post upgrade, 100% of upgrade cycles.
+- Rolling upgrade: zero quorum gaps > 5 seconds, verified across 10 upgrade cycles.
+- Gate enforcement: pipeline never reaches production when staging is red, 100% of runs.
+
+---
+
+## ADR-056: Shared Hardware Staging with Port Isolation
+
+**Status:** Accepted
+
+**Context:** Running two isolated PiCloud clusters (production and staging per ADR-055) on the same physical nodes reduces hardware cost. ADR-042 provides complete tenant isolation at the application layer (separate Raft cluster, event log, RDF graph, CA, IAM). However, two `picloud-server` processes on the same OS cannot both bind the same ports. The platform needs a configuration mode that allows port customisation and directory-backed storage for the non-primary instance.
+
+**Decision:** The `picloud-server` binary accepts a `--config` flag pointing to a TOML configuration file. All network ports and the storage root are configurable. The staging instance runs on alternate ports with a directory-backed storage pool. Production retains default ports and raw NVMe ownership.
+
+**Port assignments:**
+
+| Service | Production (default) | Staging |
+|---|---|---|
+| HTTPS / IRI layer | 443 | 8443 |
+| DNS | 53 | 5353 |
+| Raft | 2380 | 2381 |
+| Enrollment | 444 | 8444 |
+
+**Staging configuration:**
+
+```toml
+# /home/ubuntu/picloud/staging.toml
+data_root       = "/mnt/nvme/staging"     # directory, size-limited; not raw device
+http_port       = 8443
+dns_port        = 5353
+raft_port       = 2381
+enrollment_port = 8444
+domain          = "staging.picloud.local"
+storage_limit   = "200GB"                 # cap on directory-backed pool size
+```
+
+**Systemd service isolation:**
+
+```ini
+# /etc/systemd/system/picloud-production.service
+[Service]
+ExecStart=/usr/local/bin/picloud server --config /home/ubuntu/picloud/production.toml
+CPUWeight=200
+MemoryMax=10G
+
+# /etc/systemd/system/picloud-staging.service
+[Service]
+ExecStart=/usr/local/bin/picloud server --config /home/ubuntu/picloud/staging.toml
+CPUWeight=50
+MemoryMax=4G
+```
+
+**Storage model on shared hardware:** The staging instance uses directory-backed storage (`data_root` pointing to a directory on the NVMe filesystem) rather than raw block device ownership. The platform's volume abstraction satisfies all test scenarios from a directory-backed pool. Raw block device allocation is not tested on staging — that scenario is covered on production post-upgrade.
+
+**DNS forwarding:** Pi-hole gets one additional conditional forwarding rule per shared node:
+```
+staging.picloud.local → 192.168.1.101:5353
+```
+
+**Rationale:**
+- ADR-042 tenant isolation handles all application-layer separation — port isolation is the only OS-level concern
+- Configurable ports are a minimal addition to the platform binary; they have no impact on the production code path
+- Directory-backed storage is a legitimate storage mode, not a compromise — staging test scenarios do not require raw block devices
+- CPUWeight and MemoryMax ensure staging load cannot impact production workloads under contention
+
+**Consequences:**
+- `picloud-server` must accept `--config <path>` and honour all port and storage configuration from that file
+- Default configuration (no flag) retains all current defaults — no breaking change to existing deployments
+- The platform ontology gains no new concepts — this is a runtime configuration concern only
+- Staging `data_root` directory must be created and owned by the `picloud` service user before first start
+
+**Test coverage:**
+
+Scenario tests:
+- `shared_hardware_isolation.rs` — start both instances on a shared node. Assert production cluster SPARQL returns only production resources. Assert staging cluster SPARQL returns only staging resources. Assert zero cross-contamination.
+- `port_non_conflict.rs` — assert both `picloud-production` and `picloud-staging` systemd services are active simultaneously. Assert each responds on its designated port. Assert no `EADDRINUSE` in either service log.
+
+Invariants:
+- Production cluster triple count must not change during a staging upgrade or test run. Verified by comparing production SPARQL `COUNT(*)` before and after a full staging test suite run.
+
+Exit criteria:
+- Zero cross-contamination between clusters on shared hardware: 100% of isolation checks.
+- Both services simultaneously active: verified on every staging test run.
+- Production triple count unchanged across staging test suite execution: 100% of runs.
+
+---
+
+## ADR-057: OTel Test Data Versioning via Resource Attributes
+
+**Status:** Accepted
+
+**Context:** The `picloud-test` binary emits test results as OTLP spans to the cluster's own telemetry pipeline (ADR-045, ADR-046). Over time, the Parquet store accumulates test runs from multiple platform versions. Without explicit version labelling, it is impossible to query "did this scenario regress between v0.3 and v0.4?" — the most operationally useful question a test history can answer. The platform already exposes its version via DNS TXT records (ADR-052); the test runner should use this as its authoritative version source rather than requiring manual configuration.
+
+**Decision:** The `picloud-test` binary queries the cluster's DNS TXT record for `{cluster.domain}` at startup to extract `platform-version`. This value is set as a resource attribute (`picloud.platform_version`) on the OTel tracer used for the entire test run. Every span emitted during the run — across all scenarios, probes, and chaos cycles — inherits this attribute automatically. A unique `picloud.test.run_id` (UUID) is also set, grouping all spans from a single invocation.
+
+**Resource attributes set at tracer initialisation:**
+
+```rust
+Resource::new(vec![
+    KeyValue::new("service.name",             "picloud-test"),
+    KeyValue::new("service.version",          env!("CARGO_PKG_VERSION")),
+    KeyValue::new("picloud.platform_version", platform_version), // from DNS TXT
+    KeyValue::new("picloud.test.run_id",      Uuid::new_v4().to_string()),
+    KeyValue::new("picloud.test.suite",       suite_name),
+    KeyValue::new("picloud.test.cluster",     cluster_domain),
+])
+```
+
+**Version source — DNS TXT record:** The DNS TXT record for the cluster root already carries `platform-version` per ADR-052. The test runner resolves this at startup via `hickory-resolver`. If the DNS query fails or the field is absent, the version falls back to the `platform_version` field in `cluster.toml`. If that is also absent or set to `"auto"`, the version is recorded as `"unknown"`.
+
+**`cluster.toml` override:**
+
+```toml
+[cluster]
+platform_version = "auto"    # "auto" = query DNS TXT (default)
+                              # or pin: platform_version = "0.4.1-rc1"
+```
+
+Pinning is useful during development when the binary under test has not yet set its version string, or when testing a pre-release candidate.
+
+**Queries enabled by this design:**
+
+```sql
+-- Regression detection: p99 latency per scenario per version
+SELECT attributes->>'picloud.platform_version' AS version,
+       operation_name,
+       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99_ms,
+       SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS failures
+FROM   traces
+WHERE  service_name = 'picloud-test'
+GROUP  BY version, operation_name
+ORDER  BY operation_name, version;
+
+-- Staging passed but production failed — environment-specific failures
+SELECT t1.operation_name, t1.attributes->>'picloud.platform_version' AS version
+FROM   traces t1
+WHERE  t1.service_name = 'picloud-test'
+  AND  t1.attributes->>'picloud.test.cluster' = 'picloud.local'
+  AND  t1.status = 'error'
+  AND  EXISTS (
+       SELECT 1 FROM traces t2
+       WHERE  t2.operation_name = t1.operation_name
+         AND  t2.attributes->>'picloud.platform_version' = t1.attributes->>'picloud.platform_version'
+         AND  t2.attributes->>'picloud.test.cluster' = 'staging.picloud.local'
+         AND  t2.status = 'ok');
+```
+
+**Rationale:**
+- DNS TXT is the authoritative version source — the platform already maintains it, no new API needed
+- Resource attributes propagate to all child spans automatically — one call at startup, zero per-test overhead
+- `run_id` enables "show me all spans from run X" without filtering by time range
+- Storing test results in the platform's own Parquet store means test history has the same retention, query, and alert capabilities as any other operational telemetry
+
+**Consequences:**
+- `picloud-test/src/harness/results.rs` must query DNS TXT before building the OTel tracer
+- `cluster.toml` gains `platform_version` with a default of `"auto"`
+- Test results accumulate in the production cluster's Parquet store — retention policy applies (default 7 days for traces). For longer test history, increase the `traces` retention period in the platform configuration.
+
+**Test coverage:**
+
+Scenario tests:
+- `version_attribute_present.rs` — run the compliance suite. Query Parquet for all spans from that run_id. Assert every span carries a non-empty `picloud.platform_version` attribute.
+- `version_matches_cluster.rs` — assert the `picloud.platform_version` attribute in emitted spans matches the version string from the cluster's DNS TXT record.
+
+Exit criteria:
+- `picloud.platform_version` present and non-empty in 100% of emitted spans.
+- Version matches DNS TXT: 100% of test runs.
+
+---
+
+## ADR-058: picloud-test as First-Class Workspace Crate
+
+**Status:** Accepted
+
+**Context:** PiCloud's test scenarios, chaos tests, and protocol probes constitute a significant body of code that must be maintained alongside the platform itself. As a `picloud-test` crate in the Cargo workspace, the tests get the same dependency management, build caching, and CI integration as any production slice. The key architectural constraint is that the test crate must be able to test the platform without depending on its internals — all assertions must go through external interfaces.
+
+**Decision:** `picloud-test` is a workspace member with `publish = false` that depends only on `picloud-domain` (for shared type definitions such as `ResourceIri`) and external test-only crates. It never imports any production slice (`picloud-cluster`, `picloud-iam`, `picloud-storage`, etc.). All cluster knowledge flows through the platform's own external interfaces: SPARQL, HTTP, DNS, SSH via the `picloud` CLI binary.
+
+**Dependency rule (mirrors ADR-034):**
+
+```
+picloud-domain   ← depends on nothing internal
+picloud-test     → picloud-domain only (test-only external deps allowed)
+```
+
+**`picloud-test/Cargo.toml`:**
+
+```toml
+[package]
+name    = "picloud-test"
+version = "0.1.0"
+publish = false
+
+[[bin]]
+name = "picloud-test"
+path = "src/main.rs"
+
+[dependencies]
+picloud-domain   = { path = "../picloud-domain" }
+reqwest          = { version = "0.12", features = ["rustls-tls", "json"] }
+hickory-resolver = "0.24"
+ssh2             = "0.9"
+tokio            = { version = "1", features = ["full"] }
+serde            = { version = "1", features = ["derive"] }
+toml             = "0.8"
+opentelemetry    = "0.23"
+opentelemetry-otlp = "0.16"
+uuid             = { version = "1", features = ["v4"] }
+```
+
+**Why not `#[cfg(test)]` or `tests/` integration tests:** Platform integration tests require a live cluster, SSH access, DNS probes, and real hardware. Rust's built-in test framework is unsuitable — it does not support async cluster setup, does not emit OTLP results, cannot inject SSH-based faults mid-test, and provides no concept of suite-level fail-fast. `picloud-test` is a binary that implements its own test runner with these capabilities.
+
+**Why the external-interface constraint matters:** If `picloud-test` could import `picloud-storage` directly, a test author could assert internal storage state rather than observable SPARQL state. That test would be fragile (it breaks when internals change) and would not validate that the platform actually exposes the correct state to external consumers. The constraint forces every assertion to go through the same path that real operators and workloads use.
+
+**Rationale:**
+- Workspace membership means `cargo build --workspace` builds the test binary alongside the platform, catching compilation errors immediately
+- `publish = false` ensures the test binary is never accidentally published to crates.io
+- External-interface-only rule ensures tests validate observable behaviour, not implementation details
+- Consistent with the vertical slice dependency model (ADR-034) — the same discipline applied to test code
+
+**Consequences:**
+- `picloud-test` is added to the workspace `Cargo.toml` `members` array
+- CI builds `picloud-test` on every PR — if it fails to compile, the PR is blocked
+- The `picloud-test` binary is not included in the production `picloud-server` binary — it is a separate build artifact
+- Any shared types needed by tests that do not already exist in `picloud-domain` must be added there
+
+**Test coverage:**
+
+Scenario tests:
+- `test_crate_builds_independently.rs` — run `cargo build -p picloud-test` with all other slices absent from the workspace resolution. Assert compilation succeeds.
+- `no_internal_imports.rs` — run `cargo deny` configuration that blocks any `picloud-*` dependency in `picloud-test/Cargo.toml` other than `picloud-domain`. Assert zero violations.
+
+Exit criteria:
+- `picloud-test` compiles independently: verified on every PR.
+- Zero internal slice imports: verified by `cargo deny` on every PR.

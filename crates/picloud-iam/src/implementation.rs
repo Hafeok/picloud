@@ -22,7 +22,15 @@ use picloud_domain::identity::{
     RegisteredPasskey, RegistrationChallenge, RegistrationResponse, TokenResponse,
 };
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
-use picloud_domain::traits::{IdentityProvider, ValidatedIdentity, WorkloadCertificate};
+use picloud_domain::traits::{IdentityProvider, QueryResult, ValidatedIdentity, WorkloadCertificate};
+
+/// A function that runs a SPARQL query against the cluster graph.
+/// Injected from the composition root to avoid cross-slice imports.
+pub type SparqlQueryFn = Arc<
+    dyn Fn(String) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<QueryResult>> + Send>,
+    > + Send + Sync,
+>;
 
 /// Internal token claims — serialized to JSON then base64-encoded.
 /// Extended with audience, scopes, and permissions for ADR-051 Product IAM.
@@ -119,6 +127,9 @@ pub struct LocalIdentityProvider {
     token_ttl_secs: i64,
     /// Challenge validity duration in seconds.
     challenge_ttl_secs: i64,
+    /// Optional SPARQL query function for OWL role inheritance (ADR-051).
+    /// Injected from composition root when RDF store is available.
+    sparql_query: Option<SparqlQueryFn>,
 }
 
 impl LocalIdentityProvider {
@@ -137,6 +148,7 @@ impl LocalIdentityProvider {
             cluster_domain: domain,
             token_ttl_secs: 3600,
             challenge_ttl_secs: 300, // 5 minutes
+            sparql_query: None,
         }
     }
 
@@ -155,7 +167,14 @@ impl LocalIdentityProvider {
             cluster_domain: domain,
             token_ttl_secs,
             challenge_ttl_secs: 300,
+            sparql_query: None,
         }
+    }
+
+    /// Inject a SPARQL query function for OWL role inheritance (ADR-051).
+    /// Called from the composition root after the RDF store is initialized.
+    pub fn set_sparql_query(&mut self, query_fn: SparqlQueryFn) {
+        self.sparql_query = Some(query_fn);
     }
 
     /// Hash a client secret using SHA-256 for storage.
@@ -272,10 +291,16 @@ impl LocalIdentityProvider {
                 .unwrap_or_default()
         };
 
+        // Extract product name from audience URL (e.g. ".../products/photo-app")
+        let product = audience
+            .split("/products/")
+            .nth(1)
+            .map(|s| s.split('/').next().unwrap_or(s).to_string());
+
         let now = Utc::now();
         let claims = TokenClaims {
             identity_iri: identity_iri.as_str().to_string(),
-            product: None,
+            product,
             roles,
             issued_at: now.timestamp(),
             expires_at: (now + Duration::seconds(self.token_ttl_secs)).timestamp(),
@@ -491,17 +516,45 @@ impl IdentityProvider for LocalIdentityProvider {
             return Err(PiCloudError::Unauthenticated);
         }
 
-        // Issue a token scoped to the product
+        // Validate requested scopes against registered scopes (ADR-051)
+        let granted_scopes: Vec<String> = if let Some(scope_str) = scope {
+            let requested: Vec<&str> = scope_str.split_whitespace().collect();
+            for req_scope in &requested {
+                if !app.registration.scopes.contains(&req_scope.to_string()) {
+                    warn!(
+                        "Client {} requested unregistered scope: {}",
+                        client_id, req_scope
+                    );
+                    return Err(PiCloudError::PermissionDenied(format!(
+                        "scope '{}' is not registered for this client",
+                        req_scope
+                    )));
+                }
+            }
+            requested.into_iter().map(|s| s.to_string()).collect()
+        } else {
+            // No scope requested — grant all registered scopes
+            app.registration.scopes.clone()
+        };
+
+        // Issue a token with validated scopes
         let identity_iri = app.registration.product_iri.clone();
+        let product_name = app.product_name.clone();
+        drop(store); // Release read lock before async call
+
+        let audience = format!(
+            "https://{}/products/{}",
+            self.cluster_domain.0, product_name
+        );
         let token = self
-            .issue_token(&identity_iri, Some(&app.product_name))
+            .issue_token_with_audience(&identity_iri, &audience, granted_scopes.clone())
             .await?;
 
         Ok(TokenResponse {
             access_token: token,
             token_type: "Bearer".to_string(),
             expires_in: self.token_ttl_secs,
-            scope: scope.map(|s| s.to_string()),
+            scope: Some(granted_scopes.join(" ")),
         })
     }
 
@@ -800,19 +853,81 @@ impl IdentityProvider for LocalIdentityProvider {
             //   b) CBOR-encoded COSE_Key (we extract x,y from it)
             let pk_bytes = &matching_passkey.public_key;
             let (x_bytes, y_bytes) = if pk_bytes.len() == 65 && pk_bytes[0] == 0x04 {
-                // Uncompressed EC point
+                // Uncompressed EC point: 0x04 || x(32) || y(32)
                 (pk_bytes[1..33].to_vec(), pk_bytes[33..65].to_vec())
+            } else if pk_bytes.len() == 64 {
+                // Raw x||y (64 bytes)
+                (pk_bytes[0..32].to_vec(), pk_bytes[32..64].to_vec())
             } else {
-                // Attempt to parse as raw x||y (64 bytes)
-                if pk_bytes.len() == 64 {
-                    (pk_bytes[0..32].to_vec(), pk_bytes[32..64].to_vec())
-                } else {
-                    return Err(PiCloudError::PasskeyChallengeFailed {
-                        reason: format!(
-                            "unsupported public key format (length={})",
-                            pk_bytes.len()
-                        ),
-                    });
+                // Attempt CBOR-encoded COSE_Key decode
+                // COSE_Key for ES256: { 1: 2 (kty=EC2), 3: -7 (alg=ES256),
+                //   -1: 1 (crv=P-256), -2: x (32 bytes), -3: y (32 bytes) }
+                match ciborium::from_reader::<ciborium::Value, _>(
+                    std::io::Cursor::new(pk_bytes),
+                ) {
+                    Ok(ciborium::Value::Map(entries)) => {
+                        let get_bytes = |key: ciborium::Value| -> Option<Vec<u8>> {
+                            entries.iter().find_map(|(k, v)| {
+                                if *k == key {
+                                    if let ciborium::Value::Bytes(b) = v {
+                                        Some(b.clone())
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+
+                        // Validate kty=2 (EC2)
+                        let kty = entries.iter().find_map(|(k, v)| {
+                            if *k == ciborium::Value::Integer(1.into()) {
+                                if let ciborium::Value::Integer(i) = v {
+                                    Some(i128::from(*i))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        });
+                        if kty != Some(2) {
+                            return Err(PiCloudError::PasskeyChallengeFailed {
+                                reason: format!("COSE_Key kty is not EC2 (got {:?})", kty),
+                            });
+                        }
+
+                        // Extract x (-2) and y (-3) coordinates
+                        let x = get_bytes(ciborium::Value::Integer((-2i128).try_into().unwrap()))
+                            .ok_or_else(|| PiCloudError::PasskeyChallengeFailed {
+                                reason: "COSE_Key missing x coordinate (-2)".to_string(),
+                            })?;
+                        let y = get_bytes(ciborium::Value::Integer((-3i128).try_into().unwrap()))
+                            .ok_or_else(|| PiCloudError::PasskeyChallengeFailed {
+                                reason: "COSE_Key missing y coordinate (-3)".to_string(),
+                            })?;
+
+                        if x.len() != 32 || y.len() != 32 {
+                            return Err(PiCloudError::PasskeyChallengeFailed {
+                                reason: format!(
+                                    "COSE_Key coordinate size mismatch (x={}, y={})",
+                                    x.len(),
+                                    y.len()
+                                ),
+                            });
+                        }
+
+                        (x, y)
+                    }
+                    _ => {
+                        return Err(PiCloudError::PasskeyChallengeFailed {
+                            reason: format!(
+                                "unsupported public key format (length={}, not CBOR map)",
+                                pk_bytes.len()
+                            ),
+                        });
+                    }
                 }
             };
 
@@ -1003,6 +1118,119 @@ impl IdentityProvider for LocalIdentityProvider {
 
         debug!("Completed device flow for {}", identity_iri);
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TokenExchange trait implementation (ADR-051)
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl picloud_domain::traits::TokenExchange for LocalIdentityProvider {
+    async fn token_exchange(
+        &self,
+        request: &picloud_domain::identity::TokenExchangeRequest,
+    ) -> Result<picloud_domain::identity::TokenResponse> {
+        self.token_exchange(
+            &request.subject_token,
+            request.audience.as_deref(),
+            request.scope.as_deref(),
+        )
+        .await
+    }
+
+    async fn resolve_roles(
+        &self,
+        identity_iri: &ResourceIri,
+        product: &str,
+    ) -> Result<picloud_domain::identity::ResolvedTokenClaims> {
+        // Get the identity's direct roles
+        let direct_roles = {
+            let store = self.identities.read().await;
+            store
+                .get(identity_iri.as_str())
+                .map(|s| s.roles.clone())
+                .unwrap_or_default()
+        };
+
+        // Expand roles via rdfs:subClassOf* traversal using the RDF graph
+        let mut all_roles: std::collections::HashSet<String> =
+            direct_roles.iter().cloned().collect();
+
+        if let Some(ref sparql_fn) = self.sparql_query {
+            for role in &direct_roles {
+                // Query for all superclasses via transitive rdfs:subClassOf
+                let query = format!(
+                    r#"
+                    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                    SELECT ?super WHERE {{
+                        <{role}> rdfs:subClassOf* ?super .
+                        FILTER(?super != <{role}>)
+                    }}
+                    "#
+                );
+                match sparql_fn(query).await {
+                    Ok(result) => {
+                        for binding in &result.bindings {
+                            if let Some(super_role) = binding.get("super")
+                                .and_then(|v| v.as_str())
+                            {
+                                all_roles.insert(super_role.to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!("OWL role inheritance query failed for {}: {}", role, e);
+                        // Fall through — use direct roles only
+                    }
+                }
+            }
+        }
+
+        // Flatten permissions from all resolved roles
+        let mut permissions = Vec::new();
+        if let Some(ref sparql_fn) = self.sparql_query {
+            let roles_filter = all_roles
+                .iter()
+                .map(|r| format!("<{r}>"))
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            if !roles_filter.is_empty() {
+                let perm_query = format!(
+                    r#"
+                    PREFIX pc: <https://picloud.local/ontology#>
+                    SELECT ?permission WHERE {{
+                        VALUES ?role {{ {roles_filter} }}
+                        ?role pc:hasPermission ?permission .
+                    }}
+                    "#
+                );
+                if let Ok(result) = sparql_fn(perm_query).await {
+                    for binding in &result.bindings {
+                        if let Some(perm) = binding.get("permission")
+                            .and_then(|v| v.as_str())
+                        {
+                            permissions.push(perm.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(picloud_domain::identity::ResolvedTokenClaims {
+            subject: identity_iri.as_str().to_string(),
+            audience: format!(
+                "https://{}/products/{product}",
+                self.cluster_domain.0
+            ),
+            issuer: format!("https://{}", self.cluster_domain.0),
+            scopes: Vec::new(),
+            roles: all_roles.into_iter().collect(),
+            permissions,
+            custom: std::collections::HashMap::new(),
+            actor: None,
+        })
     }
 }
 

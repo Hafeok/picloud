@@ -1,0 +1,310 @@
+# PiCloud Platform SHACL Shapes
+# https://picloud.local/ontology/shapes
+#
+# Validation constraints for all platform resource types.
+# These shapes are the source of truth for:
+#   - picloud resource validate (offline and online)
+#   - Documentation generation (picloud docs generate)
+#   - SDK type generation
+#
+# ADR-049: Turtle as Canonical IaC
+
+@prefix pc:    <https://picloud.local/ontology#> .
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ─── Product ─────────────────────────────────────────────────────────────────
+
+pc:ProductShape
+    a sh:NodeShape ;
+    sh:targetClass pc:Product ;
+    sh:property [
+        sh:path        pc:version ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:pattern     "^[0-9]+\\.[0-9]+\\.[0-9]+$" ;
+        sh:description "Semantic version string (e.g. '1.0.0')" ;
+        sh:message     "Product version must be a valid semver string (e.g. '1.0.0')" ;
+    ] ;
+    sh:property [
+        sh:path        pc:description ;
+        sh:datatype    xsd:string ;
+        sh:maxCount    1 ;
+        sh:description "Human-readable description of the product" ;
+    ] .
+
+# ─── Container ───────────────────────────────────────────────────────────────
+
+pc:ContainerShape
+    a sh:NodeShape ;
+    sh:targetClass pc:Container ;
+    sh:property [
+        sh:path        pc:product ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:description "The product this container belongs to" ;
+        sh:message     "Container must specify exactly one product" ;
+    ] ;
+    sh:property [
+        sh:path        pc:image ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:description "OCI image reference (e.g. 'photo-api:1.0.0')" ;
+        sh:message     "Container must specify an image" ;
+    ] ;
+    sh:property [
+        sh:path        pc:identity ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:description "Workload identity for this container" ;
+        sh:message     "Container must specify a workload identity" ;
+    ] .
+
+# ─── Volume ──────────────────────────────────────────────────────────────────
+
+pc:VolumeShape
+    a sh:NodeShape ;
+    sh:targetClass pc:Volume ;
+    sh:property [
+        sh:path        pc:product ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "Volume must specify exactly one product" ;
+    ] ;
+    sh:property [
+        sh:path        pc:sizeGb ;
+        sh:datatype    xsd:integer ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:minInclusive 1 ;
+        sh:message     "Volume must specify a size in GB (minimum 1)" ;
+    ] ;
+    sh:property [
+        sh:path        pc:durability ;
+        sh:maxCount    1 ;
+        sh:in          ( pc:FullReplication pc:Quorum pc:Local pc:None ) ;
+        sh:description "Storage durability tier" ;
+        sh:message     "Volume durability must be one of: full-replication, quorum, local, none" ;
+    ] .
+
+# ─── Feature flag ────────────────────────────────────────────────────────────
+
+pc:FeatureFlagShape
+    a sh:NodeShape ;
+    sh:targetClass pc:FeatureFlag ;
+    sh:property [
+        sh:path        pc:product ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "FeatureFlag must specify exactly one product" ;
+    ] ;
+    sh:property [
+        sh:path        pc:flagEnabled ;
+        sh:datatype    xsd:boolean ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "FeatureFlag must specify enabled: true or false" ;
+    ] ;
+    sh:property [
+        sh:path        pc:flagVersionExpr ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        # Valid: "= 2", ">= 2", "<= 2", "> 2", "< 2", "2..4"
+        sh:pattern     "^(=|>=|<=|>|<)\\s*[0-9]+$|^[0-9]+\\.\\.[0-9]+$" ;
+        sh:message     "FeatureFlag version must be a valid expression (e.g. '= 2', '>= 2', '2..4')" ;
+    ] .
+
+# ─── Config entry ────────────────────────────────────────────────────────────
+
+pc:ConfigEntryShape
+    a sh:NodeShape ;
+    sh:targetClass pc:ConfigEntry ;
+    sh:property [
+        sh:path        pc:configKey ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "ConfigEntry must have a key" ;
+    ] ;
+    sh:property [
+        sh:path        pc:configValue ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "ConfigEntry must have a value" ;
+    ] ;
+    sh:property [
+        sh:path        pc:configType ;
+        sh:maxCount    1 ;
+        sh:in          ( pc:StringType pc:IntType pc:FloatType pc:BoolType ) ;
+        sh:message     "ConfigEntry type must be one of: string, int, float, bool" ;
+    ] .
+
+# ─── Inference rule ──────────────────────────────────────────────────────────
+
+pc:InferenceRuleShape
+    a sh:NodeShape ;
+    sh:targetClass pc:InferenceRule ;
+    sh:property [
+        sh:path        pc:ruleScope ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "InferenceRule must specify a scope ('platform' or product name)" ;
+    ] ;
+    sh:property [
+        sh:path        pc:constructQuery ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "InferenceRule must specify a CONSTRUCT query" ;
+    ] ;
+    sh:property [
+        sh:path        pc:reconciliation ;
+        sh:datatype    xsd:boolean ;
+        sh:maxCount    1 ;
+    ] .
+
+# ─── Tag ─────────────────────────────────────────────────────────────────────
+
+pc:TagShape
+    a sh:NodeShape ;
+    sh:targetClass pc:Tag ;
+    sh:property [
+        sh:path        pc:tagKey ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "Tag must have a key" ;
+    ] ;
+    sh:property [
+        sh:path        pc:tagValue ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "Tag must have a value" ;
+    ] .
+
+# ─── Snapshot config ─────────────────────────────────────────────────────────
+
+pc:SnapshotConfigShape
+    a sh:NodeShape ;
+    sh:targetClass pc:SnapshotConfig ;
+    sh:property [
+        sh:path        pc:storageSecret ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "SnapshotConfig must specify a storage secret (NAS connection)" ;
+    ] ;
+    sh:property [
+        sh:path        pc:schedule ;
+        sh:maxCount    1 ;
+        sh:in          ( pc:Hourly pc:Daily pc:Weekly ) ;
+        sh:message     "SnapshotConfig schedule must be one of: hourly, daily, weekly" ;
+    ] .
+
+# ─── Offsite backup config ───────────────────────────────────────────────────
+
+pc:OffsiteBackupConfigShape
+    a sh:NodeShape ;
+    sh:targetClass pc:OffsiteBackupConfig ;
+    sh:property [
+        sh:path        pc:targetSecret ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:maxCount    1 ;
+        sh:message     "OffsiteBackupConfig must specify a target secret (S3 connection)" ;
+    ] ;
+    sh:property [
+        sh:path        pc:backupFrequency ;
+        sh:maxCount    1 ;
+        sh:in          ( pc:DailyBackup pc:WeeklyBackup ) ;
+        sh:message     "OffsiteBackupConfig frequency must be one of: daily, weekly" ;
+    ] .
+
+# ─── Product role ─────────────────────────────────────────────────────────────
+
+pc:ProductRoleShape
+    a sh:NodeShape ;
+    sh:targetClass pc:ProductRole ;
+    sh:property [
+        sh:path     pc:product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message  "Role must specify exactly one product" ;
+    ] ;
+    sh:property [
+        sh:path        pc:rolePermission ;
+        sh:datatype    xsd:string ;
+        sh:description "Permission string (e.g. 'photos:read')" ;
+    ] .
+
+# ─── Product scope ────────────────────────────────────────────────────────────
+
+pc:ProductScopeShape
+    a sh:NodeShape ;
+    sh:targetClass pc:ProductScope ;
+    sh:property [
+        sh:path     pc:product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message  "Scope must specify exactly one product" ;
+    ] ;
+    sh:property [
+        sh:path        pc:description ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:message     "Scope must have a description — it is shown to users in consent screens" ;
+    ] .
+
+# ─── Static claim ─────────────────────────────────────────────────────────────
+
+pc:StaticClaimShape
+    a sh:NodeShape ;
+    sh:targetClass pc:StaticClaim ;
+    sh:property [
+        sh:path     pc:claimKey ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        # Prevent overwriting standard JWT reserved claims
+        sh:not [ sh:in ( "iss" "sub" "aud" "exp" "iat" "nbf" "jti" ) ] ;
+        sh:message  "Claim key must not be a reserved JWT claim (iss, sub, aud, exp, iat, nbf, jti)" ;
+    ] ;
+    sh:property [
+        sh:path     pc:claimValue ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message  "Claim must have a value" ;
+    ] .
+
+# ─── M2M permission ───────────────────────────────────────────────────────────
+
+pc:M2mPermissionShape
+    a sh:NodeShape ;
+    sh:targetClass pc:M2mPermission ;
+    sh:property [
+        sh:path     pc:product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message  "M2mPermission must specify the granting product" ;
+    ] ;
+    sh:property [
+        sh:path     pc:m2mClient ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message  "M2mPermission must specify the client product" ;
+    ] ;
+    sh:property [
+        sh:path        pc:m2mScope ;
+        sh:datatype    xsd:string ;
+        sh:minCount    1 ;
+        sh:message     "M2mPermission must specify at least one allowed scope" ;
+    ] .

@@ -7,6 +7,7 @@
 pub mod implementation;
 pub mod inference;
 pub mod ingress;
+pub mod iri;
 pub mod metrics;
 pub mod otel;
 pub mod provisioner;

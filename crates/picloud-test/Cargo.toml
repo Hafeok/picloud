@@ -1,0 +1,30 @@
+[package]
+name = "picloud-test"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "picloud-test"
+path = "src/main.rs"
+
+[dependencies]
+picloud-domain = { workspace = true }
+reqwest = { workspace = true }
+hickory-resolver = { version = "0.25" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+uuid = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+opentelemetry = { version = "0.27", features = ["trace"] }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "trace"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "trace"] }
+url = { workspace = true }

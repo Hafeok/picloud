@@ -325,6 +325,35 @@ pub enum TokenFlow {
     ClientCredentials { client_product: String },
 }
 
+/// Node enrollment mode — set once at cluster init, immutable after (ADR-053).
+///
+/// Determines how new nodes receive their mTLS certificates from the cluster CA.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrollmentMode {
+    /// Any node discovering the cluster via mDNS receives a certificate automatically.
+    /// Network presence is the trust boundary. Suitable for trusted home-lab networks.
+    Auto,
+    /// Nodes must present a valid, single-use enrollment token to receive a certificate.
+    /// Tokens are time-limited and issued by a cluster admin.
+    Token,
+}
+
+impl Default for EnrollmentMode {
+    fn default() -> Self {
+        EnrollmentMode::Auto
+    }
+}
+
+impl std::fmt::Display for EnrollmentMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EnrollmentMode::Auto => write!(f, "auto"),
+            EnrollmentMode::Token => write!(f, "token"),
+        }
+    }
+}
+
 /// Token exchange request (RFC 8693) (ADR-051)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenExchangeRequest {

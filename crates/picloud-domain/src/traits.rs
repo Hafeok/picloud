@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use crate::error::Result;
-use crate::events::{EventEnvelope, MetricRecord, SpanRecord, TelemetryFilter};
+use crate::events::{CertType, EventEnvelope, MetricRecord, SpanRecord, TelemetryFilter};
 use crate::iri::ResourceIri;
 
 // ---- Event Log ----
@@ -457,4 +457,172 @@ pub trait TelemetryStore: Send + Sync {
         to: DateTime<Utc>,
         filter: TelemetryFilter,
     ) -> Result<Vec<MetricRecord>>;
+}
+
+// ---- Certificate Authority (ADR-053) ----
+
+/// A signed certificate returned by the cluster CA.
+#[derive(Debug, Clone)]
+pub struct SignedCert {
+    pub cert_pem: String,
+    pub expires_at: DateTime<Utc>,
+    pub fingerprint: String,
+}
+
+/// Cluster certificate authority — issues and signs certificates for nodes,
+/// workloads, and ingress hostnames.
+/// Implemented by: picloud-network (ca module)
+#[async_trait]
+pub trait CertificateAuthority: Send + Sync {
+    /// Sign a node's CSR and return the signed certificate.
+    /// Validates: CN matches node_name, no wildcard SANs.
+    async fn sign_node_csr(
+        &self,
+        csr_der: &[u8],
+        node_name: &str,
+        node_ip: &str,
+    ) -> Result<SignedCert>;
+
+    /// Issue a workload identity certificate with a URI SAN.
+    async fn sign_workload_cert(
+        &self,
+        workload_iri: &ResourceIri,
+        product: &str,
+    ) -> Result<SignedCert>;
+
+    /// Issue a TLS certificate for an ingress hostname.
+    async fn sign_ingress_cert(&self, hostname: &str) -> Result<SignedCert>;
+
+    /// Return the CA certificate in PEM format.
+    fn ca_cert_pem(&self) -> &str;
+
+    /// Return the certificate type's lifetime parameters.
+    fn cert_lifetime(&self, cert_type: &CertType) -> std::time::Duration;
+}
+
+// ---- Authoritative DNS (ADR-052) ----
+
+/// DNS record returned by the authoritative resolver.
+#[derive(Debug, Clone)]
+pub enum DnsRecord {
+    /// IPv4 address record
+    A { address: std::net::Ipv4Addr },
+    /// Service discovery record
+    Srv { target: String, port: u16, priority: u16, weight: u16 },
+    /// Text metadata record
+    Txt { text: String },
+    /// Reverse DNS record
+    Ptr { name: String },
+}
+
+/// Authoritative DNS server for the cluster's tenant domain.
+/// Answers queries by projecting the RDF graph, with an in-memory cache.
+/// Implemented by: picloud-network (dns module)
+#[async_trait]
+pub trait AuthoritativeDns: Send + Sync {
+    /// Resolve a DNS query. Returns matching records or empty vec for NXDOMAIN.
+    async fn resolve(&self, name: &str, record_type: &str) -> Result<Vec<DnsRecord>>;
+
+    /// Check if this server is authoritative for the given domain.
+    fn is_authoritative(&self, domain: &str) -> bool;
+
+    /// Invalidate cached entries matching a hostname pattern.
+    /// Called when events indicate DNS-relevant state has changed.
+    async fn invalidate_cache(&self, hostname: &str) -> Result<()>;
+}
+
+// ---- Token Exchange (ADR-051) ----
+
+/// Extend IdentityProvider with token exchange capabilities.
+/// This is a separate trait to avoid breaking the existing IdentityProvider.
+/// Implemented by: picloud-iam
+#[async_trait]
+pub trait TokenExchange: Send + Sync {
+    /// RFC 8693 token exchange — issue a new token on behalf of the subject.
+    /// Validates the subject token, checks permissions in the target product,
+    /// resolves roles with OWL inheritance, and issues a scoped token.
+    async fn token_exchange(
+        &self,
+        request: &crate::identity::TokenExchangeRequest,
+    ) -> Result<crate::identity::TokenResponse>;
+
+    /// Resolve all roles for an identity within a product, including
+    /// inherited roles via rdfs:subClassOf traversal. Returns flattened
+    /// permissions and merged custom claims.
+    async fn resolve_roles(
+        &self,
+        identity_iri: &ResourceIri,
+        product: &str,
+    ) -> Result<crate::identity::ResolvedTokenClaims>;
+}
+
+// ---- OCI Registry (ADR-054) ----
+
+/// Store and serve OCI container images via the Distribution API v2.
+/// Implemented by: picloud-registry
+#[async_trait]
+pub trait RegistryBackend: Send + Sync {
+    /// Store a content-addressed blob. Digest is verified on write.
+    async fn put_blob(&self, digest: &str, data: Vec<u8>) -> Result<()>;
+
+    /// Retrieve a blob by its content digest.
+    async fn get_blob(&self, digest: &str) -> Result<Vec<u8>>;
+
+    /// Check if a blob exists without reading it.
+    async fn blob_exists(&self, digest: &str) -> Result<bool>;
+
+    /// Delete a blob by digest (used by GC).
+    async fn delete_blob(&self, digest: &str) -> Result<()>;
+
+    /// Store a manifest (image config + layer references).
+    /// Returns the digest of the stored manifest.
+    async fn put_manifest(
+        &self,
+        repository: &str,
+        reference: &str,
+        content_type: &str,
+        data: Vec<u8>,
+    ) -> Result<String>;
+
+    /// Retrieve a manifest by tag or digest. Returns (content_type, data).
+    async fn get_manifest(
+        &self,
+        repository: &str,
+        reference: &str,
+    ) -> Result<(String, Vec<u8>)>;
+
+    /// Delete a manifest by tag or digest.
+    async fn delete_manifest(&self, repository: &str, reference: &str) -> Result<()>;
+
+    /// List all tags in a repository.
+    async fn list_tags(&self, repository: &str) -> Result<Vec<String>>;
+
+    /// List all repositories.
+    async fn list_repositories(&self) -> Result<Vec<String>>;
+
+    /// Start a blob upload session. Returns an upload UUID.
+    async fn start_blob_upload(&self, repository: &str) -> Result<String>;
+
+    /// Run garbage collection — delete unreferenced blobs.
+    async fn garbage_collect(&self) -> Result<GarbageCollectionResult>;
+
+    /// Get registry storage statistics.
+    async fn stats(&self) -> Result<RegistryStats>;
+}
+
+/// Result of a garbage collection run.
+#[derive(Debug, Clone)]
+pub struct GarbageCollectionResult {
+    pub blobs_scanned: u64,
+    pub blobs_deleted: u64,
+    pub bytes_freed: u64,
+    pub duration_ms: u64,
+}
+
+/// Registry storage statistics.
+#[derive(Debug, Clone)]
+pub struct RegistryStats {
+    pub total_blobs: u64,
+    pub total_repositories: u64,
+    pub storage_used_bytes: u64,
 }

@@ -80,6 +80,34 @@ pub enum PiCloudError {
     #[error("SQL parse error: {reason}")]
     SqlParseError { reason: String },
 
+    // --- DNS errors (ADR-052) ---
+    #[error("DNS resolution failed for {hostname}")]
+    DnsResolutionFailed { hostname: String },
+
+    // --- Certificate enrollment errors (ADR-053) ---
+    #[error("Node enrollment failed: {reason}")]
+    EnrollmentFailed { reason: String },
+
+    #[error("Certificate revoked: {fingerprint}")]
+    CertificateRevoked { fingerprint: String },
+
+    // --- IAM audience errors (ADR-051) ---
+    #[error("Audience mismatch: expected {expected}, got {got}")]
+    AudienceMismatch { expected: String, got: String },
+
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
+    // --- Registry errors (ADR-054) ---
+    #[error("Image not found: {repository}:{reference}")]
+    ImageNotFound { repository: String, reference: String },
+
+    #[error("Blob not found: {digest}")]
+    BlobNotFound { digest: String },
+
+    #[error("Registry error: {reason}")]
+    RegistryError { reason: String },
+
     // --- Generic ---
     #[error("Internal error: {0}")]
     Internal(String),

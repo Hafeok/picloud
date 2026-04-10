@@ -23,3 +23,6 @@ mdns-sd      = { workspace = true }
 uuid         = { workspace = true }
 chrono       = { workspace = true }
 sha2         = { workspace = true }
+ring         = { workspace = true }
+rand          = { workspace = true }
+hickory-proto = { workspace = true }

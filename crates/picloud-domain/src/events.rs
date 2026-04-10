@@ -139,6 +139,28 @@ pub enum PlatformEvent {
     BackupStarted(BackupStartedPayload),
     BackupCompleted(BackupCompletedPayload),
     BackupFailed(BackupFailedPayload),
+
+    // --- Certificate enrollment events (ADR-053) ---
+    NodeEnrolled(NodeEnrolledPayload),
+    NodeEnrollmentRejected(NodeEnrollmentRejectedPayload),
+    CertIssued(CertIssuedPayload),
+    CertRenewed(CertRenewedPayload),
+    CertRevoked(CertRevokedPayload),
+    EnrollmentTokenIssued(EnrollmentTokenIssuedPayload),
+    EnrollmentTokenRevoked(EnrollmentTokenRevokedPayload),
+
+    // --- Product IAM events (ADR-051) ---
+    RoleAssigned(RoleAssignedPayload),
+    RoleRevoked(RoleRevokedPayload),
+    TokenExchanged(TokenExchangedPayload),
+
+    // --- OCI Registry events (ADR-054) ---
+    ImagePushed(ImagePushedPayload),
+    ImageDeleted(ImageDeletedPayload),
+    ImageTagUpdated(ImageTagUpdatedPayload),
+    RegistryGCStarted(RegistryGCStartedPayload),
+    RegistryGCCompleted(RegistryGCCompletedPayload),
+    RegistryAuthFailed(RegistryAuthFailedPayload),
 }
 
 // --- Payload types ---
@@ -671,6 +693,176 @@ pub struct BackupFailedPayload {
     /// IRI of the volume that was being backed up
     pub volume_iri: ResourceIri,
     /// Human-readable reason for failure
+    pub reason: String,
+}
+
+// --- Certificate enrollment payloads (ADR-053) ---
+
+/// The type of certificate issued by the cluster CA.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CertType {
+    /// Node-to-node mTLS certificate (90-day lifetime)
+    Node,
+    /// Workload identity certificate (24-hour lifetime)
+    Workload,
+    /// Ingress TLS certificate (90-day lifetime)
+    Ingress,
+}
+
+/// Payload for NodeEnrolled event (ADR-053).
+/// Emitted when a new node successfully receives its certificate from the cluster CA.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeEnrolledPayload {
+    pub node_id: Uuid,
+    pub node_name: String,
+    pub node_address: String,
+    pub fingerprint: String,
+    pub enrollment_mode: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Payload for NodeEnrollmentRejected event (ADR-053).
+/// Emitted when a node's enrollment request is denied.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeEnrollmentRejectedPayload {
+    pub node_name: String,
+    pub node_address: String,
+    pub reason: String,
+}
+
+/// Payload for CertIssued event (ADR-053).
+/// Emitted when the cluster CA issues any certificate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertIssuedPayload {
+    pub cert_type: CertType,
+    pub subject: String,
+    pub fingerprint: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Payload for CertRenewed event (ADR-053).
+/// Emitted when a certificate is automatically renewed before expiry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertRenewedPayload {
+    pub cert_type: CertType,
+    pub subject: String,
+    pub old_fingerprint: String,
+    pub new_fingerprint: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Payload for CertRevoked event (ADR-053).
+/// Emitted when a certificate is added to the in-memory CRL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertRevokedPayload {
+    pub cert_type: CertType,
+    pub subject: String,
+    pub fingerprint: String,
+    pub reason: String,
+}
+
+/// Payload for EnrollmentTokenIssued event (ADR-053).
+/// Emitted when a cluster admin generates a new enrollment token.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollmentTokenIssuedPayload {
+    pub token_id: Uuid,
+    pub created_by: ResourceIri,
+    pub expires_at: DateTime<Utc>,
+    pub for_node: Option<String>,
+}
+
+/// Payload for EnrollmentTokenRevoked event (ADR-053).
+/// Emitted when an enrollment token is revoked before use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollmentTokenRevokedPayload {
+    pub token_id: Uuid,
+    pub revoked_by: ResourceIri,
+}
+
+// --- Product IAM payloads (ADR-051) ---
+
+/// Payload for RoleAssigned event (ADR-051).
+/// Emitted when a role is assigned to an identity within a product.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleAssignedPayload {
+    pub identity_iri: ResourceIri,
+    pub role_name: String,
+    pub product: String,
+}
+
+/// Payload for RoleRevoked event (ADR-051).
+/// Emitted when a role is removed from an identity within a product.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleRevokedPayload {
+    pub identity_iri: ResourceIri,
+    pub role_name: String,
+    pub product: String,
+}
+
+/// Payload for TokenExchanged event (ADR-051).
+/// Emitted when an RFC 8693 token exchange or M2M client_credentials grant succeeds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenExchangedPayload {
+    pub subject_iri: ResourceIri,
+    pub audience: String,
+    pub flow: String,
+    pub scopes: Vec<String>,
+}
+
+// --- OCI Registry payloads (ADR-054) ---
+
+/// Payload for ImagePushed event (ADR-054).
+/// Emitted when an image is successfully pushed to the embedded registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImagePushedPayload {
+    pub repository: String,
+    pub tag: Option<String>,
+    pub digest: String,
+    pub size_bytes: u64,
+    pub media_type: String,
+    pub pushed_by: Option<String>,
+}
+
+/// Payload for ImageDeleted event (ADR-054).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageDeletedPayload {
+    pub repository: String,
+    pub digest: String,
+    pub deleted_by: Option<String>,
+}
+
+/// Payload for ImageTagUpdated event (ADR-054).
+/// Emitted when a tag is moved to a new digest (re-push with same tag).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageTagUpdatedPayload {
+    pub repository: String,
+    pub tag: String,
+    pub previous_digest: String,
+    pub new_digest: String,
+}
+
+/// Payload for RegistryGCStarted event (ADR-054).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryGCStartedPayload {
+    pub scheduled_at: DateTime<Utc>,
+}
+
+/// Payload for RegistryGCCompleted event (ADR-054).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryGCCompletedPayload {
+    pub blobs_deleted: u64,
+    pub bytes_reclaimed: u64,
+    pub duration_ms: u64,
+}
+
+/// Payload for RegistryAuthFailed event (ADR-054).
+/// Emitted when an authentication attempt against the registry fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryAuthFailedPayload {
+    pub identity: String,
+    pub operation: String,
+    pub repository: String,
     pub reason: String,
 }
 

@@ -14,6 +14,55 @@ use tracing::warn;
 
 use crate::router::{RouteEntry, SharedRouter};
 
+// ---------------------------------------------------------------------------
+// Connection draining (ADR-048, Phase 4)
+// ---------------------------------------------------------------------------
+
+/// Drain state for graceful connection draining during workload rescheduling.
+///
+/// When draining is active, new connections receive 503 with Retry-After.
+/// In-flight requests are allowed to complete within the grace period (30s).
+pub struct DrainState {
+    /// Signal that draining has started.
+    notify: tokio::sync::Notify,
+    /// Whether the proxy is currently draining.
+    draining: std::sync::atomic::AtomicBool,
+}
+
+impl DrainState {
+    pub fn new() -> Self {
+        Self {
+            notify: tokio::sync::Notify::new(),
+            draining: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Start draining — new requests will be rejected.
+    pub fn start_drain(&self) {
+        self.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    /// Stop draining — resume normal operation.
+    pub fn stop_drain(&self) {
+        self.draining.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Check if draining is active.
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Default for DrainState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Maximum time to wait for in-flight requests during connection draining.
+pub const DRAIN_GRACE_PERIOD: Duration = Duration::from_secs(30);
+
 /// Timeout for upstream connections — fail fast rather than queue.
 pub const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Timeout for the full upstream request lifecycle.

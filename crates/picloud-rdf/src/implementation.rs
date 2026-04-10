@@ -1201,6 +1201,369 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    // ---- OCI Registry Projection (ADR-054) ----
+
+    /// Project an ImagePushed event — create repository, tag, and image triples.
+    fn project_image_pushed(&self, event: &EventEnvelope) -> Result<()> {
+        let repository = event.payload["repository"]
+            .as_str()
+            .unwrap_or_default();
+        let digest = event.payload["digest"]
+            .as_str()
+            .unwrap_or_default();
+        let size_bytes = event.payload["size_bytes"]
+            .as_u64()
+            .unwrap_or(0);
+        let media_type = event.payload["media_type"]
+            .as_str()
+            .unwrap_or_default();
+        let pushed_by = event.payload["pushed_by"]
+            .as_str()
+            .unwrap_or_default();
+
+        let cluster_domain = &self.iri_builder.cluster_root();
+        let base = cluster_domain.as_str().trim_end_matches('/');
+
+        // Repository IRI: {base}/registry/{repository}
+        let repo_iri = format!("{base}/registry/{repository}");
+        // Image IRI: {base}/registry/{repository}/digests/{digest}
+        let image_iri = format!("{base}/registry/{repository}/digests/{digest}");
+
+        // Ensure the repository resource exists
+        self.insert_triple(
+            &repo_iri,
+            RDF_TYPE,
+            picloud_term("Repository").into(),
+        )?;
+        self.insert_triple(
+            &repo_iri,
+            &format!("{PICLOUD_NS}repositoryName"),
+            Literal::new_simple_literal(repository).into(),
+        )?;
+
+        // Create the image triples
+        self.insert_triple(
+            &image_iri,
+            RDF_TYPE,
+            picloud_term("Image").into(),
+        )?;
+        self.insert_triple(
+            &image_iri,
+            &format!("{PICLOUD_NS}digest"),
+            Literal::new_simple_literal(digest).into(),
+        )?;
+        self.insert_triple(
+            &image_iri,
+            &format!("{PICLOUD_NS}sizeBytes"),
+            Literal::new_typed_literal(
+                size_bytes.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#unsignedLong")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+        self.insert_triple(
+            &image_iri,
+            &format!("{PICLOUD_NS}mediaType"),
+            Literal::new_simple_literal(media_type).into(),
+        )?;
+        if !pushed_by.is_empty() {
+            self.insert_triple(
+                &image_iri,
+                &format!("{PICLOUD_NS}pushedBy"),
+                Literal::new_simple_literal(pushed_by).into(),
+            )?;
+        }
+        self.insert_triple(
+            &image_iri,
+            &format!("{PICLOUD_NS}pushedAt"),
+            Literal::new_typed_literal(
+                event.timestamp.to_rfc3339(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#dateTime")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+
+        // Link repository to image
+        self.insert_triple(
+            &repo_iri,
+            &format!("{PICLOUD_NS}hasImage"),
+            NamedNode::new(&image_iri)
+                .map_err(|e| PiCloudError::Internal(format!("invalid image IRI: {e}")))?
+                .into(),
+        )?;
+
+        // If a tag is provided, create tag triple
+        if let Some(tag) = event.payload["tag"].as_str() {
+            if !tag.is_empty() {
+                let tag_iri = format!("{base}/registry/{repository}/tags/{tag}");
+                self.insert_triple(
+                    &tag_iri,
+                    RDF_TYPE,
+                    picloud_term("ImageTag").into(),
+                )?;
+                self.insert_triple(
+                    &tag_iri,
+                    &format!("{PICLOUD_NS}tagName"),
+                    Literal::new_simple_literal(tag).into(),
+                )?;
+                self.insert_triple(
+                    &tag_iri,
+                    &format!("{PICLOUD_NS}pointsToDigest"),
+                    NamedNode::new(&image_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid image IRI: {e}")))?
+                        .into(),
+                )?;
+                self.insert_triple(
+                    &repo_iri,
+                    &format!("{PICLOUD_NS}hasTag"),
+                    NamedNode::new(&tag_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid tag IRI: {e}")))?
+                        .into(),
+                )?;
+            }
+        }
+
+        debug!(repository = repository, digest = digest, "projected ImagePushed");
+        Ok(())
+    }
+
+    /// Project an ImageDeleted event — remove triples for the deleted image digest.
+    fn project_image_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let repository = event.payload["repository"]
+            .as_str()
+            .unwrap_or_default();
+        let digest = event.payload["digest"]
+            .as_str()
+            .unwrap_or_default();
+
+        let cluster_domain = &self.iri_builder.cluster_root();
+        let base = cluster_domain.as_str().trim_end_matches('/');
+        let repo_iri = format!("{base}/registry/{repository}");
+        let image_iri = format!("{base}/registry/{repository}/digests/{digest}");
+
+        // Remove the hasImage link from repo to this image
+        let s = NamedNode::new(&repo_iri)
+            .map_err(|e| PiCloudError::Internal(format!("invalid repo IRI: {e}")))?;
+        let p = NamedNode::new(format!("{PICLOUD_NS}hasImage"))
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+        let o = NamedNode::new(&image_iri)
+            .map_err(|e| PiCloudError::Internal(format!("invalid image IRI: {e}")))?;
+        let quad = Quad::new(s, p, o, GraphName::DefaultGraph);
+        let _ = self.store.remove(&quad);
+
+        // Remove all triples about the image itself
+        self.remove_triples_about(&image_iri)?;
+
+        // Remove any tags that point to this digest
+        let sparql = format!(
+            "SELECT ?tag WHERE {{ ?tag <{PICLOUD_NS}pointsToDigest> <{image_iri}> }}"
+        );
+        if let Ok(result) = self.execute_query(&sparql) {
+            for row in &result.bindings {
+                if let Some(tag_iri) = row.get("tag").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
+                    self.remove_triples_about(tag_iri)?;
+                    // Remove hasTag link from repo
+                    let rs = NamedNode::new(&repo_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid repo IRI: {e}")))?;
+                    let rp = NamedNode::new(format!("{PICLOUD_NS}hasTag"))
+                        .map_err(|e| PiCloudError::Internal(format!("invalid predicate: {e}")))?;
+                    let ro = NamedNode::new(tag_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid tag IRI: {e}")))?;
+                    let rquad = Quad::new(rs, rp, ro, GraphName::DefaultGraph);
+                    let _ = self.store.remove(&rquad);
+                }
+            }
+        }
+
+        debug!(repository = repository, digest = digest, "projected ImageDeleted");
+        Ok(())
+    }
+
+    /// Project an ImageTagUpdated event — move a tag to point to a new digest.
+    fn project_image_tag_updated(&self, event: &EventEnvelope) -> Result<()> {
+        let repository = event.payload["repository"]
+            .as_str()
+            .unwrap_or_default();
+        let tag = event.payload["tag"]
+            .as_str()
+            .unwrap_or_default();
+        let new_digest = event.payload["new_digest"]
+            .as_str()
+            .unwrap_or_default();
+
+        let cluster_domain = &self.iri_builder.cluster_root();
+        let base = cluster_domain.as_str().trim_end_matches('/');
+        let tag_iri = format!("{base}/registry/{repository}/tags/{tag}");
+        let new_image_iri = format!("{base}/registry/{repository}/digests/{new_digest}");
+
+        // Remove old pointsToDigest triple from the tag
+        let s = NamedNode::new(&tag_iri)
+            .map_err(|e| PiCloudError::Internal(format!("invalid tag IRI: {e}")))?;
+        let pred = format!("{PICLOUD_NS}pointsToDigest");
+        let p = NamedNodeRef::new(&pred)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let old_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                None,
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &old_quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        // Insert new pointsToDigest triple
+        self.insert_triple(
+            &tag_iri,
+            &format!("{PICLOUD_NS}pointsToDigest"),
+            NamedNode::new(&new_image_iri)
+                .map_err(|e| PiCloudError::Internal(format!("invalid image IRI: {e}")))?
+                .into(),
+        )?;
+
+        // Ensure the tag resource exists (in case it was created outside ImagePushed)
+        self.insert_triple(
+            &tag_iri,
+            RDF_TYPE,
+            picloud_term("ImageTag").into(),
+        )?;
+        self.insert_triple(
+            &tag_iri,
+            &format!("{PICLOUD_NS}tagName"),
+            Literal::new_simple_literal(tag).into(),
+        )?;
+
+        debug!(repository = repository, tag = tag, new_digest = new_digest, "projected ImageTagUpdated");
+        Ok(())
+    }
+
+    /// Project a RegistryGCStarted event — add GC activity triple with start time.
+    fn project_registry_gc_started(&self, event: &EventEnvelope) -> Result<()> {
+        let scheduled_at = event.payload["scheduled_at"]
+            .as_str()
+            .unwrap_or_default();
+
+        let cluster_domain = &self.iri_builder.cluster_root();
+        let base = cluster_domain.as_str().trim_end_matches('/');
+        let gc_iri = format!("{base}/registry/gc/{}", event.id);
+
+        self.insert_triple(
+            &gc_iri,
+            RDF_TYPE,
+            picloud_term("RegistryGC").into(),
+        )?;
+        self.insert_triple(
+            &gc_iri,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("running").into(),
+        )?;
+        self.insert_triple(
+            &gc_iri,
+            &format!("{PICLOUD_NS}scheduledAt"),
+            Literal::new_typed_literal(
+                scheduled_at.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#dateTime")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+
+        debug!(gc_iri = gc_iri, "projected RegistryGCStarted");
+        Ok(())
+    }
+
+    /// Project a RegistryGCCompleted event — update GC activity with completion info.
+    fn project_registry_gc_completed(&self, event: &EventEnvelope) -> Result<()> {
+        let blobs_deleted = event.payload["blobs_deleted"]
+            .as_u64()
+            .unwrap_or(0);
+        let bytes_reclaimed = event.payload["bytes_reclaimed"]
+            .as_u64()
+            .unwrap_or(0);
+        let duration_ms = event.payload["duration_ms"]
+            .as_u64()
+            .unwrap_or(0);
+
+        // The GC IRI is linked via correlation_id to the RegistryGCStarted event.
+        // We look up the GC resource by its correlation_id.
+        let cluster_domain = &self.iri_builder.cluster_root();
+        let base = cluster_domain.as_str().trim_end_matches('/');
+
+        // Find the GC resource by correlation_id
+        let sparql = format!(
+            "SELECT ?gc WHERE {{ ?gc <{RDF_TYPE}> <{PICLOUD_NS}RegistryGC> . ?gc <{PICLOUD_NS}status> \"running\" }}"
+        );
+        let gc_iri = if let Ok(result) = self.execute_query(&sparql) {
+            result.bindings.first()
+                .and_then(|row| row.get("gc"))
+                .and_then(|v| v.get("value"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        // Fall back to constructing a GC IRI from the event's correlation_id
+        let gc_iri = gc_iri.unwrap_or_else(|| {
+            format!("{base}/registry/gc/{}", event.correlation_id)
+        });
+
+        // Update status from "running" to "completed"
+        self.update_status(&gc_iri, "completed", None)?;
+
+        self.insert_triple(
+            &gc_iri,
+            &format!("{PICLOUD_NS}blobsDeleted"),
+            Literal::new_typed_literal(
+                blobs_deleted.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#unsignedLong")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+        self.insert_triple(
+            &gc_iri,
+            &format!("{PICLOUD_NS}bytesReclaimed"),
+            Literal::new_typed_literal(
+                bytes_reclaimed.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#unsignedLong")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+        self.insert_triple(
+            &gc_iri,
+            &format!("{PICLOUD_NS}durationMs"),
+            Literal::new_typed_literal(
+                duration_ms.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#unsignedLong")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+        self.insert_triple(
+            &gc_iri,
+            &format!("{PICLOUD_NS}completedAt"),
+            Literal::new_typed_literal(
+                event.timestamp.to_rfc3339(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#dateTime")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+
+        debug!(gc_iri = gc_iri, blobs_deleted = blobs_deleted, bytes_reclaimed = bytes_reclaimed, "projected RegistryGCCompleted");
+        Ok(())
+    }
+
     // ---- Snapshot & Backup Projection (ADR-047) ----
 
     /// Project a SnapshotCreated event — update volume snapshot status triples.
@@ -1695,6 +2058,16 @@ impl StateProjector for OxigraphProjector {
             "BackupCompleted" => self.project_backup_completed(event),
             "BackupStarted" | "BackupFailed" => {
                 debug!(event_type = %event.event_type, "backup lifecycle event — recorded");
+                Ok(())
+            }
+            // OCI Registry events (ADR-054)
+            "ImagePushed" => self.project_image_pushed(event),
+            "ImageDeleted" => self.project_image_deleted(event),
+            "ImageTagUpdated" => self.project_image_tag_updated(event),
+            "RegistryGCStarted" => self.project_registry_gc_started(event),
+            "RegistryGCCompleted" => self.project_registry_gc_completed(event),
+            "RegistryAuthFailed" => {
+                debug!("RegistryAuthFailed event — no RDF projection");
                 Ok(())
             }
             // Telemetry events (ADR-045) — no RDF projection needed
@@ -2776,5 +3149,354 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(result.bindings.len(), 1);
+    }
+
+    // ---- OCI Registry projection tests (ADR-054) ----
+
+    #[tokio::test]
+    async fn test_project_image_pushed() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        let event = EventEnvelope::new(
+            iri_builder.event_schema("ImagePushed", 1),
+            "ImagePushed",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "tag": "v1.0",
+                "digest": "sha256:abc123",
+                "size_bytes": 52428800_u64,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "pushed_by": "admin",
+            }),
+        );
+
+        projector.project(&event).await.unwrap();
+
+        // Check repository was created
+        let result = projector
+            .query(&format!(
+                "SELECT ?name WHERE {{ ?repo <{RDF_TYPE}> <{PICLOUD_NS}Repository> . ?repo <{PICLOUD_NS}repositoryName> ?name }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["name"]["value"].as_str().unwrap(), "myapp/api");
+
+        // Check image was created with digest and size
+        let result = projector
+            .query(&format!(
+                "SELECT ?digest ?size WHERE {{ ?img <{RDF_TYPE}> <{PICLOUD_NS}Image> . ?img <{PICLOUD_NS}digest> ?digest . ?img <{PICLOUD_NS}sizeBytes> ?size }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["digest"]["value"].as_str().unwrap(), "sha256:abc123");
+        assert_eq!(result.bindings[0]["size"]["value"].as_str().unwrap(), "52428800");
+
+        // Check tag was created and points to the image
+        let result = projector
+            .query(&format!(
+                "SELECT ?tagName WHERE {{ ?tag <{RDF_TYPE}> <{PICLOUD_NS}ImageTag> . ?tag <{PICLOUD_NS}tagName> ?tagName }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["tagName"]["value"].as_str().unwrap(), "v1.0");
+
+        // Check repo has image and tag links
+        let result = projector
+            .query(&format!(
+                "SELECT ?img WHERE {{ ?repo <{PICLOUD_NS}hasImage> ?img }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+
+        let result = projector
+            .query(&format!(
+                "SELECT ?tag WHERE {{ ?repo <{PICLOUD_NS}hasTag> ?tag }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_project_image_pushed_without_tag() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        let event = EventEnvelope::new(
+            iri_builder.event_schema("ImagePushed", 1),
+            "ImagePushed",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "digest": "sha256:abc123",
+                "size_bytes": 1024_u64,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+            }),
+        );
+
+        projector.project(&event).await.unwrap();
+
+        // Image should exist
+        let result = projector
+            .query(&format!(
+                "SELECT ?img WHERE {{ ?img <{RDF_TYPE}> <{PICLOUD_NS}Image> }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+
+        // No tag should exist
+        let result = projector
+            .query(&format!(
+                "SELECT ?tag WHERE {{ ?tag <{RDF_TYPE}> <{PICLOUD_NS}ImageTag> }}"
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_project_image_deleted() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        // First push an image
+        let push_event = EventEnvelope::new(
+            iri_builder.event_schema("ImagePushed", 1),
+            "ImagePushed",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "tag": "v1.0",
+                "digest": "sha256:abc123",
+                "size_bytes": 1024_u64,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+            }),
+        );
+        projector.project(&push_event).await.unwrap();
+
+        // Verify image exists
+        let result = projector
+            .query(&format!(
+                "SELECT ?img WHERE {{ ?img <{RDF_TYPE}> <{PICLOUD_NS}Image> }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+
+        // Now delete the image
+        let delete_event = EventEnvelope::new(
+            iri_builder.event_schema("ImageDeleted", 1),
+            "ImageDeleted",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "digest": "sha256:abc123",
+                "deleted_by": "admin",
+            }),
+        );
+        projector.project(&delete_event).await.unwrap();
+
+        // Image should be gone
+        let result = projector
+            .query(&format!(
+                "SELECT ?img WHERE {{ ?img <{RDF_TYPE}> <{PICLOUD_NS}Image> }}"
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+
+        // Tag pointing to deleted image should also be gone
+        let result = projector
+            .query(&format!(
+                "SELECT ?tag WHERE {{ ?tag <{RDF_TYPE}> <{PICLOUD_NS}ImageTag> }}"
+            ))
+            .await
+            .unwrap();
+        assert!(result.bindings.is_empty());
+
+        // Repository should still exist
+        let result = projector
+            .query(&format!(
+                "SELECT ?repo WHERE {{ ?repo <{RDF_TYPE}> <{PICLOUD_NS}Repository> }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_project_image_tag_updated() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        // Push initial image with tag
+        let push_event = EventEnvelope::new(
+            iri_builder.event_schema("ImagePushed", 1),
+            "ImagePushed",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "tag": "latest",
+                "digest": "sha256:old111",
+                "size_bytes": 1024_u64,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+            }),
+        );
+        projector.project(&push_event).await.unwrap();
+
+        // Push new image (so it exists in the store)
+        let push_event2 = EventEnvelope::new(
+            iri_builder.event_schema("ImagePushed", 1),
+            "ImagePushed",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "digest": "sha256:new222",
+                "size_bytes": 2048_u64,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+            }),
+        );
+        projector.project(&push_event2).await.unwrap();
+
+        // Update tag to point to new digest
+        let update_event = EventEnvelope::new(
+            iri_builder.event_schema("ImageTagUpdated", 1),
+            "ImageTagUpdated",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "repository": "myapp/api",
+                "tag": "latest",
+                "previous_digest": "sha256:old111",
+                "new_digest": "sha256:new222",
+            }),
+        );
+        projector.project(&update_event).await.unwrap();
+
+        // Verify the tag now points to the new image
+        let result = projector
+            .query(&format!(
+                "SELECT ?target WHERE {{ ?tag <{PICLOUD_NS}tagName> \"latest\" . ?tag <{PICLOUD_NS}pointsToDigest> ?target }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        let target_iri = result.bindings[0]["target"]["value"].as_str().unwrap();
+        assert!(target_iri.contains("sha256:new222"), "tag should point to new digest, got: {target_iri}");
+    }
+
+    #[tokio::test]
+    async fn test_project_registry_gc_started() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        let event = EventEnvelope::new(
+            iri_builder.event_schema("RegistryGCStarted", 1),
+            "RegistryGCStarted",
+            iri_builder.cluster_root(),
+            None,
+            Uuid::new_v4(),
+            serde_json::json!({
+                "scheduled_at": "2026-04-10T12:00:00Z",
+            }),
+        );
+        projector.project(&event).await.unwrap();
+
+        // Check GC resource was created with running status
+        let result = projector
+            .query(&format!(
+                "SELECT ?gc ?status WHERE {{ ?gc <{RDF_TYPE}> <{PICLOUD_NS}RegistryGC> . ?gc <{PICLOUD_NS}status> ?status }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["status"]["value"].as_str().unwrap(), "running");
+
+        // Check scheduled_at
+        let result = projector
+            .query(&format!(
+                "SELECT ?at WHERE {{ ?gc <{RDF_TYPE}> <{PICLOUD_NS}RegistryGC> . ?gc <{PICLOUD_NS}scheduledAt> ?at }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["at"]["value"].as_str().unwrap(), "2026-04-10T12:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn test_project_registry_gc_completed() {
+        let projector = OxigraphProjector::new().unwrap();
+        let iri_builder = make_iri_builder();
+
+        let correlation = Uuid::new_v4();
+
+        // Start GC
+        let start_event = EventEnvelope::new(
+            iri_builder.event_schema("RegistryGCStarted", 1),
+            "RegistryGCStarted",
+            iri_builder.cluster_root(),
+            None,
+            correlation,
+            serde_json::json!({
+                "scheduled_at": "2026-04-10T12:00:00Z",
+            }),
+        );
+        projector.project(&start_event).await.unwrap();
+
+        // Complete GC
+        let complete_event = EventEnvelope::new(
+            iri_builder.event_schema("RegistryGCCompleted", 1),
+            "RegistryGCCompleted",
+            iri_builder.cluster_root(),
+            None,
+            correlation,
+            serde_json::json!({
+                "blobs_deleted": 42_u64,
+                "bytes_reclaimed": 1073741824_u64,
+                "duration_ms": 3500_u64,
+            }),
+        );
+        projector.project(&complete_event).await.unwrap();
+
+        // Status should be "completed"
+        let result = projector
+            .query(&format!(
+                "SELECT ?status WHERE {{ ?gc <{RDF_TYPE}> <{PICLOUD_NS}RegistryGC> . ?gc <{PICLOUD_NS}status> ?status }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["status"]["value"].as_str().unwrap(), "completed");
+
+        // Check blobs_deleted and bytes_reclaimed
+        let result = projector
+            .query(&format!(
+                "SELECT ?blobs ?bytes WHERE {{ ?gc <{RDF_TYPE}> <{PICLOUD_NS}RegistryGC> . ?gc <{PICLOUD_NS}blobsDeleted> ?blobs . ?gc <{PICLOUD_NS}bytesReclaimed> ?bytes }}"
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.bindings.len(), 1);
+        assert_eq!(result.bindings[0]["blobs"]["value"].as_str().unwrap(), "42");
+        assert_eq!(result.bindings[0]["bytes"]["value"].as_str().unwrap(), "1073741824");
     }
 }

@@ -5,6 +5,8 @@
 //! Slices communicate at runtime via the event log.
 
 pub mod implementation;
+pub mod ca;
+pub mod dns;
 
 pub use implementation::{
     InMemoryDnsRegistry, NodeCertificate, PlatformCa, ServiceCertificate,

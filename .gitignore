@@ -7,3 +7,4 @@ Cargo.lock
 *.key
 *.crt
 .DS_Store
+cluster-local.toml

@@ -12,6 +12,8 @@ members = [
     "crates/picloud-sdk-gen",
     "crates/picloud-cli",
     "crates/picloud-compiler",
+    "crates/picloud-registry",
+    "crates/picloud-test",
     "src",
 ]
 resolver = "2"
@@ -78,12 +80,24 @@ p256         = { version = "0.13", features = ["ecdsa"] }
 # FIDO2 / CTAP2
 ctap-hid-fido2 = "3.5"
 
+# CBOR (COSE key parsing for passkeys)
+ciborium     = "0.2"
+
+# XML parsing (S3 ListBucketResult)
+quick-xml    = { version = "0.37", features = ["serialize"] }
+
+# DNS wire format
+hickory-proto = "0.25"
+
 # Observability
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # CLI
 clap         = { version = "4", features = ["derive", "env"] }
+
+# Config
+toml         = "0.8"
 
 # POSIX
 libc         = "0.2"
@@ -104,6 +118,7 @@ picloud-http     = { path = "crates/picloud-http" }
 picloud-sdk-gen  = { path = "crates/picloud-sdk-gen" }
 picloud-cli      = { path = "crates/picloud-cli" }
 picloud-compiler = { path = "crates/picloud-compiler" }
+picloud-registry = { path = "crates/picloud-registry" }
 
 [profile.release]
 opt-level     = 3

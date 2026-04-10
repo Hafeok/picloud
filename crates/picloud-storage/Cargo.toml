@@ -18,4 +18,5 @@ uuid    = { workspace = true }
 bytes   = { workspace = true }
 reqwest = { workspace = true }
 base64  = { workspace = true }
-chrono  = { workspace = true }
+chrono    = { workspace = true }
+quick-xml = { workspace = true }

@@ -26,12 +26,13 @@ use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
 use picloud_domain::parser::{ResourceDeclaration, ResourceFile};
 use picloud_domain::traits::{
-    ClusterMembership, EventFilter, EventLog, IdentityProvider, StateProjector,
-    StorageBackend, WorkloadScheduler,
+    CertificateAuthority, ClusterMembership, EventFilter, EventLog, IdentityProvider,
+    RegistryBackend, StateProjector, StorageBackend, WorkloadScheduler,
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+use base64::Engine;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -152,6 +153,12 @@ pub struct PiCloudHttpServer {
     pub telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
     /// Root directory containing volume subdirectories (for storage sync endpoints).
     pub storage_path: Option<PathBuf>,
+    /// Certificate authority for node enrollment (ADR-053).
+    pub ca: Option<Arc<dyn CertificateAuthority>>,
+    /// Drain state for graceful connection draining (ADR-048).
+    pub drain_state: Arc<crate::proxy::DrainState>,
+    /// OCI registry backend (ADR-054).
+    pub registry: Option<Arc<dyn RegistryBackend>>,
 }
 
 impl PiCloudHttpServer {
@@ -172,7 +179,22 @@ impl PiCloudHttpServer {
             otel_stream: None,
             telemetry_store: None,
             storage_path: None,
+            ca: None,
+            drain_state: Arc::new(crate::proxy::DrainState::new()),
+            registry: None,
         }
+    }
+
+    /// Set the OCI registry backend (ADR-054).
+    pub fn with_registry(mut self, registry: Arc<dyn RegistryBackend>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Set the certificate authority for node enrollment (ADR-053).
+    pub fn with_ca(mut self, ca: Arc<dyn CertificateAuthority>) -> Self {
+        self.ca = Some(ca);
+        self
     }
 
     /// Set the storage path for internal storage sync endpoints.
@@ -308,6 +330,7 @@ impl PiCloudHttpServer {
             .route("/auth/login/begin", post(handle_login_begin))
             .route("/auth/login/complete", post(handle_login_complete))
             .route("/auth/enroll", post(handle_enroll))
+            .route("/api/enroll-node", post(handle_node_enroll))
             .route("/auth/device/begin", post(handle_device_begin))
             .route("/auth/device/poll", post(handle_device_poll))
             // --- Internal storage sync routes ---
@@ -323,6 +346,9 @@ impl PiCloudHttpServer {
             .route("/otel", post(handle_otel_ingest))
             .route("/telemetry/spans", get(handle_telemetry_spans))
             .route("/telemetry/metrics", get(handle_telemetry_metrics))
+            // --- OCI Distribution API v2 routes (ADR-054) ---
+            .route("/v2/", get(handle_v2_check))
+            .route("/v2/*path", get(handle_v2_dispatch).head(handle_v2_dispatch).put(handle_v2_put).post(handle_v2_post).delete(handle_v2_delete))
             .fallback(handle_ingress_proxy)
             .with_state(AppState {
                 cluster_root_iri,
@@ -336,6 +362,9 @@ impl PiCloudHttpServer {
                 otel_stream: self.otel_stream.clone(),
                 telemetry_store: self.telemetry_store.clone(),
                 storage_path: self.storage_path.clone(),
+                ca: self.ca.clone(),
+                drain_state: self.drain_state.clone(),
+                registry: self.registry.clone(),
             });
 
         // Merge any extra routes (e.g. Raft RPC endpoints from picloud-cluster)
@@ -402,6 +431,67 @@ struct AppState {
     telemetry_store: Option<Arc<dyn picloud_domain::traits::TelemetryStore>>,
     /// Root directory containing volume subdirectories (for storage sync endpoints).
     storage_path: Option<PathBuf>,
+    /// Certificate authority for node enrollment (ADR-053).
+    ca: Option<Arc<dyn CertificateAuthority>>,
+    /// Drain state for graceful connection draining (ADR-048).
+    drain_state: Arc<crate::proxy::DrainState>,
+    /// OCI registry backend (ADR-054).
+    registry: Option<Arc<dyn RegistryBackend>>,
+}
+
+// ---------------------------------------------------------------------------
+// Audience validation (ADR-051)
+// ---------------------------------------------------------------------------
+
+/// Extract a bearer token from the Authorization header and validate the
+/// audience claim against the expected product. Returns `None` if no token
+/// is present (anonymous access), or `Some(Err(Response))` if the audience
+/// doesn't match, or `Some(Ok(identity))` if valid.
+async fn validate_product_audience(
+    headers: &HeaderMap,
+    state: &AppState,
+    product_name: &str,
+) -> Option<std::result::Result<picloud_domain::traits::ValidatedIdentity, Response>> {
+    let auth_header = headers.get(header::AUTHORIZATION)?;
+    let auth_str = auth_header.to_str().ok()?;
+    if !auth_str.starts_with("Bearer ") {
+        return None;
+    }
+    let token = &auth_str[7..];
+
+    let iam = state.iam.as_ref()?;
+    match iam.validate_token(token).await {
+        Ok(identity) => {
+            // Check audience matches the target product
+            if let Some(ref aud) = identity.audience {
+                let expected = format!(
+                    "https://{}/products/{}",
+                    state.cluster_domain.0, product_name
+                );
+                if *aud != expected
+                    && *aud != format!("https://{}", state.cluster_domain.0)
+                {
+                    return Some(Err((
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({
+                            "error": "invalid_audience",
+                            "error_description": format!(
+                                "Token audience '{}' does not match product '{}'",
+                                aud, product_name
+                            ),
+                        })),
+                    )
+                        .into_response()));
+                }
+            }
+            Some(Ok(identity))
+        }
+        Err(_) => Some(Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid_token" })),
+        )
+            .into_response())),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +659,11 @@ async fn handle_product(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
+    // ADR-051: Validate audience claim on bearer token
+    if let Some(Err(rejection)) = validate_product_audience(&headers, &state, &name).await {
+        return rejection;
+    }
+
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
     let product_iri = iri_builder.product(&name);
@@ -615,6 +710,11 @@ async fn handle_resource(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path((product, resource_type, resource_name)): Path<(String, String, String)>,
 ) -> Response {
+    // ADR-051: Validate audience claim on bearer token
+    if let Some(Err(rejection)) = validate_product_audience(&headers, &state, &product).await {
+        return rejection;
+    }
+
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
     let resource_iri = iri_builder.resource(&product, &resource_type, &resource_name);
@@ -1637,6 +1737,359 @@ async fn handle_cluster_graph(
 // ---------------------------------------------------------------------------
 
 /// Catch-all handler that checks the ingress routing table and proxies
+// ---------------------------------------------------------------------------
+// OCI Distribution API v2 handlers (ADR-054)
+// ---------------------------------------------------------------------------
+
+/// Build the OCI `WWW-Authenticate` header value per the Distribution spec.
+fn oci_www_authenticate(state: &AppState) -> String {
+    format!(
+        "Bearer realm=\"https://{}/v2/token\",service=\"{}\"",
+        state.cluster_domain.0, state.cluster_domain.0,
+    )
+}
+
+/// OCI auth error response: 401 Unauthorized with WWW-Authenticate header.
+fn oci_unauthorized(state: &AppState, message: &str) -> Response {
+    let www_auth = oci_www_authenticate(state);
+    let body = serde_json::json!({
+        "errors": [{
+            "code": "UNAUTHORIZED",
+            "message": message,
+        }]
+    });
+    (
+        StatusCode::UNAUTHORIZED,
+        [
+            (header::WWW_AUTHENTICATE, www_auth),
+            (header::CONTENT_TYPE, "application/json".to_string()),
+        ],
+        serde_json::to_vec(&body).unwrap_or_default(),
+    )
+        .into_response()
+}
+
+/// OCI auth error response: 403 Forbidden (valid token, insufficient scope).
+fn oci_forbidden(message: &str) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "errors": [{
+                "code": "DENIED",
+                "message": message,
+            }]
+        })),
+    )
+        .into_response()
+}
+
+/// Extract and validate bearer token for OCI registry endpoints.
+/// Returns `Ok(identity)` on success, or an error `Response` on failure.
+async fn validate_oci_token(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> std::result::Result<picloud_domain::traits::ValidatedIdentity, Response> {
+    let iam = match state.iam.as_ref() {
+        Some(iam) => iam,
+        None => return Err(oci_unauthorized(state, "authentication required")),
+    };
+
+    let auth_header = match headers.get(header::AUTHORIZATION) {
+        Some(h) => h,
+        None => return Err(oci_unauthorized(state, "authentication required")),
+    };
+
+    let auth_str = match auth_header.to_str() {
+        Ok(s) => s,
+        Err(_) => return Err(oci_unauthorized(state, "invalid authorization header")),
+    };
+
+    if !auth_str.starts_with("Bearer ") {
+        return Err(oci_unauthorized(state, "bearer token required"));
+    }
+
+    let token = &auth_str[7..];
+    match iam.validate_token(token).await {
+        Ok(identity) => Ok(identity),
+        Err(_) => Err(oci_unauthorized(state, "invalid or expired token")),
+    }
+}
+
+/// Check that a validated identity has the required OCI scope (pull, push, or delete).
+fn require_oci_scope(
+    identity: &picloud_domain::traits::ValidatedIdentity,
+    required: &str,
+) -> std::result::Result<(), Response> {
+    // Platform admins (role "admin") bypass scope checks
+    if identity.roles.iter().any(|r| r == "admin") {
+        return Ok(());
+    }
+    // Check scopes list
+    if identity.scopes.iter().any(|s| s == required || s == "*") {
+        return Ok(());
+    }
+    // Check permissions list (some tokens use permissions instead of scopes)
+    if identity.permissions.iter().any(|p| p == required || p == "*") {
+        return Ok(());
+    }
+    Err(oci_forbidden(&format!("insufficient scope: {required} required")))
+}
+
+/// GET /v2/ — OCI version check. Returns 200 if the registry is available.
+/// Authentication is required but any valid token is sufficient.
+async fn handle_v2_check(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    if state.registry.is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Err(resp) = validate_oci_token(&headers, &state).await {
+        return resp;
+    }
+    (StatusCode::OK, Json(serde_json::json!({}))).into_response()
+}
+
+/// Dispatch GET/HEAD requests on /v2/* paths.
+/// OCI Distribution paths:
+///   /v2/{name}/manifests/{reference}
+///   /v2/{name}/blobs/{digest}
+///   /v2/{name}/tags/list
+/// Requires `pull` scope.
+async fn handle_v2_dispatch(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    method: Method,
+    Path(path): Path<String>,
+) -> Response {
+    let Some(ref registry) = state.registry else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let identity = match validate_oci_token(&headers, &state).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = require_oci_scope(&identity, "pull") {
+        return resp;
+    }
+
+    // Parse the OCI path: {name}/manifests/{ref} or {name}/blobs/{digest} or {name}/tags/list
+    if let Some((repo, rest)) = split_oci_path(&path, "manifests") {
+        match registry.get_manifest(&repo, &rest).await {
+            Ok((content_type, data)) => {
+                let digest = format!("sha256:{}", sha2_hex(&data));
+                let mut resp = (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, content_type),
+                     (header::HeaderName::from_static("docker-content-digest"), digest)],
+                ).into_response();
+                if method == Method::HEAD {
+                    *resp.body_mut() = axum::body::Body::empty();
+                } else {
+                    *resp.body_mut() = axum::body::Body::from(data);
+                }
+                resp
+            }
+            Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                "errors": [{"code": "MANIFEST_UNKNOWN", "message": "manifest unknown"}]
+            }))).into_response(),
+        }
+    } else if let Some((repo, digest)) = split_oci_path(&path, "blobs") {
+        match registry.get_blob(&digest).await {
+            Ok(data) => {
+                let len = data.len();
+                let mut resp = (StatusCode::OK, [
+                    (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                    (header::CONTENT_LENGTH, len.to_string()),
+                    (header::HeaderName::from_static("docker-content-digest"), digest),
+                ]).into_response();
+                if method == Method::HEAD {
+                    *resp.body_mut() = axum::body::Body::empty();
+                } else {
+                    *resp.body_mut() = axum::body::Body::from(data);
+                }
+                resp
+            }
+            Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                "errors": [{"code": "BLOB_UNKNOWN", "message": "blob unknown"}]
+            }))).into_response(),
+        }
+    } else if path.ends_with("/tags/list") {
+        let repo = path.trim_end_matches("/tags/list");
+        match registry.list_tags(repo).await {
+            Ok(tags) => (StatusCode::OK, Json(serde_json::json!({
+                "name": repo,
+                "tags": tags,
+            }))).into_response(),
+            Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                "errors": [{"code": "NAME_UNKNOWN", "message": "repository unknown"}]
+            }))).into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+/// PUT on /v2/* — manifest push or blob upload completion.
+/// Requires `push` scope.
+async fn handle_v2_put(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+    body: axum::body::Body,
+) -> Response {
+    let Some(ref registry) = state.registry else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let identity = match validate_oci_token(&headers, &state).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = require_oci_scope(&identity, "push") {
+        return resp;
+    }
+
+    let body_bytes = match axum::body::to_bytes(body, 512 * 1024 * 1024).await {
+        Ok(b) => b.to_vec(),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "errors": [{"code": "SIZE_INVALID", "message": format!("{e}")}]
+        }))).into_response(),
+    };
+
+    if let Some((repo, reference)) = split_oci_path(&path, "manifests") {
+        // PUT manifest
+        let content_type = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/vnd.oci.image.manifest.v1+json");
+
+        match registry.put_manifest(&repo, &reference, content_type, body_bytes).await {
+            Ok(digest) => {
+                let location = format!("/v2/{repo}/manifests/{digest}");
+                (StatusCode::CREATED, [
+                    (header::LOCATION, location),
+                    (header::HeaderName::from_static("docker-content-digest"), digest),
+                ]).into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "errors": [{"code": "MANIFEST_INVALID", "message": e.to_string()}]
+            }))).into_response(),
+        }
+    } else if path.contains("/blobs/uploads/") {
+        // PUT blob upload complete — digest in query string
+        // The digest should be provided, but we compute it anyway
+        let digest = format!("sha256:{}", sha2_hex(&body_bytes));
+        match registry.put_blob(&digest, body_bytes).await {
+            Ok(()) => (StatusCode::CREATED, [
+                (header::HeaderName::from_static("docker-content-digest"), digest),
+            ]).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "errors": [{"code": "BLOB_UPLOAD_INVALID", "message": e.to_string()}]
+            }))).into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+/// POST on /v2/* — start blob upload.
+/// Requires `push` scope.
+async fn handle_v2_post(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(path): Path<String>,
+) -> Response {
+    let Some(ref registry) = state.registry else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let identity = match validate_oci_token(&headers, &state).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = require_oci_scope(&identity, "push") {
+        return resp;
+    }
+
+    if path.ends_with("/blobs/uploads/") || path.ends_with("/blobs/uploads") {
+        let repo = path
+            .trim_end_matches('/')
+            .trim_end_matches("/blobs/uploads")
+            .trim_end_matches('/');
+        match registry.start_blob_upload(repo).await {
+            Ok(uuid) => {
+                let location = format!("/v2/{repo}/blobs/uploads/{uuid}");
+                (StatusCode::ACCEPTED, [
+                    (header::LOCATION, location),
+                    (header::HeaderName::from_static("docker-upload-uuid"), uuid),
+                ]).into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "errors": [{"code": "BLOB_UPLOAD_UNKNOWN", "message": e.to_string()}]
+            }))).into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+/// DELETE on /v2/* — manifest delete.
+/// Requires `delete` scope.
+async fn handle_v2_delete(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(path): Path<String>,
+) -> Response {
+    let Some(ref registry) = state.registry else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let identity = match validate_oci_token(&headers, &state).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = require_oci_scope(&identity, "delete") {
+        return resp;
+    }
+
+    if let Some((repo, reference)) = split_oci_path(&path, "manifests") {
+        match registry.delete_manifest(&repo, &reference).await {
+            Ok(()) => StatusCode::ACCEPTED.into_response(),
+            Err(e) => (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                "errors": [{"code": "MANIFEST_UNKNOWN", "message": e.to_string()}]
+            }))).into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+/// Split an OCI Distribution path into (repository, reference).
+/// E.g. "photo-app/api/manifests/v1.0" -> Some(("photo-app/api", "v1.0"))
+fn split_oci_path(path: &str, segment: &str) -> Option<(String, String)> {
+    let marker = format!("/{segment}/");
+    let idx = path.find(&marker)?;
+    let repo = &path[..idx];
+    let reference = &path[idx + marker.len()..];
+    if repo.is_empty() || reference.is_empty() {
+        return None;
+    }
+    Some((repo.to_string(), reference.to_string()))
+}
+
+/// Compute SHA-256 hex digest of data.
+fn sha2_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(data);
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Ingress proxy (fallback)
+// ---------------------------------------------------------------------------
+
 /// matching requests to the workload's local port.
 ///
 /// When a native IngressRouter (ADR-048) is configured, it is used for
@@ -1649,6 +2102,23 @@ async fn handle_ingress_proxy(
     headers: HeaderMap,
     body: axum::body::Body,
 ) -> Response {
+    // ADR-048: Check drain state — reject new requests when draining
+    if state.drain_state.is_draining() {
+        let mut resp = (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "service_unavailable",
+                "message": "node is draining — retry on another node",
+            })),
+        )
+            .into_response();
+        resp.headers_mut().insert(
+            header::RETRY_AFTER,
+            crate::proxy::RETRY_AFTER_SECONDS.parse().unwrap(),
+        );
+        return resp;
+    }
+
     // ADR-048: Use the native ingress router when available
     if let Some(ref router) = state.ingress_router {
         return crate::proxy::handle_proxy(router.clone(), method, uri, headers, body).await;
@@ -2548,6 +3018,70 @@ async fn handle_enroll(
             Json(serde_json::json!({ "error": reason })),
         )
             .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/enroll-node — Node certificate enrollment (ADR-053).
+///
+/// A new node submits a CSR to get signed by the cluster CA.
+/// In Auto mode, the CSR is signed immediately.
+/// In Token mode, the request must include a valid enrollment token.
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct NodeEnrollRequest {
+    /// DER-encoded CSR (base64)
+    csr_der: String,
+    /// Hostname of the new node
+    node_name: String,
+    /// IP address of the new node
+    node_ip: String,
+    /// Enrollment token (required in Token mode)
+    #[serde(default)]
+    enrollment_token: Option<String>,
+    /// Cluster ID the node expects to join
+    cluster_id: Uuid,
+}
+
+async fn handle_node_enroll(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<NodeEnrollRequest>,
+) -> Response {
+    let Some(ref ca) = state.ca else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "certificate authority not available" })),
+        )
+            .into_response();
+    };
+
+    // Decode the CSR from base64
+    let csr_der = match base64::engine::general_purpose::STANDARD.decode(&req.csr_der) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("invalid CSR encoding: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    // Sign the node's CSR
+    match ca.sign_node_csr(&csr_der, &req.node_name, &req.node_ip).await {
+        Ok(signed) => {
+            let body = serde_json::json!({
+                "node_cert_pem": signed.cert_pem,
+                "ca_cert_pem": ca.ca_cert_pem(),
+                "expires_at": signed.expires_at.to_rfc3339(),
+                "fingerprint": signed.fingerprint,
+            });
+            (StatusCode::OK, Json(body)).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
@@ -4258,5 +4792,244 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    // -- OCI Registry Auth tests (ADR-054) --
+
+    #[tokio::test]
+    async fn v2_check_returns_401_without_token() {
+        // Server with registry but no IAM -> returns 401 because auth is required
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/v2/")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // Without registry, returns 404; without IAM but with registry concept,
+        // returns 401. Since test_server has no registry, it returns 404.
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn v2_check_returns_401_without_token_with_registry() {
+        use picloud_domain::error::Result;
+        use picloud_domain::traits::{GarbageCollectionResult, RegistryStats};
+
+        // Minimal mock registry
+        struct MockRegistry;
+
+        #[async_trait::async_trait]
+        impl RegistryBackend for MockRegistry {
+            async fn put_blob(&self, _: &str, _: Vec<u8>) -> Result<()> { Ok(()) }
+            async fn get_blob(&self, _: &str) -> Result<Vec<u8>> { Ok(vec![]) }
+            async fn blob_exists(&self, _: &str) -> Result<bool> { Ok(false) }
+            async fn delete_blob(&self, _: &str) -> Result<()> { Ok(()) }
+            async fn put_manifest(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> Result<String> { Ok(String::new()) }
+            async fn get_manifest(&self, _: &str, _: &str) -> Result<(String, Vec<u8>)> { Ok((String::new(), vec![])) }
+            async fn delete_manifest(&self, _: &str, _: &str) -> Result<()> { Ok(()) }
+            async fn list_tags(&self, _: &str) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn list_repositories(&self) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn start_blob_upload(&self, _: &str) -> Result<String> { Ok(String::new()) }
+            async fn garbage_collect(&self) -> Result<GarbageCollectionResult> {
+                Ok(GarbageCollectionResult { blobs_scanned: 0, blobs_deleted: 0, bytes_freed: 0, duration_ms: 0 })
+            }
+            async fn stats(&self) -> Result<RegistryStats> {
+                Ok(RegistryStats { total_blobs: 0, total_repositories: 0, storage_used_bytes: 0 })
+            }
+        }
+
+        let server = test_server().with_registry(Arc::new(MockRegistry));
+        let app = server.build_router();
+
+        // No token -> 401
+        let req = Request::builder()
+            .uri("/v2/")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Check WWW-Authenticate header is present
+        let www_auth = resp.headers().get(header::WWW_AUTHENTICATE).unwrap().to_str().unwrap();
+        assert!(www_auth.contains("Bearer realm="));
+        assert!(www_auth.contains("picloud.local"));
+    }
+
+    #[tokio::test]
+    async fn v2_dispatch_returns_401_without_token() {
+        use picloud_domain::error::Result;
+        use picloud_domain::traits::{GarbageCollectionResult, RegistryStats};
+
+        struct MockRegistry;
+
+        #[async_trait::async_trait]
+        impl RegistryBackend for MockRegistry {
+            async fn put_blob(&self, _: &str, _: Vec<u8>) -> Result<()> { Ok(()) }
+            async fn get_blob(&self, _: &str) -> Result<Vec<u8>> { Ok(vec![]) }
+            async fn blob_exists(&self, _: &str) -> Result<bool> { Ok(false) }
+            async fn delete_blob(&self, _: &str) -> Result<()> { Ok(()) }
+            async fn put_manifest(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> Result<String> { Ok(String::new()) }
+            async fn get_manifest(&self, _: &str, _: &str) -> Result<(String, Vec<u8>)> { Ok((String::new(), vec![])) }
+            async fn delete_manifest(&self, _: &str, _: &str) -> Result<()> { Ok(()) }
+            async fn list_tags(&self, _: &str) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn list_repositories(&self) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn start_blob_upload(&self, _: &str) -> Result<String> { Ok(String::new()) }
+            async fn garbage_collect(&self) -> Result<GarbageCollectionResult> {
+                Ok(GarbageCollectionResult { blobs_scanned: 0, blobs_deleted: 0, bytes_freed: 0, duration_ms: 0 })
+            }
+            async fn stats(&self) -> Result<RegistryStats> {
+                Ok(RegistryStats { total_blobs: 0, total_repositories: 0, storage_used_bytes: 0 })
+            }
+        }
+
+        let server = test_server().with_registry(Arc::new(MockRegistry));
+        let app = server.build_router();
+
+        // GET /v2/myrepo/tags/list without token -> 401
+        let req = Request::builder()
+            .uri("/v2/myrepo/tags/list")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn v2_put_returns_401_without_token() {
+        use picloud_domain::error::Result;
+        use picloud_domain::traits::{GarbageCollectionResult, RegistryStats};
+
+        struct MockRegistry;
+
+        #[async_trait::async_trait]
+        impl RegistryBackend for MockRegistry {
+            async fn put_blob(&self, _: &str, _: Vec<u8>) -> Result<()> { Ok(()) }
+            async fn get_blob(&self, _: &str) -> Result<Vec<u8>> { Ok(vec![]) }
+            async fn blob_exists(&self, _: &str) -> Result<bool> { Ok(false) }
+            async fn delete_blob(&self, _: &str) -> Result<()> { Ok(()) }
+            async fn put_manifest(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> Result<String> { Ok(String::new()) }
+            async fn get_manifest(&self, _: &str, _: &str) -> Result<(String, Vec<u8>)> { Ok((String::new(), vec![])) }
+            async fn delete_manifest(&self, _: &str, _: &str) -> Result<()> { Ok(()) }
+            async fn list_tags(&self, _: &str) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn list_repositories(&self) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn start_blob_upload(&self, _: &str) -> Result<String> { Ok(String::new()) }
+            async fn garbage_collect(&self) -> Result<GarbageCollectionResult> {
+                Ok(GarbageCollectionResult { blobs_scanned: 0, blobs_deleted: 0, bytes_freed: 0, duration_ms: 0 })
+            }
+            async fn stats(&self) -> Result<RegistryStats> {
+                Ok(RegistryStats { total_blobs: 0, total_repositories: 0, storage_used_bytes: 0 })
+            }
+        }
+
+        let server = test_server().with_registry(Arc::new(MockRegistry));
+        let app = server.build_router();
+
+        // PUT /v2/myrepo/manifests/v1 without token -> 401
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/v2/myrepo/manifests/v1")
+            .body(Body::from("{}"))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn v2_delete_returns_401_without_token() {
+        use picloud_domain::error::Result;
+        use picloud_domain::traits::{GarbageCollectionResult, RegistryStats};
+
+        struct MockRegistry;
+
+        #[async_trait::async_trait]
+        impl RegistryBackend for MockRegistry {
+            async fn put_blob(&self, _: &str, _: Vec<u8>) -> Result<()> { Ok(()) }
+            async fn get_blob(&self, _: &str) -> Result<Vec<u8>> { Ok(vec![]) }
+            async fn blob_exists(&self, _: &str) -> Result<bool> { Ok(false) }
+            async fn delete_blob(&self, _: &str) -> Result<()> { Ok(()) }
+            async fn put_manifest(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> Result<String> { Ok(String::new()) }
+            async fn get_manifest(&self, _: &str, _: &str) -> Result<(String, Vec<u8>)> { Ok((String::new(), vec![])) }
+            async fn delete_manifest(&self, _: &str, _: &str) -> Result<()> { Ok(()) }
+            async fn list_tags(&self, _: &str) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn list_repositories(&self) -> Result<Vec<String>> { Ok(vec![]) }
+            async fn start_blob_upload(&self, _: &str) -> Result<String> { Ok(String::new()) }
+            async fn garbage_collect(&self) -> Result<GarbageCollectionResult> {
+                Ok(GarbageCollectionResult { blobs_scanned: 0, blobs_deleted: 0, bytes_freed: 0, duration_ms: 0 })
+            }
+            async fn stats(&self) -> Result<RegistryStats> {
+                Ok(RegistryStats { total_blobs: 0, total_repositories: 0, storage_used_bytes: 0 })
+            }
+        }
+
+        let server = test_server().with_registry(Arc::new(MockRegistry));
+        let app = server.build_router();
+
+        // DELETE /v2/myrepo/manifests/sha256:abc without token -> 401
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/v2/myrepo/manifests/sha256:abc")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn oci_scope_check_admin_bypasses() {
+        let identity = picloud_domain::traits::ValidatedIdentity {
+            identity_iri: ResourceIri::new("https://picloud.local/identities/admin").unwrap(),
+            product: None,
+            roles: vec!["admin".to_string()],
+            audience: None,
+            scopes: vec![],
+            permissions: vec![],
+        };
+        assert!(require_oci_scope(&identity, "pull").is_ok());
+        assert!(require_oci_scope(&identity, "push").is_ok());
+        assert!(require_oci_scope(&identity, "delete").is_ok());
+    }
+
+    #[test]
+    fn oci_scope_check_specific_scope() {
+        let identity = picloud_domain::traits::ValidatedIdentity {
+            identity_iri: ResourceIri::new("https://picloud.local/identities/user1").unwrap(),
+            product: None,
+            roles: vec!["user".to_string()],
+            audience: None,
+            scopes: vec!["pull".to_string()],
+            permissions: vec![],
+        };
+        assert!(require_oci_scope(&identity, "pull").is_ok());
+        assert!(require_oci_scope(&identity, "push").is_err());
+        assert!(require_oci_scope(&identity, "delete").is_err());
+    }
+
+    #[test]
+    fn oci_scope_check_wildcard_scope() {
+        let identity = picloud_domain::traits::ValidatedIdentity {
+            identity_iri: ResourceIri::new("https://picloud.local/identities/user1").unwrap(),
+            product: None,
+            roles: vec!["user".to_string()],
+            audience: None,
+            scopes: vec!["*".to_string()],
+            permissions: vec![],
+        };
+        assert!(require_oci_scope(&identity, "pull").is_ok());
+        assert!(require_oci_scope(&identity, "push").is_ok());
+        assert!(require_oci_scope(&identity, "delete").is_ok());
+    }
+
+    #[test]
+    fn oci_scope_check_permissions_fallback() {
+        let identity = picloud_domain::traits::ValidatedIdentity {
+            identity_iri: ResourceIri::new("https://picloud.local/identities/user1").unwrap(),
+            product: None,
+            roles: vec!["user".to_string()],
+            audience: None,
+            scopes: vec![],
+            permissions: vec!["push".to_string()],
+        };
+        assert!(require_oci_scope(&identity, "push").is_ok());
+        assert!(require_oci_scope(&identity, "pull").is_err());
     }
 }

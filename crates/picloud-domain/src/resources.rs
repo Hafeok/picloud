@@ -373,6 +373,9 @@ pub struct ClusterIdentity {
     pub created_at: DateTime<Utc>,
     /// SHA-256 fingerprint of the cluster CA certificate
     pub ca_fingerprint: String,
+    /// Node enrollment mode — immutable after init (ADR-053)
+    #[serde(default)]
+    pub enrollment_mode: crate::identity::EnrollmentMode,
 }
 
 /// An active alert — produced by inference rules (ADR-041).
@@ -457,6 +460,52 @@ pub fn builtin_alert_rules() -> Vec<BuiltInAlertRule> {
             message_template: "Disk usage above 90%",
         },
     ]
+}
+
+// --- OCI Registry resources (ADR-054) ---
+
+/// The embedded OCI registry — a first-class platform component.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Registry {
+    pub meta: ResourceMeta,
+    /// HTTP endpoint (e.g. "registry.picloud.local")
+    pub endpoint: String,
+    /// Total storage used by blobs in bytes
+    pub storage_used_bytes: u64,
+    /// Number of content-addressed blobs
+    pub blob_count: u64,
+    /// Number of image repositories
+    pub repository_count: u64,
+}
+
+/// An image repository within the registry, namespaced by product.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageRepository {
+    pub meta: ResourceMeta,
+    /// Product that owns this repository
+    pub product: String,
+    /// Repository name (e.g. "api-server")
+    pub name: String,
+    /// Number of tags in this repository
+    pub tag_count: u64,
+}
+
+/// A tagged image in a repository, pointing to a content-addressed digest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageTag {
+    pub meta: ResourceMeta,
+    /// Tag name (e.g. "1.0.0", "latest")
+    pub tag: String,
+    /// Content digest (e.g. "sha256:e3b0c44...")
+    pub digest: String,
+    /// Image size in bytes
+    pub size_bytes: u64,
+    /// OCI media type
+    pub media_type: String,
+    /// When this tag was pushed
+    pub pushed_at: DateTime<Utc>,
+    /// Identity that pushed this tag
+    pub pushed_by: Option<String>,
 }
 
 #[cfg(test)]
@@ -744,12 +793,27 @@ mod tests {
             domain: crate::iri::ClusterDomain("acme.local".to_string()),
             created_at: Utc::now(),
             ca_fingerprint: "sha256:deadbeef".to_string(),
+            enrollment_mode: crate::identity::EnrollmentMode::Token,
         };
         let json = serde_json::to_string(&identity).unwrap();
         let back: ClusterIdentity = serde_json::from_str(&json).unwrap();
         assert_eq!(back.cluster_id, identity.cluster_id);
         assert_eq!(back.domain.0, "acme.local");
         assert_eq!(back.ca_fingerprint, "sha256:deadbeef");
+        assert_eq!(back.enrollment_mode, crate::identity::EnrollmentMode::Token);
+    }
+
+    #[test]
+    fn cluster_identity_defaults_enrollment_mode_to_auto() {
+        // Backward compatibility: existing serialized data without enrollment_mode
+        let json = r#"{
+            "cluster_id": "00000000-0000-0000-0000-000000000001",
+            "domain": "picloud.local",
+            "created_at": "2026-01-01T00:00:00Z",
+            "ca_fingerprint": "sha256:abc"
+        }"#;
+        let back: ClusterIdentity = serde_json::from_str(json).unwrap();
+        assert_eq!(back.enrollment_mode, crate::identity::EnrollmentMode::Auto);
     }
 
     #[test]

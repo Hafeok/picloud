@@ -8,4 +8,5 @@ pub mod implementation;
 pub mod secrets;
 
 pub use implementation::{LocalIdentityProvider, StoredAppRegistration, StoredIdentity};
+// LocalIdentityProvider also implements picloud_domain::traits::TokenExchange (ADR-051)
 pub use secrets::InMemorySecretStore;

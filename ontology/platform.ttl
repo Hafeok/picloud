@@ -1,0 +1,339 @@
+# PiCloud Platform Ontology
+# https://picloud.local/ontology
+#
+# Defines all platform resource types, properties, and relationships.
+# This file is the source of truth for:
+#   - SHACL validation (shapes.ttl)
+#   - Documentation generation (picloud docs generate)
+#   - SDK generation (picloud sdk publish)
+#   - .picloud compiler type checking
+#
+# ADR-049: .picloud Format as Compiler Target
+
+@prefix pc:    <https://picloud.local/ontology#> .
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:   <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+
+# ─── Ontology declaration ────────────────────────────────────────────────────
+
+<https://picloud.local/ontology>
+    a owl:Ontology ;
+    rdfs:label "PiCloud Platform Ontology" ;
+    rdfs:comment "Defines all resource types, properties, and constraints for the PiCloud platform." ;
+    owl:versionInfo "0.1.0" .
+
+# ─── Resource status ─────────────────────────────────────────────────────────
+
+pc:ResourceStatus a rdfs:Class ;
+    rdfs:label "Resource Status" .
+
+pc:Declared      a pc:ResourceStatus ; rdfs:label "declared" .
+pc:Provisioning  a pc:ResourceStatus ; rdfs:label "provisioning" .
+pc:Ready         a pc:ResourceStatus ; rdfs:label "ready" .
+pc:Failed        a pc:ResourceStatus ; rdfs:label "failed" .
+pc:Deleting      a pc:ResourceStatus ; rdfs:label "deleting" .
+
+# ─── Common properties ───────────────────────────────────────────────────────
+
+pc:name        a rdf:Property ; rdfs:label "name" ; rdfs:domain rdfs:Resource ; rdfs:range xsd:string .
+pc:description a rdf:Property ; rdfs:label "description" ; rdfs:domain rdfs:Resource ; rdfs:range xsd:string .
+pc:status      a rdf:Property ; rdfs:label "status" ; rdfs:domain rdfs:Resource ; rdfs:range pc:ResourceStatus .
+pc:product     a rdf:Property ; rdfs:label "product" ; rdfs:domain rdfs:Resource ; rdfs:range pc:Product .
+pc:tag         a rdf:Property ; rdfs:label "tag" ; rdfs:domain rdfs:Resource ; rdfs:range pc:Tag .
+pc:createdAt   a rdf:Property ; rdfs:label "created at" ; rdfs:domain rdfs:Resource ; rdfs:range xsd:dateTime .
+pc:updatedAt   a rdf:Property ; rdfs:label "updated at" ; rdfs:domain rdfs:Resource ; rdfs:range xsd:dateTime .
+
+# ─── Tag ─────────────────────────────────────────────────────────────────────
+
+pc:Tag a rdfs:Class ;
+    rdfs:label "Tag" ;
+    rdfs:comment "A key:value label attachable to any platform resource (ADR-036)." .
+
+pc:tagKey   a rdf:Property ; rdfs:label "key" ;   rdfs:domain pc:Tag ; rdfs:range xsd:string .
+pc:tagValue a rdf:Property ; rdfs:label "value" ; rdfs:domain pc:Tag ; rdfs:range xsd:string .
+
+# ─── Product ─────────────────────────────────────────────────────────────────
+
+pc:Product a rdfs:Class ;
+    rdfs:label "Product" ;
+    rdfs:comment "A versioned, hermetically sealed deployment unit (ADR-016). Contains all resources for an application." .
+
+pc:version         a rdf:Property ; rdfs:label "version" ;       rdfs:domain pc:Product ; rdfs:range xsd:string .
+pc:sparqlEndpoint  a rdf:Property ; rdfs:label "SPARQL endpoint" ; rdfs:domain pc:Product ; rdfs:range xsd:anyURI .
+pc:ontologyIri     a rdf:Property ; rdfs:label "ontology IRI" ;  rdfs:domain pc:Product ; rdfs:range xsd:anyURI .
+pc:eventsEndpoint  a rdf:Property ; rdfs:label "events endpoint" ; rdfs:domain pc:Product ; rdfs:range xsd:anyURI .
+
+# ─── Container ───────────────────────────────────────────────────────────────
+
+pc:Container a rdfs:Class ;
+    rdfs:label "Container" ;
+    rdfs:comment "An OCI container workload scheduled on the cluster (ADR-010)." .
+
+pc:image          a rdf:Property ; rdfs:label "image" ;    rdfs:domain pc:Container ; rdfs:range xsd:string .
+pc:identity       a rdf:Property ; rdfs:label "identity" ; rdfs:domain pc:Container ; rdfs:range pc:WorkloadIdentity .
+pc:mount          a rdf:Property ; rdfs:label "mount" ;    rdfs:domain pc:Container ; rdfs:range pc:VolumeMount .
+pc:port           a rdf:Property ; rdfs:label "port" ;     rdfs:domain pc:Container ; rdfs:range pc:PortMapping .
+pc:otel           a rdf:Property ; rdfs:label "OTel config" ; rdfs:domain pc:Container ; rdfs:range pc:OtelConfig .
+pc:nodeId         a rdf:Property ; rdfs:label "node ID" ;  rdfs:domain pc:Container ; rdfs:range xsd:string .
+
+# ─── Volume ──────────────────────────────────────────────────────────────────
+
+pc:Volume a rdfs:Class ;
+    rdfs:label "Volume" ;
+    rdfs:comment "Block storage allocation with declared storage intent (ADR-024)." .
+
+pc:sizeGb       a rdf:Property ; rdfs:label "size (GB)" ; rdfs:domain pc:Volume ; rdfs:range xsd:integer .
+pc:durability   a rdf:Property ; rdfs:label "durability" ; rdfs:domain pc:Volume ; rdfs:range pc:DurabilityTier .
+pc:performance  a rdf:Property ; rdfs:label "performance" ; rdfs:domain pc:Volume ; rdfs:range pc:PerformanceTier .
+pc:snapshots    a rdf:Property ; rdfs:label "snapshots" ; rdfs:domain pc:Volume ; rdfs:range pc:SnapshotConfig .
+pc:offsite      a rdf:Property ; rdfs:label "offsite backup" ; rdfs:domain pc:Volume ; rdfs:range pc:OffsiteBackupConfig .
+pc:volumeType   a rdf:Property ; rdfs:label "volume type" ; rdfs:domain pc:Volume ; rdfs:range pc:VolumeType .
+
+# Durability tiers
+pc:DurabilityTier    a rdfs:Class ; rdfs:label "Durability Tier" .
+pc:FullReplication   a pc:DurabilityTier ; rdfs:label "full-replication" .
+pc:Quorum            a pc:DurabilityTier ; rdfs:label "quorum" .
+pc:Local             a pc:DurabilityTier ; rdfs:label "local" .
+pc:None              a pc:DurabilityTier ; rdfs:label "none" .
+
+# Performance tiers
+pc:PerformanceTier a rdfs:Class ; rdfs:label "Performance Tier" .
+pc:Standard        a pc:PerformanceTier ; rdfs:label "standard" .
+pc:Fast            a pc:PerformanceTier ; rdfs:label "fast" .
+pc:Archive         a pc:PerformanceTier ; rdfs:label "archive" .
+
+# Volume types
+pc:VolumeType  a rdfs:Class ; rdfs:label "Volume Type" .
+pc:Mounted     a pc:VolumeType ; rdfs:label "mounted" .
+pc:RawBlock    a pc:VolumeType ; rdfs:label "raw-block" .
+
+# ─── Snapshot config ─────────────────────────────────────────────────────────
+
+pc:SnapshotConfig a rdfs:Class ;
+    rdfs:label "Snapshot Configuration" ;
+    rdfs:comment "Point-in-time snapshot configuration for a volume (ADR-047)." .
+
+pc:snapshotEnabled  a rdf:Property ; rdfs:label "enabled" ;  rdfs:domain pc:SnapshotConfig ; rdfs:range xsd:boolean .
+pc:schedule         a rdf:Property ; rdfs:label "schedule" ; rdfs:domain pc:SnapshotConfig ; rdfs:range pc:SnapshotSchedule .
+pc:storageSecret    a rdf:Property ; rdfs:label "storage secret" ; rdfs:domain pc:SnapshotConfig ; rdfs:range xsd:string .
+pc:retention        a rdf:Property ; rdfs:label "retention" ; rdfs:domain pc:SnapshotConfig ; rdfs:range pc:SnapshotRetention .
+
+pc:SnapshotSchedule a rdfs:Class ; rdfs:label "Snapshot Schedule" .
+pc:Hourly  a pc:SnapshotSchedule ; rdfs:label "hourly" .
+pc:Daily   a pc:SnapshotSchedule ; rdfs:label "daily" .
+pc:Weekly  a pc:SnapshotSchedule ; rdfs:label "weekly" .
+
+pc:SnapshotRetention a rdfs:Class ; rdfs:label "Snapshot Retention" .
+pc:dailyCount   a rdf:Property ; rdfs:label "daily count" ;   rdfs:domain pc:SnapshotRetention ; rdfs:range xsd:integer .
+pc:weeklyCount  a rdf:Property ; rdfs:label "weekly count" ;  rdfs:domain pc:SnapshotRetention ; rdfs:range xsd:integer .
+pc:monthlyCount a rdf:Property ; rdfs:label "monthly count" ; rdfs:domain pc:SnapshotRetention ; rdfs:range xsd:integer .
+
+# ─── Offsite backup config ───────────────────────────────────────────────────
+
+pc:OffsiteBackupConfig a rdfs:Class ;
+    rdfs:label "Offsite Backup Configuration" ;
+    rdfs:comment "S3-compatible offsite backup configuration for a volume (ADR-047)." .
+
+pc:offsiteEnabled    a rdf:Property ; rdfs:label "enabled" ;      rdfs:domain pc:OffsiteBackupConfig ; rdfs:range xsd:boolean .
+pc:targetSecret      a rdf:Property ; rdfs:label "target secret" ; rdfs:domain pc:OffsiteBackupConfig ; rdfs:range xsd:string .
+pc:backupFrequency   a rdf:Property ; rdfs:label "frequency" ;    rdfs:domain pc:OffsiteBackupConfig ; rdfs:range pc:BackupFrequency .
+pc:backupEncryption  a rdf:Property ; rdfs:label "encryption" ;   rdfs:domain pc:OffsiteBackupConfig ; rdfs:range xsd:boolean .
+
+pc:BackupFrequency a rdfs:Class ; rdfs:label "Backup Frequency" .
+pc:DailyBackup  a pc:BackupFrequency ; rdfs:label "daily" .
+pc:WeeklyBackup a pc:BackupFrequency ; rdfs:label "weekly" .
+
+# ─── Feature flag ────────────────────────────────────────────────────────────
+
+pc:FeatureFlag a rdfs:Class ;
+    rdfs:label "Feature Flag" ;
+    rdfs:comment "Version-bound on/off feature flag (ADR-044)." .
+
+pc:flagEnabled    a rdf:Property ; rdfs:label "enabled" ;         rdfs:domain pc:FeatureFlag ; rdfs:range xsd:boolean .
+pc:flagVersionExpr a rdf:Property ; rdfs:label "version expression" ; rdfs:domain pc:FeatureFlag ; rdfs:range xsd:string .
+
+# ─── Config entry ────────────────────────────────────────────────────────────
+
+pc:ConfigEntry a rdfs:Class ;
+    rdfs:label "Configuration Entry" ;
+    rdfs:comment "A typed key-value configuration entry (ADR-043)." .
+
+pc:configKey   a rdf:Property ; rdfs:label "key" ;   rdfs:domain pc:ConfigEntry ; rdfs:range xsd:string .
+pc:configValue a rdf:Property ; rdfs:label "value" ; rdfs:domain pc:ConfigEntry ; rdfs:range xsd:string .
+pc:configType  a rdf:Property ; rdfs:label "type" ;  rdfs:domain pc:ConfigEntry ; rdfs:range pc:ConfigValueType .
+
+pc:ConfigValueType a rdfs:Class ; rdfs:label "Config Value Type" .
+pc:StringType  a pc:ConfigValueType ; rdfs:label "string" .
+pc:IntType     a pc:ConfigValueType ; rdfs:label "int" .
+pc:FloatType   a pc:ConfigValueType ; rdfs:label "float" .
+pc:BoolType    a pc:ConfigValueType ; rdfs:label "bool" .
+
+# ─── Inference rule ──────────────────────────────────────────────────────────
+
+pc:InferenceRule a rdfs:Class ;
+    rdfs:label "Inference Rule" ;
+    rdfs:comment "A SPARQL CONSTRUCT rule that derives new graph facts (ADR-038)." .
+
+pc:ruleScope          a rdf:Property ; rdfs:label "scope" ;          rdfs:domain pc:InferenceRule ; rdfs:range xsd:string .
+pc:triggerEvent       a rdf:Property ; rdfs:label "trigger event" ;  rdfs:domain pc:InferenceRule ; rdfs:range xsd:string .
+pc:reconciliation     a rdf:Property ; rdfs:label "reconciliation" ; rdfs:domain pc:InferenceRule ; rdfs:range xsd:boolean .
+pc:constructQuery     a rdf:Property ; rdfs:label "CONSTRUCT query" ; rdfs:domain pc:InferenceRule ; rdfs:range xsd:string .
+
+# ─── Alert ───────────────────────────────────────────────────────────────────
+
+pc:Alert a rdfs:Class ;
+    rdfs:label "Alert" ;
+    rdfs:comment "An active alert produced by an inference rule (ADR-041)." .
+
+pc:alertType      a rdf:Property ; rdfs:label "alert type" ;    rdfs:domain pc:Alert ; rdfs:range xsd:string .
+pc:alertSeverity  a rdf:Property ; rdfs:label "severity" ;      rdfs:domain pc:Alert ; rdfs:range pc:AlertSeverity .
+pc:alertMessage   a rdf:Property ; rdfs:label "message" ;       rdfs:domain pc:Alert ; rdfs:range xsd:string .
+pc:alertResource  a rdf:Property ; rdfs:label "resource" ;      rdfs:domain pc:Alert ; rdfs:range rdfs:Resource .
+pc:alertTimestamp a rdf:Property ; rdfs:label "timestamp" ;     rdfs:domain pc:Alert ; rdfs:range xsd:dateTime .
+
+pc:AlertSeverity a rdfs:Class ; rdfs:label "Alert Severity" .
+pc:InfoAlert     a pc:AlertSeverity ; rdfs:label "info" .
+pc:WarningAlert  a pc:AlertSeverity ; rdfs:label "warning" .
+pc:CriticalAlert a pc:AlertSeverity ; rdfs:label "critical" .
+
+# ─── Node ────────────────────────────────────────────────────────────────────
+
+pc:Node a rdfs:Class ;
+    rdfs:label "Node" ;
+    rdfs:comment "A cluster member — one Raspberry Pi running picloud-server." .
+
+pc:nodeAddress        a rdf:Property ; rdfs:label "address" ;           rdfs:domain pc:Node ; rdfs:range xsd:string .
+pc:isLeader           a rdf:Property ; rdfs:label "is leader" ;         rdfs:domain pc:Node ; rdfs:range xsd:boolean .
+pc:storageCapacityGb  a rdf:Property ; rdfs:label "storage capacity GB" ; rdfs:domain pc:Node ; rdfs:range xsd:decimal .
+pc:storageUsedGb      a rdf:Property ; rdfs:label "storage used GB" ;   rdfs:domain pc:Node ; rdfs:range xsd:decimal .
+pc:cpuUsagePercent    a rdf:Property ; rdfs:label "CPU usage %" ;       rdfs:domain pc:Node ; rdfs:range xsd:decimal .
+pc:memoryUsedMb       a rdf:Property ; rdfs:label "memory used MB" ;    rdfs:domain pc:Node ; rdfs:range xsd:decimal .
+pc:memoryTotalMb      a rdf:Property ; rdfs:label "memory total MB" ;   rdfs:domain pc:Node ; rdfs:range xsd:decimal .
+pc:cpuTempCelsius     a rdf:Property ; rdfs:label "CPU temperature °C" ; rdfs:domain pc:Node ; rdfs:range xsd:decimal .
+pc:metricsUpdatedAt   a rdf:Property ; rdfs:label "metrics updated at" ; rdfs:domain pc:Node ; rdfs:range xsd:dateTime .
+
+# ─── Group ───────────────────────────────────────────────────────────────────
+
+pc:Group a rdfs:Class ;
+    rdfs:label "Group" ;
+    rdfs:comment "A collection of identities sharing roles (ADR-037)." .
+
+pc:hasMember a rdf:Property ;
+    rdfs:label "has member" ;
+    rdfs:domain pc:Group ;
+    rdfs:range  pc:HumanIdentity ;
+    rdf:type    owl:TransitiveProperty .   # group membership is transitive
+
+pc:hasRole a rdf:Property ;
+    rdfs:label "has role" ;
+    rdfs:domain pc:Group ;
+    rdfs:range  pc:Role .
+
+# ─── OTel config ─────────────────────────────────────────────────────────────
+
+pc:OtelConfig a rdfs:Class ;
+    rdfs:label "OTel Configuration" ;
+    rdfs:comment "OpenTelemetry configuration for a workload (ADR-045)." .
+
+pc:otelTraces     a rdf:Property ; rdfs:label "traces" ;      rdfs:domain pc:OtelConfig ; rdfs:range xsd:boolean .
+pc:otelMetrics    a rdf:Property ; rdfs:label "metrics" ;     rdfs:domain pc:OtelConfig ; rdfs:range xsd:boolean .
+pc:otelLogs       a rdf:Property ; rdfs:label "logs" ;        rdfs:domain pc:OtelConfig ; rdfs:range xsd:boolean .
+pc:otelSampleRate a rdf:Property ; rdfs:label "sample rate" ; rdfs:domain pc:OtelConfig ; rdfs:range xsd:decimal .
+
+# ─── Product role ─────────────────────────────────────────────────────────────
+
+pc:ProductRole a rdfs:Class ;
+    rdfs:label "Product Role" ;
+    rdfs:comment "A role within a product — grants permissions and custom claims (ADR-051)." .
+
+pc:rolePermission a rdf:Property ; rdfs:label "permission" ; rdfs:domain pc:ProductRole ; rdfs:range xsd:string .
+pc:roleClaim      a rdf:Property ; rdfs:label "claim" ;      rdfs:domain pc:ProductRole ; rdfs:range pc:StaticClaim .
+# Inheritance uses rdfs:subClassOf — resolved transitively by OWL inference (ADR-039)
+
+# ─── Product scope ────────────────────────────────────────────────────────────
+
+pc:ProductScope a rdfs:Class ;
+    rdfs:label "Product Scope" ;
+    rdfs:comment "An OAuth scope within a product — maps to permissions and claims (ADR-051)." .
+
+pc:scopePermission a rdf:Property ; rdfs:label "permission" ; rdfs:domain pc:ProductScope ; rdfs:range xsd:string .
+pc:scopeClaim      a rdf:Property ; rdfs:label "claim" ;      rdfs:domain pc:ProductScope ; rdfs:range pc:StaticClaim .
+
+# ─── Static claim ─────────────────────────────────────────────────────────────
+
+pc:StaticClaim a rdfs:Class ;
+    rdfs:label "Static Claim" ;
+    rdfs:comment "A static key-value JWT claim added to tokens (ADR-051)." .
+
+pc:claimKey   a rdf:Property ; rdfs:label "key" ;   rdfs:domain pc:StaticClaim ; rdfs:range xsd:string .
+pc:claimValue a rdf:Property ; rdfs:label "value" ; rdfs:domain pc:StaticClaim ; rdfs:range xsd:string .
+
+# ─── M2M permission ───────────────────────────────────────────────────────────
+
+pc:M2mPermission a rdfs:Class ;
+    rdfs:label "M2M Permission" ;
+    rdfs:comment "Declares which products may request client_credentials tokens against this product (ADR-051)." .
+
+pc:m2mClient a rdf:Property ; rdfs:label "client product" ; rdfs:domain pc:M2mPermission ; rdfs:range pc:Product .
+pc:m2mScope  a rdf:Property ; rdfs:label "allowed scope" ; rdfs:domain pc:M2mPermission ; rdfs:range xsd:string .
+
+# ─── DNS properties (ADR-052) ─────────────────────────────────────────────────
+
+pc:hostname       a rdf:Property ;
+    rdfs:label   "hostname" ;
+    rdfs:comment "The DNS hostname for this resource within the tenant domain." ;
+    rdfs:domain  rdfs:Resource ;
+    rdfs:range   xsd:string .
+
+pc:ingressAddress a rdf:Property ;
+    rdfs:label   "ingress address" ;
+    rdfs:comment "The IPv4 address of the ingress for this product or node." ;
+    rdfs:domain  rdfs:Resource ;
+    rdfs:range   xsd:string .
+
+pc:targetAddress  a rdf:Property ;
+    rdfs:label   "target address" ;
+    rdfs:comment "The IPv4 address of the workload this ingress routes to." ;
+    rdfs:domain  pc:Ingress ;
+    rdfs:range   xsd:string .
+
+pc:ServiceEndpoint a rdfs:Class ;
+    rdfs:label   "Service Endpoint" ;
+    rdfs:comment "A well-known service endpoint for SRV record discovery." .
+
+pc:serviceType a rdf:Property ; rdfs:label "service type" ; rdfs:domain pc:ServiceEndpoint ; rdfs:range xsd:string .
+pc:protocol    a rdf:Property ; rdfs:label "protocol" ;     rdfs:domain pc:ServiceEndpoint ; rdfs:range xsd:string .
+pc:targetHostname a rdf:Property ; rdfs:label "target hostname" ; rdfs:domain pc:ServiceEndpoint ; rdfs:range xsd:string .
+
+# Well-known service endpoints registered automatically by the platform
+# _sparql._tcp.{product}.{domain}
+# _events._tcp.{product}.{domain}
+# _https._tcp.{domain}
+
+# ─── Certificate properties (ADR-053) ────────────────────────────────────────
+
+pc:certFingerprint  a rdf:Property ;
+    rdfs:label   "certificate fingerprint" ;
+    rdfs:domain  rdfs:Resource ;
+    rdfs:range   xsd:string .
+
+pc:certExpiresAt    a rdf:Property ;
+    rdfs:label   "certificate expires at" ;
+    rdfs:domain  rdfs:Resource ;
+    rdfs:range   xsd:dateTime .
+
+pc:enrollmentMode   a rdf:Property ;
+    rdfs:label   "enrollment mode" ;
+    rdfs:domain  pc:Cluster ;
+    rdfs:range   xsd:string .   # "auto" | "token"
+
+pc:Cluster a rdfs:Class ;
+    rdfs:label   "Cluster" ;
+    rdfs:comment "The PiCloud cluster identity." .
+
+pc:clusterId        a rdf:Property ; rdfs:label "cluster ID" ;    rdfs:domain pc:Cluster ; rdfs:range xsd:string .
+pc:clusterDomain    a rdf:Property ; rdfs:label "cluster domain" ; rdfs:domain pc:Cluster ; rdfs:range xsd:string .
+pc:caFingerprint    a rdf:Property ; rdfs:label "CA fingerprint" ; rdfs:domain pc:Cluster ; rdfs:range xsd:string .

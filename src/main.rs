@@ -7,9 +7,11 @@
 /// ADR-034: Vertical slice architecture with stable domain dependency
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use clap::Parser;
+use serde::Deserialize;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -25,25 +27,114 @@ use picloud_events::{PersistentEventLog, WriteThroughEventLog};
 use picloud_iam::{InMemorySecretStore, LocalIdentityProvider};
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
 use picloud_rdf::OxigraphProjector;
+use picloud_registry::LocalRegistryBackend;
 use picloud_storage::{LocalStorageBackend, StorageReplicator};
 use picloud_workload::ProcessScheduler;
 use picloud_http::{InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner};
 
-/// Server configuration, loaded from env or defaults
+/// CLI arguments — only `--config` is supported; everything else
+/// comes from the TOML file or environment variables.
+#[derive(Parser, Debug)]
+#[command(name = "picloud-server", about = "PiCloud server — runs on every node")]
+struct CliArgs {
+    /// Path to a TOML configuration file (optional).
+    /// Env vars always override values from the file.
+    #[arg(long = "config", value_name = "PATH")]
+    config: Option<PathBuf>,
+}
+
+/// TOML-deserializable platform configuration (ADR-056).
+///
+/// All fields are optional — missing fields fall back to defaults.
+/// Environment variables always override values loaded from the file.
+#[derive(Debug, Default, Deserialize)]
+struct PlatformConfig {
+    /// Root directory for all PiCloud data.
+    #[serde(default = "PlatformConfig::default_data_root")]
+    data_root: Option<String>,
+
+    /// HTTP/HTTPS listen port.
+    http_port: Option<u16>,
+
+    /// Authoritative DNS server port.
+    dns_port: Option<u16>,
+
+    /// Raft consensus port.
+    raft_port: Option<u16>,
+
+    /// Enrollment API port (new-node join).
+    enrollment_port: Option<u16>,
+
+    /// Cluster domain suffix.
+    domain: Option<String>,
+
+    /// Storage capacity limit (e.g. "200GB"). Parsed to a raw GB number.
+    storage_limit: Option<String>,
+}
+
+impl PlatformConfig {
+    fn default_data_root() -> Option<String> {
+        Some("/var/lib/picloud".to_string())
+    }
+
+    /// Load from a TOML file, returning `Default` if the path is `None`.
+    fn load(path: Option<&Path>) -> Self {
+        let Some(path) = path else {
+            return Self::default();
+        };
+        match std::fs::read_to_string(path) {
+            Ok(contents) => match toml::from_str::<PlatformConfig>(&contents) {
+                Ok(cfg) => {
+                    info!(path = %path.display(), "Loaded TOML config");
+                    cfg
+                }
+                Err(e) => {
+                    eprintln!("WARN: Failed to parse TOML config {}: {e}", path.display());
+                    Self::default()
+                }
+            },
+            Err(e) => {
+                eprintln!("WARN: Failed to read config file {}: {e}", path.display());
+                Self::default()
+            }
+        }
+    }
+
+    /// Parse `storage_limit` like "200GB" / "100gb" into a u64 GB value.
+    fn storage_limit_gb(&self) -> Option<u64> {
+        let s = self.storage_limit.as_deref()?;
+        let s = s.trim();
+        let numeric = s.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+        numeric.trim().parse::<u64>().ok()
+    }
+}
+
+/// Server configuration, loaded from TOML then env overrides.
 struct ServerConfig {
     node_id: Uuid,
     node_name: String,
     cluster_domain: ClusterDomain,
     http_port: u16,
+    dns_port: u16,
+    raft_port: u16,
+    enrollment_port: u16,
     bind_addr: IpAddr,
     events_path: PathBuf,
     storage_path: PathBuf,
     storage_capacity_gb: u64,
     rdf_path: PathBuf,
+    registry_path: PathBuf,
 }
 
 impl ServerConfig {
-    fn from_env() -> Self {
+    /// Build config with layered precedence: env > TOML > defaults.
+    fn from_toml_and_env(toml: &PlatformConfig) -> Self {
+        let data_root = std::env::var("PICLOUD_DATA_ROOT")
+            .ok()
+            .or_else(|| toml.data_root.clone())
+            .unwrap_or_else(|| "/var/lib/picloud".to_string());
+
+        // --- per-instance (env-only, never from TOML) ---
         let node_id = std::env::var("PICLOUD_NODE_ID")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -52,14 +143,36 @@ impl ServerConfig {
         let node_name = std::env::var("PICLOUD_NODE_NAME")
             .unwrap_or_else(|_| hostname().unwrap_or_else(|| format!("pi-{}", &node_id.to_string()[..8])));
 
+        // --- layered: env > TOML > default ---
         let cluster_domain = std::env::var("PICLOUD_DOMAIN")
+            .ok()
+            .or_else(|| toml.domain.clone())
             .map(ClusterDomain)
             .unwrap_or_default();
 
         let http_port = std::env::var("PICLOUD_HTTP_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
+            .or(toml.http_port)
             .unwrap_or(7443);
+
+        let dns_port = std::env::var("PICLOUD_DNS_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or(toml.dns_port)
+            .unwrap_or(53);
+
+        let raft_port = std::env::var("PICLOUD_RAFT_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or(toml.raft_port)
+            .unwrap_or(2380);
+
+        let enrollment_port = std::env::var("PICLOUD_ENROLLMENT_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or(toml.enrollment_port)
+            .unwrap_or(444);
 
         let bind_addr = std::env::var("PICLOUD_BIND_ADDR")
             .ok()
@@ -68,31 +181,40 @@ impl ServerConfig {
 
         let events_path = std::env::var("PICLOUD_EVENTS_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/events"));
+            .unwrap_or_else(|_| PathBuf::from(format!("{data_root}/events")));
 
         let storage_path = std::env::var("PICLOUD_STORAGE_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/storage"));
+            .unwrap_or_else(|_| PathBuf::from(format!("{data_root}/storage")));
 
         let storage_capacity_gb = std::env::var("PICLOUD_STORAGE_CAPACITY_GB")
             .ok()
             .and_then(|s| s.parse().ok())
+            .or_else(|| toml.storage_limit_gb())
             .unwrap_or(100);
 
         let rdf_path = std::env::var("PICLOUD_RDF_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/var/lib/picloud/rdf"));
+            .unwrap_or_else(|_| PathBuf::from(format!("{data_root}/rdf")));
+
+        let registry_path = std::env::var("PICLOUD_REGISTRY_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(format!("{data_root}/registry")));
 
         Self {
             node_id,
             node_name,
             cluster_domain,
             http_port,
+            dns_port,
+            raft_port,
+            enrollment_port,
             bind_addr,
             events_path,
             storage_path,
             storage_capacity_gb,
             rdf_path,
+            registry_path,
         }
     }
 }
@@ -114,7 +236,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json()
         .init();
 
-    let config = ServerConfig::from_env();
+    let cli = CliArgs::parse();
+    let toml_config = PlatformConfig::load(cli.config.as_deref());
+    let config = ServerConfig::from_toml_and_env(&toml_config);
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -497,6 +621,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Network services started (DNS + CA)");
 
+    // 8b. Start authoritative DNS server (ADR-052)
+    let dns_resolver = std::sync::Arc::new(
+        picloud_network::dns::resolver::DnsResolver::new(config.cluster_domain.0.clone())
+    );
+    let dns_cache = dns_resolver.cache();
+    {
+        let dns_config = picloud_network::dns::server::DnsServerConfig {
+            bind_addr: format!("0.0.0.0:{}", config.dns_port),
+            domain: config.cluster_domain.0.clone(),
+            evict_interval_secs: 60,
+        };
+        match picloud_network::dns::server::start(dns_config, dns_resolver.clone(), dns_cache.clone()).await {
+            Ok(()) => info!(port = config.dns_port, "Authoritative DNS server started"),
+            Err(e) => warn!(error = %e, port = config.dns_port, "Failed to start DNS server"),
+        }
+    }
+
+    // 8c. Initialize Certificate Revocation List (ADR-053)
+    let _crl = std::sync::Arc::new(tokio::sync::RwLock::new(
+        picloud_network::ca::revocation::RevocationList::new()
+    ));
+
     // 9. Register this node's DNS entry
     let node_iri = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone())
         .node(&config.node_name);
@@ -537,6 +683,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             domain: config.cluster_domain.clone(),
             created_at: chrono::Utc::now(),
             ca_fingerprint: ca_fingerprint.clone(),
+            enrollment_mode: picloud_domain::identity::EnrollmentMode::default(),
         };
 
         match identity_store.initialize(identity).await {
@@ -703,7 +850,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The ingress_handler will be wired into the event subscription loop
     // when the full event stream infrastructure is connected.
 
-    // 13. Start HTTP server
+    // 13. Start image registry (ADR-054)
+    let registry: Arc<dyn picloud_domain::traits::RegistryBackend> = Arc::new(
+        LocalRegistryBackend::new(&config.registry_path)
+            .expect("failed to initialize image registry"),
+    );
+    info!(
+        path = %config.registry_path.display(),
+        "Image registry started"
+    );
+
+    // 14. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
     let mut http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
         .with_dependencies(
@@ -718,7 +875,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ingress_router(ingress_router.clone())
         .with_extra_router(raft_router)
         .with_otel(otel_stream.clone(), telemetry_store_trait.clone())
-        .with_storage_path(config.storage_path.clone());
+        .with_storage_path(config.storage_path.clone())
+        .with_registry(registry.clone());
     if let Some(tls) = tls_config {
         http_server = http_server.with_tls_config(tls);
     }

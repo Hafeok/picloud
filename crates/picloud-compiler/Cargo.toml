@@ -12,3 +12,5 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 uuid       = { workspace = true }
 tracing    = { workspace = true }
+oxigraph   = { workspace = true }
+reqwest    = { workspace = true }
