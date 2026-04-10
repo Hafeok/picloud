@@ -25,7 +25,7 @@ picloud/
 ├── Cargo.toml                  ← workspace root
 ├── docs/
 │   ├── picloud-prd.md          ← full product requirements
-│   └── picloud-adrs.md         ← all architectural decisions (33 ADRs)
+│   └── picloud-adrs.md         ← all architectural decisions (58 ADRs)
 ├── crates/
 │   ├── picloud-domain/         ← STABLE FOUNDATION — read this first
 │   │   └── src/
