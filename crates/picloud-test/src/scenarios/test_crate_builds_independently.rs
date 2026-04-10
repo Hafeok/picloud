@@ -23,12 +23,11 @@ impl Scenario for TestCrateBuildsIndependently {
         "ADR-058"
     }
 
-    async fn run(&self, _ctx: &TestContext) -> ScenarioResult {
+    async fn run(&self, ctx: &TestContext) -> ScenarioResult {
         let start = Instant::now();
 
-        // Find the workspace root so cargo resolves the workspace correctly.
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let workspace_root = std::path::Path::new(manifest_dir).join("../..");
+        // Use the workspace root so cargo resolves the workspace correctly.
+        let workspace_root = ctx.workspace_root();
 
         let output = match Command::new("cargo")
             .args(["check", "-p", "picloud-test"])

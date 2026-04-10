@@ -23,12 +23,11 @@ impl Scenario for NoInternalImports {
         "ADR-058"
     }
 
-    async fn run(&self, _ctx: &TestContext) -> ScenarioResult {
+    async fn run(&self, ctx: &TestContext) -> ScenarioResult {
         let start = Instant::now();
 
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let cargo_toml_path =
-            std::path::Path::new(manifest_dir).join("Cargo.toml");
+        let cargo_toml_path = ctx.workspace_root()
+            .join("crates/picloud-test/Cargo.toml");
 
         let content = match std::fs::read_to_string(&cargo_toml_path) {
             Ok(c) => c,

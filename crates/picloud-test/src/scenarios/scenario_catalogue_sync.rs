@@ -6,7 +6,6 @@
 //! `crates/picloud-test/src/scenarios/`.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -25,13 +24,11 @@ impl Scenario for ScenarioCatalogueSync {
         "ADR-054"
     }
 
-    async fn run(&self, _ctx: &TestContext) -> ScenarioResult {
+    async fn run(&self, ctx: &TestContext) -> ScenarioResult {
         let start = Instant::now();
 
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let workspace_root = Path::new(manifest_dir).join("../..");
-        let adr_path = workspace_root.join("new features/picloud-adrs.md");
-        let scenarios_dir = workspace_root.join("crates/picloud-test/src/scenarios");
+        let adr_path = ctx.workspace_root().join("docs/picloud-adrs.md");
+        let scenarios_dir = ctx.workspace_root().join("crates/picloud-test/src/scenarios");
 
         let content = match std::fs::read_to_string(&adr_path) {
             Ok(c) => c,

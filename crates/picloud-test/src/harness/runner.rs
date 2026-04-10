@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -9,10 +10,11 @@ use crate::config::ClusterConfig;
 pub struct TestContext {
     pub config: ClusterConfig,
     pub http_client: reqwest::Client,
+    workspace_root: PathBuf,
 }
 
 impl TestContext {
-    pub fn new(config: ClusterConfig) -> Self {
+    pub fn new(config: ClusterConfig, workspace_root: PathBuf) -> Self {
         // Build an HTTP client that accepts self-signed certs (cluster uses internal CA).
         let http_client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
@@ -23,7 +25,13 @@ impl TestContext {
         Self {
             config,
             http_client,
+            workspace_root,
         }
+    }
+
+    /// Path to the picloud workspace root directory.
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
     }
 }
 

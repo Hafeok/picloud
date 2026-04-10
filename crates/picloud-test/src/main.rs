@@ -38,6 +38,12 @@ enum Command {
         /// Path to cluster.toml configuration file
         #[arg(long, default_value = "cluster.toml")]
         config: PathBuf,
+
+        /// Path to the picloud workspace root directory. Scenarios that read
+        /// source files (ADR-054, ADR-058) need this to locate docs/, crates/,
+        /// and Cargo.toml. Defaults to the compile-time workspace root.
+        #[arg(long, env = "PICLOUD_WORKSPACE_ROOT")]
+        workspace_root: Option<PathBuf>,
     },
 
     /// List all registered scenarios
@@ -71,6 +77,7 @@ async fn main() {
             suite,
             scenario,
             config,
+            workspace_root,
         } => {
             let cluster_config = match ClusterConfig::load(&config) {
                 Ok(c) => c,
@@ -80,13 +87,20 @@ async fn main() {
                 }
             };
 
+            // Resolve workspace root: CLI flag > env var > compile-time fallback.
+            let ws_root = workspace_root.unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+            });
+            let ws_root = ws_root.canonicalize().unwrap_or(ws_root);
+
             info!(
                 domain = cluster_config.cluster.domain.as_str(),
                 nodes = cluster_config.nodes.len(),
+                workspace_root = ws_root.display().to_string().as_str(),
                 "cluster config loaded"
             );
 
-            let ctx = TestContext::new(cluster_config);
+            let ctx = TestContext::new(cluster_config, ws_root);
             let all = scenarios::all_scenarios();
 
             if all.is_empty() {

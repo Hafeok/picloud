@@ -59,7 +59,7 @@ impl Scenario for UpgradeGateEnforcementScenario {
             operator: None,
             nodes: vec![],
         };
-        let dummy_ctx = TestContext::new(dummy_config);
+        let dummy_ctx = TestContext::new(dummy_config, std::path::PathBuf::from("."));
 
         // Create a scenario list containing only the always-fail mock.
         let scenarios: Vec<Box<dyn Scenario>> = vec![Box::new(AlwaysFailScenario)];

@@ -317,7 +317,7 @@ pub async fn rolling_upgrade(config: UpgradeConfig) -> Result<UpgradeReport, Box
         .into());
     }
 
-    let ctx = TestContext::new(config.cluster_config.clone());
+    let ctx = TestContext::new(config.cluster_config.clone(), std::path::PathBuf::from("."));
     let http_port = config.cluster_config.cluster.http_port;
 
     // Step 1: Determine the leader so we can upgrade it last

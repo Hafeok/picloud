@@ -22,13 +22,11 @@ impl Scenario for AdrTestCoverageCompleteness {
         "ADR-054"
     }
 
-    async fn run(&self, _ctx: &TestContext) -> ScenarioResult {
+    async fn run(&self, ctx: &TestContext) -> ScenarioResult {
         let start = Instant::now();
 
         // Locate the ADR file relative to the workspace root.
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let adr_path = std::path::Path::new(manifest_dir)
-            .join("../../new features/picloud-adrs.md");
+        let adr_path = ctx.workspace_root().join("docs/picloud-adrs.md");
 
         let content = match std::fs::read_to_string(&adr_path) {
             Ok(c) => c,
