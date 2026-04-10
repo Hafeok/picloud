@@ -626,6 +626,15 @@ picloud telemetry query --signal traces \
   --from "2025-07-01T00:00:00Z" --to "2025-07-01T01:00:00Z" \
   --sql "SELECT operation_name, AVG(duration_ms) FROM traces GROUP BY operation_name"
 picloud telemetry query --signal metrics --sql "SELECT * FROM metrics WHERE product = 'photo-app'"
+
+# Test suite (picloud-test binary)
+picloud-test --config cluster.toml --suite compliance          # protocol probes only
+picloud-test --config cluster.toml --suite scenarios           # scenario harness
+picloud-test --config cluster.toml --suite chaos               # chaos + invariants
+picloud-test --config cluster.toml --suite all                 # all three, fail-fast
+picloud-test --config cluster.toml --scenario dns_resolution   # single scenario
+picloud-test --config cluster-staging.toml upgrade \
+  --binary ./target/aarch64-unknown-linux-gnu/release/picloud  # rolling upgrade
 ```
 
 ### Command execution model
@@ -871,6 +880,14 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 - [ ] CLI: `cluster init`, `resource apply`, `resource status`, `identity create`
 - [ ] mTLS node-to-node communication with platform-issued certificates
 
+- [ ] `picloud-test` crate scaffold — harness module, `cluster.toml` reader, SPARQL/DNS/HTTP probe clients
+- [ ] Orchestrator Pi configured — dedicated device on the same L2 segment, not enrolled in the cluster
+- [ ] Protocol compliance suite Phase 1: mDNS RFC 6762 (`mdns_rfc6762.rs`), mTLS RFC 8446 (`mtls_rfc8446.rs`), basic SPARQL 1.1 protocol (`sparql_protocol.rs`)
+- [ ] Scenario suite Phase 1: `cluster_init.rs`, `raft_leader_election.rs`, `dns_resolution.rs`, `mtls_enforcement.rs`, `event_log_replay.rs`
+- [ ] Chaos suite Phase 1: `raft_leader_failover.rs` — kill leader, assert re-election < 5 s
+- [ ] Test results emitted as OTLP spans to cluster telemetry with `picloud.platform_version` resource attribute
+- [ ] `cluster.toml` and `cluster.example.toml` checked into repo
+
 **Exit criteria:** A two-node cluster runs a containerized workload with a replicated volume. The cluster survives one node restart without data loss.
 
 ---
@@ -907,6 +924,11 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 - [ ] Telemetry retention policy — configurable per signal type
 - [ ] CLI: `events stream`, `graph query`, `identity token`, `telemetry query`
 
+- [ ] Scenario suite Phase 2: `iam_lifecycle.rs`, `oidc_flow.rs`, `product_deploy.rs`, `volume_mount.rs`, `cascading_delete.rs`, `idempotent_apply.rs`
+- [ ] Protocol compliance suite Phase 2: OIDC Discovery spec (`oidc_discovery.rs`), JWKS endpoint, token endpoint conformance, OTLP/HTTP (`otlp_http.rs`)
+- [ ] `picloud.platform_version` resource attribute populated from cluster DNS TXT record at test-runner startup (ADR-057)
+- [ ] DataFusion queries for test history per scenario per platform version — regression detection across releases
+
 **Exit criteria:** A Product with a container, volume, and workload identity deploys end-to-end. A user authenticates against a Product-hosted application via OIDC.
 
 ---
@@ -939,6 +961,11 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 - [ ] `picloud sdk publish` command
 - [ ] .NET Aspire integration package
 
+- [ ] Chaos suite Phase 3: `network_partition.rs`, `follower_kill.rs`, `disk_full_simulation.rs`
+- [ ] Full invariant checker — SPARQL + DNS polling on 1 s intervals during fault injection, violation timestamps recorded
+- [ ] Alert inference rule: `AlertFired` when test suite failure rate exceeds threshold in rolling 24 h window
+- [ ] Scenario suite Phase 3: all remaining ADR scenario tests
+
 **Exit criteria:** An inference rule automatically assigns a user to a group on tag change. A CPU temperature alert fires and resolves. A Product appends to its event store and queries the RDF projection. SDKs are published.
 
 ---
@@ -951,9 +978,201 @@ var api = builder.AddProject<Projects.PhotoApi>("api")
 - [ ] Event log compaction and snapshotting
 - [ ] Platform self-monitoring via its own RDF graph
 - [ ] Multi-node Raft voter configuration tuning
+- [ ] Staging cluster provisioned — two Pi 5 nodes (4 GB RAM, 256 GB NVMe), shared hardware with port isolation (ADR-056)
+- [ ] `cluster-staging.toml` configured; staging domain `staging.picloud.local`
+- [ ] `picloud-test upgrade` subcommand — rolling upgrade automation, followers-first ordering (ADR-055)
+- [ ] `upgrade_compatibility.rs` scenario — assert v(N) events correctly projected by v(N+1) binary
+- [ ] Promotion gate: full staging test suite must be green before any production upgrade proceeds
 
 ---
 
-## 18. Open Questions
+---
+
+## 18. Testing Infrastructure
+
+PiCloud is built on the principle that everything measurable should be measured. The test infrastructure is not a separate concern — it is a first-class part of the platform, governed by ADR-054 (every ADR must include a test coverage section) and built from the same engineering discipline as the platform itself.
+
+### Design philosophy
+
+Every architectural decision in the ADRs carries a `Test coverage` section that specifies exactly what "working correctly" means for that decision. The test suite is derived from those sections — not invented separately. This means:
+
+- Tests are written before implementation, at decision time
+- Exit criteria are measurable numbers, never vague assertions
+- A feature is not complete until its ADR's exit criteria are green
+
+### Three test suite designs
+
+**Design 1 — Scenario Harness** runs named end-to-end scenarios that drive the `picloud` CLI exactly as a real operator would, then asserts correctness by querying the RDF graph via SPARQL. The event log is the source of truth; the graph is the observable surface. Every scenario follows the contract: `setup()` → `wait_for_projection()` → `assert_sparql()` → `assert_dns()` → `teardown()`.
+
+**Design 2 — Chaos + Invariants** defines cluster invariants that must hold continuously — including during and after faults — then injects faults (node kills, network partitions, leader changes) while an invariant checker polls every second. Failures are timestamped and correlated with the event log. Recovery time budgets are enforced as hard pass/fail thresholds.
+
+**Design 3 — Protocol Compliance** treats the cluster as a black box and probes every protocol boundary from an external client perspective: mDNS (RFC 6762), DNS (RFC 1034), OIDC (OpenID Connect Core 1.0), mTLS (RFC 8446), SPARQL 1.1 Protocol, and OTLP/HTTP. This suite runs first, takes under two minutes, and catches the class of bugs that make external tools fail.
+
+The three suites run in sequence with fail-fast ordering: compliance → scenarios → chaos. Running chaos against a cluster whose protocol probes are failing produces meaningless results.
+
+### Workspace integration — `picloud-test` crate
+
+`picloud-test` is a workspace member with `publish = false`. It follows ADR-034 (vertical slice architecture) — it depends only on `picloud-domain`, never on production slices. All cluster knowledge comes through external interfaces: SPARQL, HTTP, DNS, SSH, and the `picloud` CLI binary. If a test must reach inside the platform internals to assert something, that is a gap in the platform's observability that should be fixed before the test is written.
+
+```
+picloud-test/
+├── Cargo.toml                    publish = false, depends on picloud-domain only
+├── cluster.example.toml          template — checked in
+├── cluster.toml                  live config — not checked in
+├── certs/
+│   └── picloud-ca.pem            exported via: picloud ca export
+└── src/
+    ├── main.rs                   CLI entry: --config, --suite, --scenario flags
+    ├── harness/
+    │   ├── cluster.rs            SSH client, node handles, CLI runner
+    │   ├── sparql.rs             SPARQL query client against live graph
+    │   ├── dns.rs                DNS probe client (hickory-resolver)
+    │   ├── http.rs               HTTP/mTLS probe client (reqwest + rustls)
+    │   └── results.rs            OTLP span emitter — test results as telemetry
+    ├── scenarios/                Design 1 — one file per ADR scenario group
+    ├── chaos/
+    │   ├── injector.rs           SSH-based fault injection primitives
+    │   ├── invariants.rs         invariant definitions + polling loop
+    │   └── runs/                 named chaos scenarios
+    └── probes/                   Design 3 — one file per protocol
+```
+
+### Orchestrator device
+
+The test runner executes on a dedicated Raspberry Pi 5 that is **not enrolled in the cluster**. This is required: chaos tests that kill a Raft leader via SIGKILL must run from a machine that is not the one being killed, and protocol probes must run from an external client perspective.
+
+The orchestrator connects to cluster nodes via SSH for fault injection, drives the `picloud` CLI, and makes HTTP/DNS/mTLS probes directly. It is always on the same L2 segment as the cluster — required for mDNS probes.
+
+### Cluster configuration
+
+```toml
+# cluster.example.toml — copy to cluster.toml
+
+[cluster]
+domain           = "picloud.local"
+sparql_url       = "https://picloud.local/sparql"
+otlp_url         = "https://picloud.local/otel/v1/traces"
+ca_cert          = "./certs/picloud-ca.pem"
+platform_version = "auto"     # query DNS TXT at startup; or pin to "0.4.1"
+
+[[nodes]]
+name     = "pi-node-01"
+ip       = "192.168.1.101"
+ssh_user = "ubuntu"
+
+[ssh]
+key_path = "~/.ssh/id_picloud_test"
+
+[test]
+timeout_secs = 3600
+emit_otlp    = true
+```
+
+### Running the tests
+
+```bash
+# Protocol compliance only — fast, < 2 min, no cluster state changes
+cargo run -p picloud-test -- --config cluster.toml --suite compliance
+
+# Scenario harness — medium, ~10 min, creates and tears down real resources
+cargo run -p picloud-test -- --config cluster.toml --suite scenarios
+
+# Chaos + invariants — long, ~30 min, kills nodes
+cargo run -p picloud-test -- --config cluster.toml --suite chaos
+
+# All three suites in fail-fast sequence
+cargo run -p picloud-test -- --config cluster.toml --suite all
+
+# Single named scenario during development
+cargo run -p picloud-test -- --config cluster.toml --scenario dns_resolution
+```
+
+### Test results as platform telemetry
+
+The test runner emits results as OTLP traces to the cluster's own OTLP endpoint. Each test run is a root span. Each scenario and probe is a child span with pass/fail status and measured latency. Every span carries a `picloud.platform_version` resource attribute populated from the cluster's DNS TXT record at startup (see ADR-057). This makes test history queryable via `picloud telemetry query` alongside operational history, with full version-to-version regression tracking.
+
+```bash
+# P99 DNS resolution latency per platform version
+picloud telemetry query --signal traces --sql "
+  SELECT attributes->>'picloud.platform_version' AS version,
+         PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99_ms
+  FROM   traces
+  WHERE  operation_name = 'probe.dns_resolution'
+  GROUP  BY version
+  ORDER  BY version"
+```
+
+---
+
+## 19. Platform Upgrade Lifecycle
+
+### Staged promotion model
+
+Every platform release is validated against a dedicated staging cluster before being promoted to production. The staging cluster is fully isolated from production by the tenant boundary in ADR-042 — different domain, different cluster ID, different CA. The `picloud-test` suite is the promotion gate: production is only upgraded if the full staging test run exits green.
+
+### Staging cluster hardware
+
+The staging cluster runs on two Pi 5 nodes. Two nodes is the minimum that validates Raft behaviour, rolling upgrade sequencing, mTLS, and the full protocol compliance suite. Test scenarios requiring a three-node quorum are tagged `requires_three_nodes` and skipped on staging — they run on production post-upgrade as final verification.
+
+Staging nodes may be shared with production nodes to reduce hardware cost. Tenant isolation (ADR-042) provides complete separation at the application layer. Port isolation (ADR-056) resolves the OS-level conflict where two platform instances cannot bind the same port. The staging instance runs on alternate ports with a size-limited directory-backed storage pool rather than raw NVMe ownership.
+
+```toml
+# /home/ubuntu/picloud/staging.toml
+data_root       = "/mnt/nvme/staging"   # directory, not raw device
+http_port       = 8443
+dns_port        = 5353
+raft_port       = 2381
+enrollment_port = 8444
+domain          = "staging.picloud.local"
+```
+
+Two systemd services on each shared node — production at normal priority, staging capped:
+
+```ini
+# picloud-production.service
+[Service]
+ExecStart=/usr/local/bin/picloud server --config /home/ubuntu/picloud/production.toml
+CPUWeight=200
+MemoryMax=10G
+
+# picloud-staging.service
+[Service]
+ExecStart=/usr/local/bin/picloud server --config /home/ubuntu/picloud/staging.toml
+CPUWeight=50
+MemoryMax=4G
+```
+
+Pi-hole gets one additional conditional forwarding rule:
+
+```
+staging.picloud.local → 192.168.1.101:5353   # any shared node, staging DNS port
+```
+
+### Upgrade workflow
+
+```bash
+# Step 1 — rolling upgrade staging (followers first, then leader)
+picloud-test --config cluster-staging.toml upgrade \
+  --binary ./target/aarch64-unknown-linux-gnu/release/picloud
+
+# Step 2 — run full test suite against staging including upgrade_compatibility
+picloud-test --config cluster-staging.toml --suite all
+
+# Step 3 — gate: only proceed if exit code 0
+
+# Step 4 — rolling upgrade production
+picloud-test --config cluster-prod.toml upgrade \
+  --binary ./target/aarch64-unknown-linux-gnu/release/picloud
+
+# Step 5 — compliance probes against production to confirm clean landing
+picloud-test --config cluster-prod.toml --suite compliance
+```
+
+### Event log compatibility — the primary gate
+
+The most important single test is `upgrade_compatibility.rs`. After deploying v(N+1) to staging, the staging cluster contains events written by v(N). The test asserts that the v(N+1) projector produces an identical RDF graph triple count to the pre-upgrade snapshot. A mismatch means the new projector silently dropped or corrupted historical events — an unrecoverable state in production. Schema IRIs (ADR-031) are the mechanism that makes compatibility achievable; `upgrade_compatibility.rs` is what proves it actually worked for a specific release.
+
+
+## 20. Open Questions
 
 1. **CA trust distribution** — external clients (operator laptops, browsers, RDF tools) must trust the platform CA or BYO-CA to connect to `picloud.local` over HTTPS. The `picloud ca export` command handles certificate export, but the installation step is OS-specific and manual. A `picloud ca install` command that handles OS trust store installation on common platforms (macOS, Linux, Windows) would improve the setup experience.

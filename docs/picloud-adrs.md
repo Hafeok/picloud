@@ -3760,7 +3760,7 @@ DNS Server: 192.168.1.101
 
 No other Pi-hole configuration needed. Pi-hole continues to handle all external resolution, ad blocking, and DHCP as before.
 
-**Rationale:**
+### Rationale
 - The RDF graph already contains every hostname and address — DNS is a read-only projection of existing data, not a new data store
 - Authoritative-only design keeps the implementation minimal — no recursive resolver, no upstream forwarder, no root hint management
 - Delegating external resolution to Pi-hole + Unbound respects the operator's existing investment and keeps concerns separated
