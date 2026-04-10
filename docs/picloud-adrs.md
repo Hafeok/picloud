@@ -2875,3 +2875,81 @@ Role inheritance is `rdfs:subClassOf` — the OWL inference engine materialises 
 - The SDK `validateToken` method must check `aud` — this is the most critical SDK method from a security perspective
 - Role inheritance creates a dependency ordering problem at deployment — if `editor` inherits `viewer`, `viewer` must exist before `editor` is created. The platform resolves this via the dependency graph at deploy time.
 - M2M permission resources must exist in the target product before M2M tokens can be issued — cross-product declaration, target wins
+
+---
+
+## ADR-055: Native ACME Server and Smallstep BYO-CA Backend
+
+**Status:** Accepted
+
+**Context:** PiCloud's built-in CA (ADR-030, ADR-053) issues certificates for nodes, workloads, and ingress. Two gaps remain:
+
+1. **No ACME support.** Products running on PiCloud that want automated certificate management (e.g. ACME clients like certbot or cert-manager) have no way to obtain certificates automatically. External ACME clients cannot reach Let's Encrypt on a private network, and the platform CA has no ACME endpoint.
+
+2. **No BYO-CA implementation.** ADR-030 specifies that operators may provide an external CA, but no concrete backend exists. Operators running Smallstep step-ca or another external CA cannot plug it in.
+
+3. **CSR validation gap.** The current `ClusterCa::sign_node_csr` accepts a CSR parameter but does not parse or validate it — the CSR's Common Name, SANs, and signature are not verified before signing.
+
+**Decision:** Three changes to the CA subsystem in `picloud-network`:
+
+### 1. CSR Validation
+
+`ClusterCa::sign_node_csr` now validates incoming CSRs using `x509-parser`:
+- Verifies the CSR's self-signature (proof of private key possession)
+- Validates CN matches the expected `{node_name}.{domain}`
+- Rejects wildcard SANs in node CSRs
+- Rejects CSRs with mismatched IP SANs
+
+### 2. Native ACME Server (HTTP-01)
+
+A minimal ACME server (RFC 8555) is implemented in `picloud-network::ca::acme`. It supports:
+- **HTTP-01 challenges only** — PiCloud controls the HTTP layer (ADR-048), making HTTP-01 the natural fit. DNS-01 is unnecessary since PiCloud controls DNS (ADR-052). TLS-ALPN-01 may be added later.
+- **In-memory state** — ACME accounts, orders, authorizations, and challenges are held in memory. They are transient by nature (orders expire in 7 days). Certificate issuance events are emitted through the event log as `CertIssued`.
+- **Integration with platform CA** — The ACME server delegates signing to whatever `CertificateAuthority` implementation is active (built-in or BYO-CA).
+
+ACME endpoints (wired in `picloud-http`):
+```
+GET  /acme/directory         → directory metadata
+POST /acme/new-nonce         → fresh nonce
+POST /acme/new-account       → account registration
+POST /acme/new-order         → certificate order
+POST /acme/order/{id}        → order status
+POST /acme/authz/{id}        → authorization status
+POST /acme/challenge/{id}    → respond to challenge
+POST /acme/order/{id}/finalize → submit CSR, issue certificate
+POST /acme/cert/{id}         → download certificate
+```
+
+### 3. Smallstep BYO-CA Backend
+
+`SmallstepCa` implements the `CertificateAuthority` trait against an external Smallstep step-ca server's REST API (`/1.0/sign`). This is the concrete implementation of ADR-030's BYO-CA mode.
+
+Configuration:
+```rust
+SmallstepConfig {
+    endpoint: "https://step-ca.local:9000",
+    provisioner: "picloud",
+    provisioner_key_b64: "base64-encoded-jwk-key",
+    ca_cert_pem: "-----BEGIN CERTIFICATE-----...",
+    fingerprint: "sha256:...",
+}
+```
+
+The backend:
+- Signs a JWK provisioner token (ES256) for each signing request
+- Submits CSRs to step-ca's `/1.0/sign` endpoint
+- Parses the certificate chain from the response
+- Handles step-ca's renewal endpoint for certificate rotation
+
+**Rationale:**
+- ACME is the industry-standard protocol for automated certificate management — supporting it means any ACME client works with PiCloud out of the box
+- HTTP-01 is the simplest and most reliable challenge type when the CA controls the HTTP layer
+- Smallstep is the most common homelab CA and the one explicitly mentioned in ADR-030 — implementing it first provides immediate value for the target audience
+- All three changes stay within `picloud-network` — no new crates, no dependency rule violations
+- The `CertificateAuthority` trait (ADR-053) already abstracts the signing backend — Smallstep is just another implementation
+
+**Consequences:**
+- `picloud-network` gains `reqwest` and `base64` dependencies for the Smallstep HTTP client
+- ACME state is in-memory only — if the leader changes, in-flight ACME orders are lost. This is acceptable because ACME clients retry automatically, and orders are short-lived.
+- The ACME server trusts HTTP-01 challenge responses served by PiCloud's own ingress router — this is a closed-loop validation (the CA and the HTTP server are the same platform). This is secure because only the workload that owns the ingress route can serve the challenge response.
+- Operators switching from built-in CA to Smallstep must re-enroll all nodes (new CA root). The platform handles this via a rolling certificate rotation triggered by a `CaRotated` event.

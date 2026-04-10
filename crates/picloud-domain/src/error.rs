@@ -91,6 +91,18 @@ pub enum PiCloudError {
     #[error("Certificate revoked: {fingerprint}")]
     CertificateRevoked { fingerprint: String },
 
+    // --- CSR validation errors (ADR-055) ---
+    #[error("CSR validation failed: {reason}")]
+    CsrValidationFailed { reason: String },
+
+    // --- ACME errors (ADR-055) ---
+    #[error("ACME protocol error: {reason}")]
+    AcmeProtocolError { reason: String },
+
+    // --- BYO-CA errors (ADR-030, ADR-055) ---
+    #[error("External CA error: {reason}")]
+    ExternalCaError { reason: String },
+
     // --- IAM audience errors (ADR-051) ---
     #[error("Audience mismatch: expected {expected}, got {got}")]
     AudienceMismatch { expected: String, got: String },

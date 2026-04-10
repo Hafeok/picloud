@@ -1,12 +1,17 @@
-//! Cluster CA — key management and certificate signing (ADR-053).
+//! Cluster CA — key management and certificate signing (ADR-053, ADR-055).
 //!
 //! The CA private key is encrypted at rest (AES-256-GCM) and stored in
 //! Raft state. Every node that becomes leader decrypts it in memory.
+//!
+//! CSR validation: all incoming CSRs are parsed with `x509-parser`,
+//! the self-signature is verified, CN and SANs are validated, and
+//! wildcard SANs are rejected for node certificates.
 
 use chrono::{Duration, Utc};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
 use sha2::{Digest, Sha256};
-use tracing::info;
+use tracing::{info, warn};
+use x509_parser::prelude::*;
 
 use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::events::CertType;
@@ -159,27 +164,72 @@ impl ClusterCa {
 
     /// Sign a node CSR and return the signed certificate.
     ///
-    /// Validates: CN must match node_name, no wildcard SANs.
+    /// Validates the CSR (ADR-055):
+    ///   1. Parses the DER-encoded CSR with x509-parser
+    ///   2. Verifies the CSR self-signature (proof of key possession)
+    ///   3. Validates CN matches `{node_name}` or `{node_name}.{domain}`
+    ///   4. Rejects wildcard SANs
+    ///   5. Signs a certificate with the validated identity
     pub fn sign_node_csr(
         &self,
-        _csr_der: &[u8],
+        csr_der: &[u8],
         node_name: &str,
         node_ip: &str,
     ) -> Result<SignedCert> {
+        // --- Step 1: Parse the CSR ---
+        let (_, csr) = X509CertificationRequest::from_der(csr_der).map_err(|e| {
+            PiCloudError::CsrValidationFailed {
+                reason: format!("failed to parse CSR DER: {e}"),
+            }
+        })?;
+
+        // --- Step 2: Verify CSR self-signature ---
+        csr.verify_signature().map_err(|e| {
+            warn!(node = %node_name, "CSR signature verification failed");
+            PiCloudError::CsrValidationFailed {
+                reason: format!("CSR signature verification failed: {e}"),
+            }
+        })?;
+
+        // --- Step 3: Validate CN ---
+        let fqdn = format!("{node_name}.{}", self.identity.domain.0);
+        let subject = &csr.certification_request_info.subject;
+        let cn = subject
+            .iter_common_name()
+            .next()
+            .and_then(|attr| attr.as_str().ok())
+            .ok_or_else(|| PiCloudError::CsrValidationFailed {
+                reason: "CSR missing Common Name in subject".to_string(),
+            })?;
+
+        if cn != node_name && cn != fqdn {
+            warn!(node = %node_name, cn = %cn, "CSR CN mismatch");
+            return Err(PiCloudError::CsrValidationFailed {
+                reason: format!(
+                    "CSR CN '{cn}' does not match expected '{node_name}' or '{fqdn}'"
+                ),
+            });
+        }
+
+        // --- Step 4: Reject wildcard SANs ---
+        validate_no_wildcard_sans(&csr)?;
+
+        // --- Step 5: Sign the certificate ---
         let expires_at = Utc::now() + Duration::days(CertLifetime::NODE_DAYS);
 
         let ee_key = KeyPair::generate().map_err(|e| PiCloudError::TlsCertificateError {
             reason: format!("failed to generate node key pair: {e}"),
         })?;
 
-        let fqdn = format!("{node_name}.{}", self.identity.domain.0);
         let mut params = CertificateParams::new(vec![fqdn.clone(), node_ip.to_string()])
             .map_err(|e| PiCloudError::TlsCertificateError {
                 reason: format!("failed to create node cert params: {e}"),
             })?;
 
         params.distinguished_name.push(DnType::CommonName, &fqdn);
-        params.distinguished_name.push(DnType::OrganizationName, "PiCloud");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "PiCloud");
 
         let ca_cert = self.ca_params.clone().self_signed(&self.ca_key).map_err(|e| {
             PiCloudError::TlsCertificateError {
@@ -187,16 +237,16 @@ impl ClusterCa {
             }
         })?;
 
-        let cert = params.signed_by(&ee_key, &ca_cert, &self.ca_key).map_err(|e| {
-            PiCloudError::TlsCertificateError {
+        let cert = params
+            .signed_by(&ee_key, &ca_cert, &self.ca_key)
+            .map_err(|e| PiCloudError::TlsCertificateError {
                 reason: format!("failed to sign node certificate: {e}"),
-            }
-        })?;
+            })?;
 
         let cert_pem = cert.pem();
         let fingerprint = compute_fingerprint(cert_pem.as_bytes());
 
-        info!(node = %node_name, ip = %node_ip, "Node certificate signed");
+        info!(node = %node_name, ip = %node_ip, cn = %cn, "Node certificate signed (CSR validated)");
 
         Ok(SignedCert {
             cert_pem,
@@ -298,6 +348,33 @@ impl ClusterCa {
     }
 }
 
+/// Validate that a CSR contains no wildcard SANs (ADR-055).
+///
+/// Node CSRs must not include wildcard DNS names — only the specific
+/// node FQDN and IP address are permitted.
+fn validate_no_wildcard_sans(csr: &X509CertificationRequest<'_>) -> Result<()> {
+    // CSR extensions live inside a PKCS#9 extensionRequest attribute.
+    // x509-parser exposes them via requested_extensions().
+    if let Some(extensions) = csr.requested_extensions() {
+        for ext in extensions {
+            if let ParsedExtension::SubjectAlternativeName(san) = ext {
+                for name in &san.general_names {
+                    if let GeneralName::DNSName(dns) = name {
+                        if dns.starts_with('*') {
+                            return Err(PiCloudError::CsrValidationFailed {
+                                reason: format!(
+                                    "wildcard SAN '{dns}' not permitted in node CSR"
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Compute the SHA-256 fingerprint of a certificate (hex-encoded with "sha256:" prefix).
 pub fn compute_fingerprint(cert_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -388,6 +465,16 @@ mod tests {
         }
     }
 
+    /// Generate a DER-encoded CSR with the given CN and SANs using rcgen.
+    fn make_csr(cn: &str, sans: &[&str]) -> Vec<u8> {
+        let key = KeyPair::generate().unwrap();
+        let mut params = CertificateParams::new(sans.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+            .unwrap();
+        params.distinguished_name.push(DnType::CommonName, cn);
+        let csr = params.serialize_request(&key).unwrap();
+        csr.der().to_vec()
+    }
+
     #[test]
     fn generate_ca_produces_valid_pem() {
         let master_key = [0u8; 32];
@@ -413,13 +500,54 @@ mod tests {
     }
 
     #[test]
-    fn sign_node_csr_produces_valid_cert() {
+    fn sign_node_csr_with_valid_csr() {
         let master_key = [0u8; 32];
         let (ca, _) = ClusterCa::generate(test_identity(), &master_key).unwrap();
-        let cert = ca.sign_node_csr(&[], "pi-node-01", "192.168.1.10").unwrap();
+
+        let csr_der = make_csr(
+            "pi-node-01.picloud.local",
+            &["pi-node-01.picloud.local", "192.168.1.10"],
+        );
+
+        let cert = ca.sign_node_csr(&csr_der, "pi-node-01", "192.168.1.10").unwrap();
         assert!(cert.cert_pem.contains("-----BEGIN CERTIFICATE-----"));
         assert!(cert.fingerprint.starts_with("sha256:"));
         assert!(cert.expires_at > Utc::now());
+    }
+
+    #[test]
+    fn sign_node_csr_accepts_short_cn() {
+        let master_key = [0u8; 32];
+        let (ca, _) = ClusterCa::generate(test_identity(), &master_key).unwrap();
+
+        // CN = just the node name (without domain) is also accepted
+        let csr_der = make_csr("pi-node-01", &["pi-node-01"]);
+        let cert = ca.sign_node_csr(&csr_der, "pi-node-01", "192.168.1.10").unwrap();
+        assert!(cert.cert_pem.contains("-----BEGIN CERTIFICATE-----"));
+    }
+
+    #[test]
+    fn sign_node_csr_rejects_cn_mismatch() {
+        let master_key = [0u8; 32];
+        let (ca, _) = ClusterCa::generate(test_identity(), &master_key).unwrap();
+
+        let csr_der = make_csr("rogue-node.evil.com", &["rogue-node.evil.com"]);
+        let result = ca.sign_node_csr(&csr_der, "pi-node-01", "192.168.1.10");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("does not match"));
+    }
+
+    #[test]
+    fn sign_node_csr_rejects_invalid_der() {
+        let master_key = [0u8; 32];
+        let (ca, _) = ClusterCa::generate(test_identity(), &master_key).unwrap();
+
+        let result = ca.sign_node_csr(b"not-a-csr", "pi-node-01", "192.168.1.10");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("CSR"));
     }
 
     #[test]
