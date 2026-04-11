@@ -449,8 +449,15 @@ impl OxigraphProjector {
             Literal::new_simple_literal("declared").into(),
         )?;
 
-        // If product-scoped, also insert into the product's named graph.
+        // If product-scoped, link to product in default graph and also insert into named graph.
         if let Some(product) = event.payload["product"].as_str() {
+            // Insert product link in default graph so ProductDeleted can find children
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}product"),
+                Literal::new_simple_literal(product).into(),
+            )?;
+
             let graph_iri = self.iri_builder.product_graph(product);
             self.insert_triple_in_graph(
                 resource_iri_str,
@@ -723,15 +730,30 @@ impl OxigraphProjector {
         }
 
         // Also remove child resources from the default graph.
-        // Children are linked via picloud:product "{product_name}" literal.
-        if let Some(product_name) = event.payload["product_iri"].as_str()
-            .and_then(|iri| iri.rsplit('/').next())
-            .or(event.product.as_deref())
+        // First, try children linked via picloud:product literal.
+        // Then also find children whose IRI contains the product path segment.
+        if let Some(product_name) = event.product.as_deref()
+            .or_else(|| event.payload["product_iri"].as_str()
+                .and_then(|iri| iri.rsplit('/').next()))
         {
+            // Query 1: children linked via picloud:product predicate
             let child_query = format!(
                 "SELECT ?child WHERE {{ ?child <{PICLOUD_NS}product> \"{}\" }}", product_name
             );
             if let Ok(result) = self.execute_query(&child_query) {
+                for row in &result.bindings {
+                    if let Some(child_iri) = row.get("child").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
+                        let _ = self.remove_triples_about_all_graphs(child_iri);
+                    }
+                }
+            }
+
+            // Query 2: children whose IRI contains /products/{product_name}/
+            let path_query = format!(
+                "SELECT ?child WHERE {{ ?child a <{PICLOUD_NS}Resource> . FILTER(CONTAINS(STR(?child), \"/products/{}/\")) }}",
+                product_name
+            );
+            if let Ok(result) = self.execute_query(&path_query) {
                 for row in &result.bindings {
                     if let Some(child_iri) = row.get("child").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
                         let _ = self.remove_triples_about_all_graphs(child_iri);

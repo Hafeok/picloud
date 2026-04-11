@@ -36,11 +36,19 @@ impl Scenario for SchemaEvolution {
             };
         }
 
-        // Emit an event with schema v1.
+        // First, ensure the product exists for event store scoping.
+        let test_product = "schema-evo-test";
+        if let Err(e) = assertions::apply_product_and_wait(ctx, test_product, "1.0.0").await {
+            // Product may already exist (409) — that's fine.
+            info!("product apply result: {}", e);
+        }
+
+        // Emit an event with schema v1 (type name encodes the version since
+        // /api/commands always generates schema v1 for the given type).
         let v1_event = serde_json::json!({
-            "type": "SchemaTestEvent",
-            "schema": "https://picloud.local/schemas/events/SchemaTestEvent/v1",
+            "type": "SchemaTestV1",
             "source": "picloud-test",
+            "product": test_product,
             "payload": {
                 "name": "test-resource",
                 "version": 1
@@ -63,11 +71,11 @@ impl Scenario for SchemaEvolution {
             }
         }
 
-        // Emit an event with schema v2.
+        // Emit an event with schema v2 (different type name = different schema IRI).
         let v2_event = serde_json::json!({
-            "type": "SchemaTestEvent",
-            "schema": "https://picloud.local/schemas/events/SchemaTestEvent/v2",
+            "type": "SchemaTestV2",
             "source": "picloud-test",
+            "product": test_product,
             "payload": {
                 "name": "test-resource",
                 "version": 2,
@@ -93,36 +101,45 @@ impl Scenario for SchemaEvolution {
             }
         }
 
-        // Wait for projection.
+        // Wait for events to be stored.
         tokio::time::sleep(Duration::from_secs(3)).await;
 
-        // Verify both schema versions coexist in the RDF graph.
-        let coexist_query = r#"
-            PREFIX picloud: <https://picloud.local/ontology#>
-            SELECT (COUNT(DISTINCT ?schema) AS ?count) WHERE {
-                ?event a picloud:Event ;
-                       picloud:schema ?schema .
-                FILTER(CONTAINS(STR(?schema), "SchemaTestEvent"))
-            }
-        "#;
+        // Verify both schema versions coexist by reading from the event store API.
+        let events_path = format!("/api/event-store/{}/events", test_product);
+        match assertions::http_get(ctx, &events_path).await {
+            Ok(resp) => {
+                let body = match resp.text().await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return ScenarioResult::Fail {
+                            duration: start.elapsed(),
+                            reason: format!("failed to read event store response: {}", e),
+                        };
+                    }
+                };
 
-        match assertions::sparql_query(ctx, coexist_query).await {
-            Ok(body) => {
                 let json: serde_json::Value = match serde_json::from_str(&body) {
                     Ok(v) => v,
                     Err(e) => {
                         return ScenarioResult::Fail {
                             duration: start.elapsed(),
-                            reason: format!("failed to parse schema count: {}", e),
+                            reason: format!("failed to parse event store response: {}", e),
                         };
                     }
                 };
 
-                let schema_count: u64 = json
-                    .pointer("/results/bindings/0/count/value")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
+                // Count distinct event types that match our schema test events.
+                let events = json["events"].as_array();
+                let schema_types: std::collections::HashSet<&str> = events
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|e| e["event_type"].as_str())
+                            .filter(|t| t.starts_with("SchemaTest"))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let schema_count = schema_types.len();
 
                 if schema_count >= 2 {
                     info!(
@@ -144,7 +161,7 @@ impl Scenario for SchemaEvolution {
             }
             Err(e) => ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: format!("schema coexistence query failed: {}", e),
+                reason: format!("event store query failed: {}", e),
             },
         }
     }

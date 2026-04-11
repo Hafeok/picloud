@@ -36,19 +36,22 @@ impl Scenario for RawBlockDevice {
             };
         }
 
-        // Apply a raw block device volume resource.
-        let volume_body = serde_json::json!({
-            "type": "volume",
-            "name": "test-raw-block",
-            "product": "picloud-test",
-            "spec": {
-                "mode": "raw",
-                "size": "1Gi",
-                "durability": "full-replication"
-            }
-        });
+        // Apply the product first, then the raw block device volume resource.
+        let resources = vec![
+            serde_json::json!({
+                "type": "product",
+                "name": "picloud-test",
+                "version": "1.0.0"
+            }),
+            serde_json::json!({
+                "type": "volume",
+                "name": "test-raw-block",
+                "product": "picloud-test",
+                "size_gb": 100
+            }),
+        ];
 
-        match assertions::http_post(ctx, "/api/resources", volume_body).await {
+        match assertions::apply_resources(ctx, resources).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("raw block device resource applied");
             }

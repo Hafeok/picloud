@@ -30,9 +30,8 @@ impl Scenario for AggregateReplay {
         }
 
         // 1. Check replay endpoint exists
-        let test_product = "test-replay-aggregate";
-        let replay_path = format!("/products/{}/event-store/replay", test_product);
-        if !assertions::feature_available(ctx, &replay_path).await {
+        let replay_path = "/api/replay";
+        if !assertions::feature_available(ctx, replay_path).await {
             return ScenarioResult::Skip {
                 reason: "replay endpoint not available".to_string(),
             };
@@ -45,7 +44,7 @@ impl Scenario for AggregateReplay {
             "aggregate_ids": ["test-id-001"],
         });
 
-        let resp = match assertions::http_post(ctx, &replay_path, replay_body).await {
+        let resp = match assertions::http_post(ctx, replay_path, replay_body).await {
             Ok(r) => r,
             Err(e) => {
                 return ScenarioResult::Fail {

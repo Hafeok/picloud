@@ -112,46 +112,24 @@ impl Scenario for ProductFullLifecycle {
             };
         }
 
-        // 6. Verify deletion.
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
-        let ask_deleted = format!(
+        // 6. Poll until the product is gone (projection may take time).
+        let ask_gone = format!(
             r#"
             PREFIX picloud: <https://picloud.local/ontology#>
-            ASK {{ <{}> a picloud:Product }}
+            ASK {{
+                FILTER NOT EXISTS {{ <{}> a picloud:Product }}
+            }}
             "#,
             product_iri
         );
 
-        match assertions::sparql_query(ctx, &ask_deleted).await {
-            Ok(body) => {
-                let json: serde_json::Value = match serde_json::from_str(&body) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return ScenarioResult::Fail {
-                            duration: start.elapsed(),
-                            reason: format!("failed to parse response: {}", e),
-                        };
-                    }
-                };
-
-                let still_exists =
-                    json.get("boolean").and_then(|v| v.as_bool()).unwrap_or(true);
-
-                if still_exists {
-                    ScenarioResult::Fail {
-                        duration: start.elapsed(),
-                        reason: "product still exists after deletion".to_string(),
-                    }
-                } else {
-                    ScenarioResult::Pass {
-                        duration: start.elapsed(),
-                    }
-                }
-            }
-            Err(e) => ScenarioResult::Fail {
+        match assertions::wait_for_sparql(ctx, &ask_gone, Duration::from_secs(15)).await {
+            Ok(()) => ScenarioResult::Pass {
                 duration: start.elapsed(),
-                reason: format!("SPARQL query after deletion failed: {}", e),
+            },
+            Err(_) => ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: "product still exists after deletion".to_string(),
             },
         }
     }

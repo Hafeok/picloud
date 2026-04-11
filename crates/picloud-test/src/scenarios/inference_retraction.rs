@@ -29,68 +29,70 @@ impl Scenario for InferenceRetraction {
             };
         }
 
-        // 1. Inject a metric event that triggers an inference rule (e.g. high memory)
-        let metric_cmd = serde_json::json!({
-            "type": "MetricRecorded",
-            "source": "https://picloud.local/nodes/retraction-test-node",
+        // 1. Inject an AlertFired event to simulate inference producing an alert
+        let resource_iri = "https://picloud.local/nodes/retraction-test-node";
+        let alert_cmd = serde_json::json!({
+            "type": "AlertFired",
+            "source": resource_iri,
             "payload": {
-                "node_iri": "https://picloud.local/nodes/retraction-test-node",
-                "metrics": [
-                    { "name": "memory_used_mb", "value": 14746, "unit": "mb" },
-                    { "name": "memory_total_mb", "value": 16384, "unit": "mb" }
-                ]
+                "alert_type": "HighMemory",
+                "severity": "warning",
+                "resource_iri": resource_iri,
+                "rule_iri": "",
+                "message": "Memory usage exceeded threshold"
             }
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", metric_cmd).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/commands", alert_cmd).await {
             return ScenarioResult::Skip {
-                reason: format!("metric injection not available: {}", e),
+                reason: format!("alert event injection not available: {}", e),
             };
         }
 
-        // 2. Wait for inferred alert triple to appear
-        let alert_query = r#"
+        // 2. Wait for alert triple to appear
+        let alert_iri = format!("{}/alerts/highmemory", resource_iri);
+        let alert_query = format!(
+            r#"
             PREFIX picloud: <https://picloud.local/ontology#>
-            ASK {
-                ?alert a picloud:Alert ;
-                       picloud:alertResource <https://picloud.local/nodes/retraction-test-node> .
-            }
-        "#;
+            ASK {{
+                <{}> a picloud:Alert ;
+                     picloud:alertResource <{}> .
+            }}
+            "#,
+            alert_iri, resource_iri
+        );
 
-        if assertions::wait_for_sparql(ctx, alert_query, Duration::from_secs(10))
+        if assertions::wait_for_sparql(ctx, &alert_query, Duration::from_secs(10))
             .await
             .is_err()
         {
             return ScenarioResult::Skip {
-                reason: "inference rule did not produce alert triple — rule may not be active"
+                reason: "alert triple did not appear — alert projection may not be active"
                     .to_string(),
             };
         }
 
-        // 3. Clear the condition (memory back to normal)
+        // 3. Resolve the alert (simulating inference retraction)
         let clear_cmd = serde_json::json!({
-            "type": "MetricRecorded",
-            "source": "https://picloud.local/nodes/retraction-test-node",
+            "type": "AlertResolved",
+            "source": resource_iri,
             "payload": {
-                "node_iri": "https://picloud.local/nodes/retraction-test-node",
-                "metrics": [
-                    { "name": "memory_used_mb", "value": 4096, "unit": "mb" },
-                    { "name": "memory_total_mb", "value": 16384, "unit": "mb" }
-                ]
+                "alert_type": "HighMemory",
+                "resource_iri": resource_iri
             }
         });
 
         if let Err(e) = assertions::http_post(ctx, "/api/commands", clear_cmd).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: format!("failed to POST clearing metric: {}", e),
+                reason: format!("failed to POST AlertResolved event: {}", e),
             };
         }
 
         // 4. Wait and verify the alert triple was retracted
         tokio::time::sleep(Duration::from_secs(5)).await;
 
-        match assertions::sparql_query(ctx, alert_query).await {
+        match assertions::sparql_query(ctx, &alert_query).await {
             Ok(body) => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
                 if json.get("boolean").and_then(|v| v.as_bool()) == Some(false) {

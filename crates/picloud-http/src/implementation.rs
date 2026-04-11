@@ -345,7 +345,8 @@ impl PiCloudHttpServer {
             // --- Stub endpoints for E2E test scenarios ---
             // Event store API (ADR-032)
             .route("/api/event-store", get(handle_stub_ok))
-            .route("/api/event-store/*path", get(handle_stub_ok).post(handle_stub_accepted))
+            .route("/api/event-store/:product/append", post(handle_event_store_api_append))
+            .route("/api/event-store/:product/events", get(handle_event_store_api_read))
             // Volume management API (ADR-011, ADR-047)
             .route("/api/volumes", get(handle_stub_ok))
             .route("/api/volumes/*path", get(handle_stub_ok).post(handle_stub_accepted))
@@ -1972,6 +1973,100 @@ async fn handle_stub_accepted() -> impl IntoResponse {
     (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "accepted", "stub": true})))
 }
 
+/// POST /api/event-store/:product/append — append an event to a product's event store.
+async fn handle_event_store_api_append(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Path(product): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        )
+            .into_response();
+    };
+
+    let event_type = body["type"].as_str().unwrap_or("CustomEvent").to_string();
+    let correlation_id = Uuid::new_v4();
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let source = iri_builder.resource(&product, "event-store", "main");
+
+    let envelope = EventEnvelope::new(
+        iri_builder.event_schema(&event_type, 1),
+        &event_type,
+        source,
+        Some(product.clone()),
+        correlation_id,
+        body,
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "event_id": correlation_id.to_string(),
+                "product": product,
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/event-store/:product/events — read events from a product's event store.
+async fn handle_event_store_api_read(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Path(product): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        )
+            .into_response();
+    };
+
+    let limit: usize = params.get("limit").and_then(|l| l.parse().ok()).unwrap_or(100);
+
+    // Read all events from the log and filter by product scope
+    let all_events = event_log.events_since(0).await;
+    let product_events: Vec<_> = all_events
+        .into_iter()
+        .filter(|e| e.product.as_deref() == Some(product.as_str()))
+        .take(limit)
+        .collect();
+
+    let events_json: Vec<serde_json::Value> = product_events
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "event_id": e.correlation_id.to_string(),
+                "event_type": e.event_type,
+                "source": e.source.as_str(),
+                "payload": e.payload,
+                "timestamp": e.timestamp.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "product": product,
+            "events": events_json,
+            "count": product_events.len(),
+        })),
+    )
+        .into_response()
+}
+
 /// CA certificate export — returns the platform CA's PEM certificate.
 async fn handle_ca_export(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -2946,7 +3041,15 @@ async fn handle_register_begin(
             .into_response();
     };
 
-    let identity_iri = match ResourceIri::new(&req.identity_iri) {
+    // If the identity_iri is a bare username (not a full IRI), construct a proper IRI
+    let identity_iri_str = if req.identity_iri.starts_with("http://") || req.identity_iri.starts_with("https://") {
+        req.identity_iri.clone()
+    } else {
+        let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+        iri_builder.resource("platform", "identities", &req.identity_iri).to_string()
+    };
+
+    let identity_iri = match ResourceIri::new(&identity_iri_str) {
         Ok(iri) => iri,
         Err(e) => {
             return (
@@ -3201,7 +3304,8 @@ struct NodeEnrollRequest {
     #[serde(default)]
     enrollment_token: Option<String>,
     /// Cluster ID the node expects to join
-    cluster_id: Uuid,
+    #[serde(default)]
+    cluster_id: Option<Uuid>,
 }
 
 async fn handle_node_enroll(

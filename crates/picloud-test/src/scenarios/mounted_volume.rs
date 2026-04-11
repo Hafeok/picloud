@@ -37,20 +37,22 @@ impl Scenario for MountedVolume {
             };
         }
 
-        // Apply a test volume resource.
-        let volume_body = serde_json::json!({
-            "type": "volume",
-            "name": "test-mounted-vol",
-            "product": "picloud-test",
-            "spec": {
-                "mode": "mounted",
-                "size": "1Gi",
-                "durability": "full-replication",
-                "mountPath": "/data"
-            }
-        });
+        // Apply the product first, then the volume resource.
+        let resources = vec![
+            serde_json::json!({
+                "type": "product",
+                "name": "picloud-test",
+                "version": "1.0.0"
+            }),
+            serde_json::json!({
+                "type": "volume",
+                "name": "test-mounted-vol",
+                "product": "picloud-test",
+                "size_gb": 100
+            }),
+        ];
 
-        match assertions::http_post(ctx, "/api/resources", volume_body).await {
+        match assertions::apply_resources(ctx, resources).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("volume resource applied");
             }

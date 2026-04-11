@@ -90,38 +90,29 @@ impl Scenario for TagRemove {
             };
         }
 
-        // Wait and verify tag is gone.
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        // Poll until the tag is gone (projection may take time).
+        let tag_gone_query = format!(
+            r#"
+            PREFIX picloud: <https://picloud.local/ontology#>
+            ASK {{
+                FILTER NOT EXISTS {{
+                    <{}> picloud:tag [
+                        picloud:tagKey "environment" ;
+                        picloud:tagValue "staging"
+                    ] .
+                }}
+            }}
+            "#,
+            product_iri
+        );
 
-        match assertions::sparql_query(ctx, &tag_ask).await {
-            Ok(body) => {
-                let json: serde_json::Value = match serde_json::from_str(&body) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return ScenarioResult::Fail {
-                            duration: start.elapsed(),
-                            reason: format!("failed to parse response: {}", e),
-                        };
-                    }
-                };
-
-                let tag_present =
-                    json.get("boolean").and_then(|v| v.as_bool()).unwrap_or(true);
-
-                if tag_present {
-                    ScenarioResult::Fail {
-                        duration: start.elapsed(),
-                        reason: "tag still present after removal".to_string(),
-                    }
-                } else {
-                    ScenarioResult::Pass {
-                        duration: start.elapsed(),
-                    }
-                }
-            }
-            Err(e) => ScenarioResult::Fail {
+        match assertions::wait_for_sparql(ctx, &tag_gone_query, Duration::from_secs(15)).await {
+            Ok(()) => ScenarioResult::Pass {
                 duration: start.elapsed(),
-                reason: format!("SPARQL query after tag removal failed: {}", e),
+            },
+            Err(_) => ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: "tag still present after removal".to_string(),
             },
         }
     }

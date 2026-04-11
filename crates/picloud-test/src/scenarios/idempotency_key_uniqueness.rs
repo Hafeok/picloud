@@ -36,39 +36,25 @@ impl Scenario for IdempotencyKeyUniqueness {
             };
         }
 
-        let key_a = format!("uniqueness-test-a-{}", uuid::Uuid::new_v4());
-        let key_b = format!("uniqueness-test-b-{}", uuid::Uuid::new_v4());
+        let suffix_a = format!("a-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        let suffix_b = format!("b-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
-        let body_a = serde_json::json!({
-            "resources": [{
-                "type": "container",
-                "name": "uniqueness-test-a",
-                "product": "picloud-test",
-                "idempotencyKey": key_a,
-                "spec": {
-                    "image": "alpine:latest",
-                    "command": ["sleep", "3600"]
-                }
-            }]
+        let resource_a = serde_json::json!({
+            "type": "product",
+            "name": format!("uniqueness-test-{}", suffix_a),
+            "version": "1.0.0"
         });
 
-        let body_b = serde_json::json!({
-            "resources": [{
-                "type": "container",
-                "name": "uniqueness-test-b",
-                "product": "picloud-test",
-                "idempotencyKey": key_b,
-                "spec": {
-                    "image": "alpine:latest",
-                    "command": ["sleep", "3600"]
-                }
-            }]
+        let resource_b = serde_json::json!({
+            "type": "product",
+            "name": format!("uniqueness-test-{}", suffix_b),
+            "version": "1.0.0"
         });
 
         // Apply resource A.
-        match assertions::http_post(ctx, "/api/apply", body_a).await {
+        match assertions::apply_resource(ctx, resource_a).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
-                info!(key = %key_a, "resource A applied");
+                info!(suffix = %suffix_a, "resource A applied");
             }
             Ok(resp) => {
                 return ScenarioResult::Skip {
@@ -83,9 +69,9 @@ impl Scenario for IdempotencyKeyUniqueness {
         }
 
         // Apply resource B.
-        match assertions::http_post(ctx, "/api/apply", body_b).await {
+        match assertions::apply_resource(ctx, resource_b).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
-                info!(key = %key_b, "resource B applied");
+                info!(suffix = %suffix_b, "resource B applied");
             }
             Ok(resp) => {
                 return ScenarioResult::Skip {
@@ -100,15 +86,20 @@ impl Scenario for IdempotencyKeyUniqueness {
         }
 
         // Verify both resources exist in the RDF graph.
-        let both_query = r#"
+        let name_a = format!("uniqueness-test-{}", suffix_a);
+        let name_b = format!("uniqueness-test-{}", suffix_b);
+        let both_query = format!(
+            r#"
             PREFIX picloud: <https://picloud.local/ontology#>
-            SELECT (COUNT(?r) AS ?count) WHERE {
-                VALUES ?name { "uniqueness-test-a" "uniqueness-test-b" }
+            SELECT (COUNT(?r) AS ?count) WHERE {{
+                VALUES ?name {{ "{}" "{}" }}
                 ?r picloud:name ?name .
-            }
-        "#;
+            }}
+        "#,
+            name_a, name_b
+        );
 
-        match assertions::sparql_query(ctx, both_query).await {
+        match assertions::sparql_query(ctx, &both_query).await {
             Ok(body) => {
                 let json: serde_json::Value = match serde_json::from_str(&body) {
                     Ok(v) => v,

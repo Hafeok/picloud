@@ -881,6 +881,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_server = http_server.with_tls_config(tls);
     }
 
+    // Emit LeaderElected after a delay to allow Raft to stabilize.
+    // Runs in a background task so it doesn't block HTTP server startup.
+    {
+        let cluster_for_leader = cluster.clone();
+        let event_log_for_leader = event_log_trait.clone();
+        let node_iri_for_leader = node_iri.clone();
+        let domain_for_leader = config.cluster_domain.clone();
+        let node_id_str = config.node_id.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            if cluster_for_leader.is_leader().await {
+                let iri_builder = picloud_domain::iri::IriBuilder::new(domain_for_leader);
+                let leader_event = picloud_domain::events::EventEnvelope::new(
+                    iri_builder.event_schema("LeaderElected", 1),
+                    "LeaderElected",
+                    node_iri_for_leader.clone(),
+                    None,
+                    Uuid::new_v4(),
+                    serde_json::json!({
+                        "node_id": node_id_str,
+                        "node_iri": node_iri_for_leader.as_str(),
+                        "term": 1,
+                    }),
+                );
+                if let Err(e) = event_log_for_leader.append(leader_event).await {
+                    warn!("Failed to emit LeaderElected event: {e}");
+                } else {
+                    info!("LeaderElected event emitted");
+                }
+            }
+        });
+    }
+
     // Log startup summary
     let members = cluster.members().await?;
     info!(

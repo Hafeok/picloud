@@ -31,30 +31,24 @@ impl Scenario for OverwriteProtection {
             };
         }
 
-        let commands_path = "/api/commands";
-        if !assertions::feature_available(ctx, commands_path).await {
+        if !assertions::feature_available(ctx, "/api/apply").await {
             return ScenarioResult::Skip {
-                reason: "commands endpoint not implemented yet".to_string(),
+                reason: "apply endpoint not implemented yet".to_string(),
             };
         }
 
-        // First, create a resource.
+        // First, create a product resource.
         let resource = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "config",
+            "type": "product",
             "name": "overwrite-test",
-            "product": "test-app",
-            "payload": {
-                "key": "overwrite.test",
-                "value": "original"
-            }
+            "version": "1.0.0"
         });
 
-        let first = match assertions::http_post(ctx, commands_path, resource.clone()).await {
+        let first = match assertions::apply_resource(ctx, resource.clone()).await {
             Ok(r) => r,
             Err(e) => {
                 return ScenarioResult::Skip {
-                    reason: format!("POST command failed: {}", e),
+                    reason: format!("first apply failed: {}", e),
                 };
             }
         };
@@ -62,7 +56,7 @@ impl Scenario for OverwriteProtection {
         let first_status = first.status().as_u16();
         if first_status == 404 || first_status == 501 {
             return ScenarioResult::Skip {
-                reason: "commands endpoint not fully implemented".to_string(),
+                reason: "apply endpoint not fully implemented".to_string(),
             };
         }
 
@@ -70,12 +64,12 @@ impl Scenario for OverwriteProtection {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Attempt to apply the same resource again without a force/overwrite flag.
-        let duplicate = match assertions::http_post(ctx, commands_path, resource).await {
+        let duplicate = match assertions::apply_resource(ctx, resource).await {
             Ok(r) => r,
             Err(e) => {
                 return ScenarioResult::Fail {
                     duration: start.elapsed(),
-                    reason: format!("second POST failed: {}", e),
+                    reason: format!("second apply failed: {}", e),
                 };
             }
         };

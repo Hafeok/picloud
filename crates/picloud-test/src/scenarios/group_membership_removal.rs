@@ -28,61 +28,68 @@ impl Scenario for GroupMembershipRemoval {
             };
         }
 
-        // 1. Add a tag to trigger group membership
-        let tag_add = serde_json::json!({
-            "resource": "https://picloud.local/platform/identities/test-user",
-            "key": "team",
-            "value": "backend"
+        let member_iri = "https://picloud.local/platform/identities/test-user";
+        let group_iri = "https://picloud.local/groups/backend-team";
+
+        // 1. Add member to group via GroupMembershipChanged event
+        let add_cmd = serde_json::json!({
+            "type": "GroupMembershipChanged",
+            "source": group_iri,
+            "payload": {
+                "group_iri": group_iri,
+                "member_iri": member_iri,
+                "action": "added"
+            }
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/tags/add", tag_add).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/commands", add_cmd).await {
             return ScenarioResult::Skip {
-                reason: format!("tag endpoint not available: {}", e),
+                reason: format!("command endpoint not available: {}", e),
             };
         }
 
         // 2. Verify membership was added
-        let member_query = r#"
+        let member_query = format!(
+            r#"
             PREFIX picloud: <https://picloud.local/ontology#>
-            ASK {
-                ?group picloud:hasMember <https://picloud.local/platform/identities/test-user> .
-            }
-        "#;
+            ASK {{
+                <{}> picloud:hasMember <{}> .
+            }}
+            "#,
+            group_iri, member_iri
+        );
 
-        if assertions::wait_for_sparql(ctx, member_query, Duration::from_secs(10))
+        if assertions::wait_for_sparql(ctx, &member_query, Duration::from_secs(10))
             .await
             .is_err()
         {
             return ScenarioResult::Skip {
-                reason: "group membership inference not active".to_string(),
+                reason: "group membership projection not active".to_string(),
             };
         }
 
-        // 3. Remove the tag to trigger membership removal
-        let tag_remove = serde_json::json!({
-            "resource": "https://picloud.local/platform/identities/test-user",
-            "key": "team",
-            "value": "backend"
+        // 3. Remove member from group via GroupMembershipChanged event
+        let remove_cmd = serde_json::json!({
+            "type": "GroupMembershipChanged",
+            "source": group_iri,
+            "payload": {
+                "group_iri": group_iri,
+                "member_iri": member_iri,
+                "action": "removed"
+            }
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/tags/remove", tag_remove).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/commands", remove_cmd).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: format!("failed to remove tag: {}", e),
+                reason: format!("failed to send membership removal event: {}", e),
             };
         }
 
         // 4. Verify membership was retracted
         tokio::time::sleep(Duration::from_secs(5)).await;
 
-        let not_member_query = r#"
-            PREFIX picloud: <https://picloud.local/ontology#>
-            ASK {
-                ?group picloud:hasMember <https://picloud.local/platform/identities/test-user> .
-            }
-        "#;
-
-        match assertions::sparql_query(ctx, not_member_query).await {
+        match assertions::sparql_query(ctx, &member_query).await {
             Ok(body) => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
                 if json.get("boolean").and_then(|v| v.as_bool()) == Some(false) {
@@ -92,7 +99,7 @@ impl Scenario for GroupMembershipRemoval {
                 } else {
                     ScenarioResult::Fail {
                         duration: start.elapsed(),
-                        reason: "membership triple was not retracted after tag removal".to_string(),
+                        reason: "membership triple not retracted after removal event".to_string(),
                     }
                 }
             }

@@ -192,6 +192,9 @@ pub struct Role {
     /// Roles this role inherits from (OWL subClassOf hierarchy)
     #[serde(default)]
     pub inherits: Vec<String>,
+    /// Custom claims to include in tokens issued to principals with this role
+    #[serde(default)]
+    pub claims: std::collections::HashMap<String, String>,
 }
 
 /// The type of a configuration value (ADR-043)

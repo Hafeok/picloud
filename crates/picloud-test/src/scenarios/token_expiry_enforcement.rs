@@ -32,8 +32,8 @@ impl Scenario for TokenExpiryEnforcement {
         // Attempt to use an expired/invalid token against an IAM-gated endpoint.
         let expired_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0IiwiZXhwIjoxMDAwMDAwMDAwfQ.invalid";
 
-        // Use a GET endpoint that exists — /products accepts GET.
-        let url = format!("{}/products", ctx.config.base_url());
+        // Use a product-scoped graph endpoint that enforces auth.
+        let url = format!("{}/products/test-product/graph", ctx.config.base_url());
         let resp = match ctx
             .http_client
             .get(&url)

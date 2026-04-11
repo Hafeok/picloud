@@ -38,13 +38,23 @@ impl Scenario for EventBusBurst {
         let burst_id = format!("burst-{}", uuid::Uuid::new_v4());
         let event_count = 100;
 
-        // Post events in rapid succession.
+        // Post events in rapid succession using ResourceDeclared so the
+        // projector actually creates triples for each one.
         let mut success_count = 0u32;
         for i in 0..event_count {
+            let resource_name = format!("burst-res-{}-{}", burst_id, i);
+            let resource_iri = format!(
+                "https://picloud.local/products/burst-test/resources/{}",
+                resource_name
+            );
             let event_body = serde_json::json!({
-                "type": "BurstTestEvent",
-                "source": "picloud-test",
+                "type": "ResourceDeclared",
+                "source": resource_iri,
+                "product": "burst-test",
                 "payload": {
+                    "resource_iri": resource_iri,
+                    "resource_type": "BurstResource",
+                    "product": "burst-test",
                     "burstId": burst_id,
                     "index": i
                 }
@@ -79,11 +89,14 @@ impl Scenario for EventBusBurst {
         tokio::time::sleep(Duration::from_secs(5)).await;
 
         // Verify all events are projected into the RDF graph.
+        // Each ResourceDeclared event creates a triple with resourceType "BurstResource"
+        // scoped to product "burst-test". Count resources whose IRI contains the burst_id.
         let count_query = format!(
             r#"
             PREFIX picloud: <https://picloud.local/ontology#>
             SELECT (COUNT(?e) AS ?count) WHERE {{
-                ?e picloud:burstId "{}" .
+                ?e picloud:resourceType "BurstResource" .
+                FILTER(CONTAINS(STR(?e), "{}"))
             }}
             "#,
             burst_id

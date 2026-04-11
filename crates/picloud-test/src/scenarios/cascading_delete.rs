@@ -103,49 +103,26 @@ impl Scenario for CascadingDelete {
             };
         }
 
-        // Wait and verify child resources are gone.
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
-        let child_query = format!(
+        // Poll until child resources are gone (projection needs time to cascade).
+        let no_children_query = format!(
             r#"
             PREFIX picloud: <https://picloud.local/ontology#>
             ASK {{
-                ?resource picloud:belongsTo <https://picloud.local/products/{}> .
+                FILTER NOT EXISTS {{
+                    ?resource picloud:belongsTo <https://picloud.local/products/{}> .
+                }}
             }}
             "#,
             test_name
         );
 
-        match assertions::sparql_query(ctx, &child_query).await {
-            Ok(body) => {
-                let json: serde_json::Value = match serde_json::from_str(&body) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return ScenarioResult::Fail {
-                            duration: start.elapsed(),
-                            reason: format!("failed to parse response: {}", e),
-                        };
-                    }
-                };
-
-                let has_children =
-                    json.get("boolean").and_then(|v| v.as_bool()).unwrap_or(true);
-
-                if has_children {
-                    ScenarioResult::Fail {
-                        duration: start.elapsed(),
-                        reason: "child resources still present after product deletion"
-                            .to_string(),
-                    }
-                } else {
-                    ScenarioResult::Pass {
-                        duration: start.elapsed(),
-                    }
-                }
-            }
-            Err(e) => ScenarioResult::Fail {
+        match assertions::wait_for_sparql(ctx, &no_children_query, Duration::from_secs(15)).await {
+            Ok(()) => ScenarioResult::Pass {
                 duration: start.elapsed(),
-                reason: format!("SPARQL query for children failed: {}", e),
+            },
+            Err(_) => ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: "child resources still present after product deletion".to_string(),
             },
         }
     }

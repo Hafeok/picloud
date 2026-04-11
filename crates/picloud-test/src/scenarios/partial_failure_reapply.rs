@@ -43,18 +43,19 @@ impl Scenario for PartialFailureReapply {
             };
         }
 
-        let idempotency_key = format!("partial-fail-{}", uuid::Uuid::new_v4());
+        let test_product = format!("partial-fail-{}", uuid::Uuid::new_v4().as_simple());
+
+        // Ensure the product exists first.
+        if let Err(e) = assertions::apply_product_and_wait(ctx, &test_product, "1.0.0").await {
+            info!("product apply note: {}", e);
+        }
 
         let resource_body = serde_json::json!({
             "resources": [{
                 "type": "container",
                 "name": "partial-fail-test",
-                "product": "picloud-test",
-                "idempotencyKey": idempotency_key,
-                "spec": {
-                    "image": "alpine:latest",
-                    "command": ["sleep", "3600"]
-                }
+                "product": test_product,
+                "image": "alpine:latest"
             }]
         });
 

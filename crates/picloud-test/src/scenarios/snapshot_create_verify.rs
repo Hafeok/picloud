@@ -38,13 +38,14 @@ impl Scenario for SnapshotCreateVerify {
             };
         }
 
-        // POST to create a snapshot.
+        // POST to create a snapshot (POST is registered at /api/snapshots/*path).
         let snapshot_req = serde_json::json!({
             "volume": "test-volume",
             "product": "test-app"
         });
 
-        let post_resp = match assertions::http_post(ctx, snapshots_path, snapshot_req).await {
+        let create_path = format!("{}/test-volume", snapshots_path);
+        let post_resp = match assertions::http_post(ctx, &create_path, snapshot_req).await {
             Ok(r) => r,
             Err(e) => {
                 return ScenarioResult::Fail {

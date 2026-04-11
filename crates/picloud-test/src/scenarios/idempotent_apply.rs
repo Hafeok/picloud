@@ -45,22 +45,13 @@ impl Scenario for IdempotentApply {
         "#;
 
         let resource_json = serde_json::json!({
-            "type": "container",
+            "type": "product",
             "name": "idempotent-test",
-            "product": "picloud-test",
-            "idempotencyKey": "idempotent-test-key-001",
-            "spec": {
-                "image": "alpine:latest",
-                "command": ["sleep", "3600"]
-            }
-        });
-
-        let first_apply_body = serde_json::json!({
-            "resources": [resource_json]
+            "version": "1.0.0"
         });
 
         // First apply.
-        match assertions::http_post(ctx, "/api/apply", first_apply_body.clone()).await {
+        match assertions::apply_resource(ctx, resource_json.clone()).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("first apply completed");
             }
@@ -95,8 +86,8 @@ impl Scenario for IdempotentApply {
 
         info!(count = count_after_first, "event count after first apply");
 
-        // Second apply with same idempotency key.
-        match assertions::http_post(ctx, "/api/apply", first_apply_body).await {
+        // Second apply with same resource.
+        match assertions::apply_resource(ctx, resource_json).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("second apply completed");
             }
