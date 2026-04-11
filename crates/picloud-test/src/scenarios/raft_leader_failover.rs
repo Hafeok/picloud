@@ -29,9 +29,18 @@ impl Scenario for RaftLeaderFailover {
             };
         }
 
-        if ctx.config.nodes.len() < 2 {
+        // Check that at least 2 nodes are actually running (not just configured)
+        let cluster_resp = match assertions::http_get(ctx, "/").await {
+            Ok(r) => r.text().await.unwrap_or_default(),
+            Err(_) => return ScenarioResult::Skip {
+                reason: "cannot query cluster members".to_string(),
+            },
+        };
+        let cluster_json: serde_json::Value = serde_json::from_str(&cluster_resp).unwrap_or_default();
+        let active_nodes = cluster_json.get("nodes").and_then(|n| n.as_array()).map(|a| a.len()).unwrap_or(0);
+        if active_nodes < 2 {
             return ScenarioResult::Skip {
-                reason: "need at least 2 nodes for leader failover test".to_string(),
+                reason: format!("need at least 2 active nodes for leader failover test, found {}", active_nodes),
             };
         }
 
