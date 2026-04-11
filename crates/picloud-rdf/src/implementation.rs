@@ -156,6 +156,14 @@ impl OxigraphProjector {
         &self.iri_builder
     }
 
+    /// Returns a reference to the underlying Oxigraph store.
+    ///
+    /// Used by the `DataProductProjector` implementation to run CONSTRUCT
+    /// queries and manage data product named graphs.
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
     /// Persist the current cursor value into the store as a metadata triple.
     /// Only meaningful for disk-backed stores (in-memory stores lose it anyway).
     fn persist_cursor(&self) -> Result<()> {

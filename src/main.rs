@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use picloud_domain::iri::ClusterDomain;
 use picloud_domain::traits::{
-    ClusterIdentityStore, ClusterMembership, DnsRegistry, EventFilter,
+    ClusterIdentityStore, ClusterMembership, DataProductSLOMonitor, DnsRegistry, EventFilter,
     EventLog, IdentityProvider, SecretStore, StateProjector, StorageBackend,
     WorkloadScheduler,
 };
@@ -26,11 +26,11 @@ use picloud_cluster::{ClusterConfig, InMemoryClusterIdentityStore, MdnsCluster};
 use picloud_events::{PersistentEventLog, WriteThroughEventLog};
 use picloud_iam::{InMemorySecretStore, LocalIdentityProvider};
 use picloud_network::{InMemoryDnsRegistry, PlatformCa};
-use picloud_rdf::OxigraphProjector;
+use picloud_rdf::{OxigraphProjector, OxigraphDataProductProjector};
 use picloud_registry::LocalRegistryBackend;
 use picloud_storage::{LocalStorageBackend, StorageReplicator};
 use picloud_workload::ProcessScheduler;
-use picloud_http::{InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner};
+use picloud_http::{CapabilityResolverImpl, InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner, RdfDataProductSLOMonitor};
 
 /// CLI arguments — only `--config` is supported; everything else
 /// comes from the TOML file or environment variables.
@@ -635,6 +635,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // 4b. Create the data product projector — shares the same Oxigraph store (ADR-056)
+    let dp_projector: Arc<dyn picloud_domain::traits::DataProductProjector> = Arc::new(
+        OxigraphDataProductProjector::new(Arc::new(projector.store().clone()))
+    );
+    info!("Data product projector started");
+
     let projector: Arc<dyn StateProjector> = projector;
     info!(
         path = %config.rdf_path.display(),
@@ -966,6 +972,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Image registry started"
     );
 
+    // 13b. Start capability resolver (ADR-055)
+    let capability_resolver: Arc<dyn picloud_domain::traits::CapabilityResolver> = Arc::new(
+        CapabilityResolverImpl::new(
+            projector.clone(),
+            event_log_trait.clone(),
+            config.cluster_domain.clone(),
+        ),
+    );
+    info!("Capability resolver started");
+
     // 14. Start HTTP server
     let http_addr = SocketAddr::new(config.bind_addr, config.http_port);
     let mut http_server = PiCloudHttpServer::new(http_addr, config.cluster_domain.clone())
@@ -983,6 +999,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_otel(otel_stream.clone(), telemetry_store_trait.clone())
         .with_storage_path(config.storage_path.clone())
         .with_registry(registry.clone())
+        .with_capability_resolver(capability_resolver.clone())
+        .with_data_product_projector(dp_projector.clone())
         .with_ca(Arc::new(ca) as Arc<dyn picloud_domain::traits::CertificateAuthority>);
     if let Some(tls) = tls_config {
         http_server = http_server.with_tls_config(tls);
@@ -1019,6 +1037,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         });
+    }
+
+    // 15. Start data product SLO monitor (ADR-056) — checks every 30s
+    {
+        let slo_monitor = RdfDataProductSLOMonitor::new(projector.clone());
+        let event_log_for_slo = event_log_trait.clone();
+        let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                match slo_monitor.check_freshness().await {
+                    Ok(actions) => {
+                        for action in actions {
+                            let event = match &action {
+                                picloud_domain::traits::DataProductSLOAction::Breach(payload) => {
+                                    picloud_domain::events::EventEnvelope::new(
+                                        iri_builder.event_schema("DataProductSLOBreached", 1),
+                                        "DataProductSLOBreached",
+                                        payload.data_product_iri.clone(),
+                                        None,
+                                        Uuid::new_v4(),
+                                        serde_json::json!({
+                                            "data_product_iri": payload.data_product_iri.as_str(),
+                                            "max_age": payload.max_age,
+                                            "actual_age_seconds": payload.actual_age_seconds,
+                                        }),
+                                    )
+                                }
+                                picloud_domain::traits::DataProductSLOAction::Restore(payload) => {
+                                    picloud_domain::events::EventEnvelope::new(
+                                        iri_builder.event_schema("DataProductSLORestored", 1),
+                                        "DataProductSLORestored",
+                                        payload.data_product_iri.clone(),
+                                        None,
+                                        Uuid::new_v4(),
+                                        serde_json::json!({
+                                            "data_product_iri": payload.data_product_iri.as_str(),
+                                            "refreshed_at": payload.refreshed_at.to_rfc3339(),
+                                        }),
+                                    )
+                                }
+                            };
+                            if let Err(e) = event_log_for_slo.append(event).await {
+                                warn!("Failed to emit SLO event: {e}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("SLO monitor check failed: {e}");
+                    }
+                }
+            }
+        });
+        info!("Data product SLO monitor started (30s interval)");
     }
 
     // Log startup summary

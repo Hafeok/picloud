@@ -26,8 +26,9 @@ use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
 use picloud_domain::parser::{ResourceDeclaration, ResourceFile};
 use picloud_domain::traits::{
-    CertificateAuthority, ClusterMembership, EventFilter, EventLog, IdentityProvider,
-    RegistryBackend, StateProjector, StorageBackend, WorkloadScheduler,
+    CapabilityResolver, CertificateAuthority, ClusterMembership, DataProductProjector,
+    EventFilter, EventLog, IdentityProvider, RegistryBackend, StateProjector, StorageBackend,
+    WorkloadScheduler,
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -159,6 +160,10 @@ pub struct PiCloudHttpServer {
     pub drain_state: Arc<crate::proxy::DrainState>,
     /// OCI registry backend (ADR-054).
     pub registry: Option<Arc<dyn RegistryBackend>>,
+    /// Capability resolver (ADR-055).
+    pub capability_resolver: Option<Arc<dyn CapabilityResolver>>,
+    /// Data product projector (ADR-056).
+    pub data_product_projector: Option<Arc<dyn DataProductProjector>>,
 }
 
 impl PiCloudHttpServer {
@@ -182,6 +187,8 @@ impl PiCloudHttpServer {
             ca: None,
             drain_state: Arc::new(crate::proxy::DrainState::new()),
             registry: None,
+            capability_resolver: None,
+            data_product_projector: None,
         }
     }
 
@@ -191,9 +198,21 @@ impl PiCloudHttpServer {
         self
     }
 
+    /// Set the capability resolver (ADR-055).
+    pub fn with_capability_resolver(mut self, resolver: Arc<dyn CapabilityResolver>) -> Self {
+        self.capability_resolver = Some(resolver);
+        self
+    }
+
     /// Set the certificate authority for node enrollment (ADR-053).
     pub fn with_ca(mut self, ca: Arc<dyn CertificateAuthority>) -> Self {
         self.ca = Some(ca);
+        self
+    }
+
+    /// Set the data product projector (ADR-056).
+    pub fn with_data_product_projector(mut self, dp: Arc<dyn DataProductProjector>) -> Self {
+        self.data_product_projector = Some(dp);
         self
     }
 
@@ -378,6 +397,11 @@ impl PiCloudHttpServer {
             .route("/.well-known/ca", get(handle_ca_export))
             // SDK publish (ADR-033)
             .route("/api/sdk/publish", post(handle_stub_accepted))
+            // Data product refresh (ADR-056)
+            .route("/api/data-products/:product/:name/refresh", post(handle_data_product_refresh))
+            // Capability routing (ADR-055)
+            .route("/api/capabilities/route", post(handle_capability_route))
+            .route("/api/capabilities", get(handle_capabilities_list))
             // Certificate management (ADR-053)
             .route("/api/certs", get(handle_certs_list))
             .route("/api/pki/crl", get(handle_pki_crl))
@@ -405,6 +429,8 @@ impl PiCloudHttpServer {
                 ca: self.ca.clone(),
                 drain_state: self.drain_state.clone(),
                 registry: self.registry.clone(),
+                capability_resolver: self.capability_resolver.clone(),
+                data_product_projector: self.data_product_projector.clone(),
             });
 
         // Merge any extra routes (e.g. Raft RPC endpoints from picloud-cluster)
@@ -477,6 +503,10 @@ struct AppState {
     drain_state: Arc<crate::proxy::DrainState>,
     /// OCI registry backend (ADR-054).
     registry: Option<Arc<dyn RegistryBackend>>,
+    /// Capability resolver (ADR-055).
+    capability_resolver: Option<Arc<dyn CapabilityResolver>>,
+    /// Data product projector (ADR-056).
+    data_product_projector: Option<Arc<dyn DataProductProjector>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -4848,6 +4878,198 @@ fn collect_volume_files(
                 mtime,
             });
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Data product refresh (ADR-056)
+// ---------------------------------------------------------------------------
+
+/// POST /api/data-products/:product/:name/refresh — trigger a manual data product projection refresh
+async fn handle_data_product_refresh(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((product, name)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let Some(ref dp_projector) = state.data_product_projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "data product projector not available" })),
+        );
+    };
+
+    let Some(ref projector) = state.projector else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "state projector not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+
+    // Derive IRIs
+    let data_product_iri = ResourceIri(format!(
+        "{}/data-products/{name}",
+        iri_builder.product(&product).as_str()
+    ));
+    let source_graph_iri = ResourceIri(format!(
+        "{}/graph",
+        iri_builder.product(&product).as_str()
+    ));
+
+    // Look up the data product's CONSTRUCT query from the RDF graph
+    let query_sparql = format!(
+        "PREFIX pc: <https://picloud.local/ontology#> \
+         SELECT ?constructQuery WHERE {{ \
+             <{}> pc:constructQuery ?constructQuery . \
+         }}",
+        data_product_iri.as_str()
+    );
+    let construct_query = match projector.query(&query_sparql).await {
+        Ok(result) => {
+            if let Some(binding) = result.bindings.first() {
+                if let Some(q) = binding.get("constructQuery").and_then(|v| v.as_str()) {
+                    q.to_owned()
+                } else {
+                    // Fallback: project all triples from the source graph
+                    format!(
+                        "CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{}> {{ ?s ?p ?o }} }}",
+                        source_graph_iri.as_str()
+                    )
+                }
+            } else {
+                format!(
+                    "CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{}> {{ ?s ?p ?o }} }}",
+                    source_graph_iri.as_str()
+                )
+            }
+        }
+        Err(_) => {
+            format!(
+                "CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{}> {{ ?s ?p ?o }} }}",
+                source_graph_iri.as_str()
+            )
+        }
+    };
+
+    match dp_projector
+        .refresh_projection(&data_product_iri, &construct_query, &source_graph_iri)
+        .await
+    {
+        Ok(result) => {
+            // Optionally emit a DataProductRefreshed event
+            if let Some(ref event_log) = state.event_log {
+                let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+                let event = EventEnvelope::new(
+                    iri_builder.event_schema("DataProductRefreshed", 1),
+                    "DataProductRefreshed",
+                    data_product_iri.clone(),
+                    Some(product.clone()),
+                    Uuid::new_v4(),
+                    serde_json::json!({
+                        "data_product_iri": data_product_iri.as_str(),
+                        "triple_count": result.triple_count,
+                        "duration_ms": result.duration_ms,
+                        "trigger_event": "manual_refresh",
+                        "refreshed_at": chrono::Utc::now().to_rfc3339(),
+                    }),
+                );
+                if let Err(e) = event_log.append(event).await {
+                    tracing::warn!(error = %e, "Failed to emit DataProductRefreshed event");
+                }
+            }
+
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "refreshed",
+                    "data_product": data_product_iri.as_str(),
+                    "triple_count": result.triple_count,
+                    "duration_ms": result.duration_ms,
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Capability routing (ADR-055)
+// ---------------------------------------------------------------------------
+
+/// Request payload for POST /api/capabilities/route
+#[derive(Debug, Deserialize)]
+struct CapabilityRoutePayload {
+    /// The capability name to route to (e.g. "gps-to-place")
+    capability: String,
+    /// The event to route to the implementor
+    event: EventEnvelope,
+}
+
+/// POST /api/capabilities/route — route an event through a capability
+async fn handle_capability_route(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<CapabilityRoutePayload>,
+) -> impl IntoResponse {
+    let Some(ref resolver) = state.capability_resolver else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "capability resolver not available" })),
+        );
+    };
+
+    match resolver
+        .route_capability_event(&payload.capability, &payload.event)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "routed",
+                "capability": payload.capability,
+            })),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// GET /api/capabilities — list all capabilities and their status
+async fn handle_capabilities_list(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    let Some(ref resolver) = state.capability_resolver else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "capability resolver not available" })),
+        );
+    };
+
+    match resolver.list_capabilities().await {
+        Ok(capabilities) => {
+            let items: Vec<serde_json::Value> = capabilities
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "iri": c.capability_iri.as_str(),
+                        "name": c.name,
+                        "version": c.version,
+                        "fulfilled": c.fulfilled,
+                        "implementors": c.implementors,
+                        "consumers": c.consumers,
+                    })
+                })
+                .collect();
+            (StatusCode::OK, Json(serde_json::json!({ "capabilities": items })))
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
     }
 }
 

@@ -12,6 +12,8 @@
 //! On restart, `OxigraphProjector::open()` restores from disk and replays
 //! only the events missed since the last shutdown.
 
+pub mod data_product;
 pub mod implementation;
 
+pub use data_product::OxigraphDataProductProjector;
 pub use implementation::OxigraphProjector;

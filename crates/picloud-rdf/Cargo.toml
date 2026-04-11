@@ -17,6 +17,7 @@ serde_json     = { workspace = true }
 uuid           = { workspace = true }
 oxigraph   = { workspace = true }
 sophia_api = { workspace = true }
+chrono     = { workspace = true }
 
 [features]
 rocksdb = ["oxigraph/rocksdb"]
