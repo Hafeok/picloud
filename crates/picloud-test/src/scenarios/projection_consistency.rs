@@ -29,19 +29,24 @@ impl Scenario for ProjectionConsistency {
             };
         }
 
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
         // Apply a test resource.
         let test_name = format!("test-proj-{}", uuid::Uuid::new_v4().as_simple());
-        let command = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": test_name,
-            "resource_type": "product",
+        let resource = serde_json::json!({
+            "type": "product",
             "name": test_name,
+            "version": "1.0.0"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", command).await {
+        if let Err(e) = assertions::apply_resource(ctx, resource).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: format!("failed to POST command: {}", e),
+                reason: format!("failed to apply product: {}", e),
             };
         }
 

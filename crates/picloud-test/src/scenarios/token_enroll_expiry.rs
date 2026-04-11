@@ -29,7 +29,7 @@ impl Scenario for TokenEnrollExpiry {
         }
 
         // 1. Check enrollment token endpoint
-        if !assertions::feature_available(ctx, "/api/nodes/enrollment-tokens").await {
+        if !assertions::feature_available(ctx, "/api/enroll-node").await {
             return ScenarioResult::Skip {
                 reason: "enrollment token endpoint not available".to_string(),
             };
@@ -41,7 +41,7 @@ impl Scenario for TokenEnrollExpiry {
         });
 
         let token_resp =
-            match assertions::http_post(ctx, "/api/nodes/enrollment-tokens", token_req).await {
+            match assertions::http_post(ctx, "/api/enroll-node", token_req).await {
                 Ok(r) => r,
                 Err(e) => {
                     return ScenarioResult::Skip {
@@ -90,7 +90,7 @@ impl Scenario for TokenEnrollExpiry {
             "token": expired_token,
         });
 
-        match assertions::http_post(ctx, "/enroll", enroll_body).await {
+        match assertions::http_post(ctx, "/auth/enroll", enroll_body).await {
             Ok(resp) => {
                 let enroll_status = resp.status().as_u16();
                 if enroll_status == 401 || enroll_status == 403 || enroll_status == 410 {

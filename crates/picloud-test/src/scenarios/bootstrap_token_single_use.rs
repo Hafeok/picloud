@@ -30,16 +30,16 @@ impl Scenario for BootstrapTokenSingleUse {
             };
         }
 
-        if !assertions::feature_available(ctx, "/api/auth/bootstrap").await {
+        if !assertions::feature_available(ctx, "/api/enroll-node").await {
             return ScenarioResult::Skip {
-                reason: "bootstrap token API not available".to_string(),
+                reason: "enrollment API not available".to_string(),
             };
         }
 
         // Generate a bootstrap token if the generate endpoint exists.
         let token_resp = match assertions::http_post(
             ctx,
-            "/api/auth/bootstrap/generate",
+            "/api/enroll-node",
             serde_json::json!({"ttl_seconds": 300}),
         )
         .await
@@ -100,7 +100,7 @@ impl Scenario for BootstrapTokenSingleUse {
 
         let first_use = match assertions::http_post(
             ctx,
-            "/api/auth/bootstrap/enroll",
+            "/auth/enroll",
             enroll_body.clone(),
         )
         .await
@@ -120,7 +120,7 @@ impl Scenario for BootstrapTokenSingleUse {
         // Second use of the same token — must be rejected.
         let second_use = match assertions::http_post(
             ctx,
-            "/api/auth/bootstrap/enroll",
+            "/auth/enroll",
             enroll_body,
         )
         .await

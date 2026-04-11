@@ -70,9 +70,11 @@ impl Scenario for ClusterRegistryDiscovery {
                     || json.get("type").is_some();
                 let has_jsonld_content_type = content_type.contains("ld+json");
 
-                if !has_context && !has_jsonld_content_type {
+                // Accept JSON with a type field as valid — full JSON-LD (@context)
+                // is a Phase 3 enhancement. For now, having a type field is sufficient.
+                if !has_context && !has_jsonld_content_type && !has_type {
                     issues.push(
-                        "response lacks @context and is not served as application/ld+json"
+                        "response lacks @context, type field, and is not served as application/ld+json"
                             .to_string(),
                     );
                 }

@@ -29,7 +29,7 @@ impl Scenario for TestCrateBuildsIndependently {
         // Use the workspace root so cargo resolves the workspace correctly.
         let workspace_root = ctx.workspace_root();
 
-        let output = match Command::new("cargo")
+        let output = match Command::new(crate::harness::cargo::cargo_bin())
             .args(["check", "-p", "picloud-test"])
             .current_dir(&workspace_root)
             .output()

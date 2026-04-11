@@ -161,6 +161,27 @@ pub enum PlatformEvent {
     RegistryGCStarted(RegistryGCStartedPayload),
     RegistryGCCompleted(RegistryGCCompletedPayload),
     RegistryAuthFailed(RegistryAuthFailedPayload),
+
+    // --- Capability events (ADR-055) ---
+    CapabilityDeclared(CapabilityDeclaredPayload),
+    CapabilityReady(CapabilityReadyPayload),
+    CapabilityImplementorAdded(CapabilityImplementorAddedPayload),
+    CapabilityImplementorRemoved(CapabilityImplementorRemovedPayload),
+    CapabilityUnfulfilled(CapabilityUnfulfilledPayload),
+    CapabilityDeleted(CapabilityDeletedPayload),
+    CapabilityRoutingFailed(CapabilityRoutingFailedPayload),
+
+    // --- Data Domain events (ADR-056) ---
+    DataDomainDeclared(DataDomainDeclaredPayload),
+    DataDomainDeleted(DataDomainDeletedPayload),
+
+    // --- Data Product events (ADR-056) ---
+    DataProductDeclared(DataProductDeclaredPayload),
+    DataProductReady(DataProductReadyPayload),
+    DataProductRefreshed(DataProductRefreshedPayload),
+    DataProductSLOBreached(DataProductSLOBreachedPayload),
+    DataProductSLORestored(DataProductSLORestoredPayload),
+    DataProductDeleted(DataProductDeletedPayload),
 }
 
 // --- Payload types ---
@@ -864,6 +885,153 @@ pub struct RegistryAuthFailedPayload {
     pub operation: String,
     pub repository: String,
     pub reason: String,
+}
+
+// --- Capability payloads (ADR-055) ---
+
+/// Payload for CapabilityDeclared event (ADR-055).
+/// Emitted when a capability resource is created and validated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityDeclaredPayload {
+    pub capability_iri: ResourceIri,
+    pub name: String,
+    pub version: String,
+    pub input_event: String,
+    pub output_event: String,
+}
+
+/// Payload for CapabilityReady event (ADR-055).
+/// Emitted when at least one implementing Product is deployed and conformant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityReadyPayload {
+    pub capability_iri: ResourceIri,
+    pub implementor_product: String,
+}
+
+/// Payload for CapabilityImplementorAdded event (ADR-055).
+/// Emitted when a Product declares `implements` for an existing capability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityImplementorAddedPayload {
+    pub capability_iri: ResourceIri,
+    pub capability_name: String,
+    pub product_iri: ResourceIri,
+    pub product_name: String,
+    pub version: String,
+}
+
+/// Payload for CapabilityImplementorRemoved event (ADR-055).
+/// Emitted when an implementing Product is removed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityImplementorRemovedPayload {
+    pub capability_iri: ResourceIri,
+    pub capability_name: String,
+    pub product_iri: ResourceIri,
+    pub product_name: String,
+}
+
+/// Payload for CapabilityUnfulfilled event (ADR-055).
+/// Emitted when no implementing Product exists for a capability that has consumers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityUnfulfilledPayload {
+    pub capability_iri: ResourceIri,
+    pub capability_name: String,
+    /// Products that depend on this capability
+    pub consumer_products: Vec<String>,
+}
+
+/// Payload for CapabilityDeleted event (ADR-055).
+/// Emitted when a capability is removed (only when no consumers exist).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityDeletedPayload {
+    pub capability_iri: ResourceIri,
+    pub capability_name: String,
+}
+
+/// Payload for CapabilityRoutingFailed event (ADR-055).
+/// Emitted when an input event cannot be routed to an implementor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityRoutingFailedPayload {
+    pub capability_iri: ResourceIri,
+    pub input_event_id: Uuid,
+    pub reason: String,
+}
+
+// --- Data Domain payloads (ADR-056) ---
+
+/// Payload for DataDomainDeclared event (ADR-056).
+/// Emitted when a data domain governance boundary is created.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataDomainDeclaredPayload {
+    pub domain_iri: ResourceIri,
+    pub name: String,
+    pub steward: String,
+    pub sensitivity: String,
+}
+
+/// Payload for DataDomainDeleted event (ADR-056).
+/// Emitted when a data domain is removed (only when no member data products exist).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataDomainDeletedPayload {
+    pub domain_iri: ResourceIri,
+    pub name: String,
+}
+
+// --- Data Product payloads (ADR-056) ---
+
+/// Payload for DataProductDeclared event (ADR-056).
+/// Emitted when a data product resource is created and validated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductDeclaredPayload {
+    pub data_product_iri: ResourceIri,
+    pub name: String,
+    pub product: String,
+    pub domain: String,
+    pub version: String,
+}
+
+/// Payload for DataProductReady event (ADR-056).
+/// Emitted when a data product's first projection is complete.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductReadyPayload {
+    pub data_product_iri: ResourceIri,
+    pub triple_count: u64,
+}
+
+/// Payload for DataProductRefreshed event (ADR-056).
+/// Emitted after a successful projection rebuild on a trigger event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductRefreshedPayload {
+    pub data_product_iri: ResourceIri,
+    pub triple_count: u64,
+    pub duration_ms: u64,
+    pub trigger_event: String,
+    pub refreshed_at: DateTime<Utc>,
+}
+
+/// Payload for DataProductSLOBreached event (ADR-056).
+/// Emitted when a data product's freshness exceeds its declared maxAge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductSLOBreachedPayload {
+    pub data_product_iri: ResourceIri,
+    pub max_age: String,
+    pub actual_age_seconds: u64,
+}
+
+/// Payload for DataProductSLORestored event (ADR-056).
+/// Emitted when a breached data product is refreshed and meets its SLO again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductSLORestoredPayload {
+    pub data_product_iri: ResourceIri,
+    pub refreshed_at: DateTime<Utc>,
+}
+
+/// Payload for DataProductDeleted event (ADR-056).
+/// Emitted when a data product is removed (only when no consumers exist).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductDeletedPayload {
+    pub data_product_iri: ResourceIri,
+    pub name: String,
+    pub product: String,
 }
 
 #[cfg(test)]

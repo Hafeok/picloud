@@ -28,17 +28,25 @@ impl Scenario for NewResourceFlags {
             };
         }
 
-        // 1. Declare a feature flag resource
-        let flag_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": "test-flags-product",
-            "resource_type": "feature-flag",
+        // 1. Ensure the parent product exists, then declare a feature flag resource
+        let product_resource = serde_json::json!({
+            "type": "product",
+            "name": "test-flags-product",
+            "version": "1.0.0"
+        });
+        let _ = assertions::apply_resource(ctx, product_resource).await;
+
+        let flag_resource = serde_json::json!({
+            "type": "config",
             "name": "test-new-flag",
-            "enabled": true,
-            "version": ">= 1",
+            "product": "test-flags-product",
+            "entries": [
+                { "key": "enabled", "value": "true" },
+                { "key": "version", "value": ">= 1" }
+            ]
         });
 
-        match assertions::http_post(ctx, "/api/commands", flag_cmd).await {
+        match assertions::apply_resource(ctx, flag_resource).await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 if status == 404 || status == 501 {
@@ -49,7 +57,7 @@ impl Scenario for NewResourceFlags {
             }
             Err(e) => {
                 return ScenarioResult::Skip {
-                    reason: format!("command endpoint not available: {}", e),
+                    reason: format!("apply endpoint not available: {}", e),
                 };
             }
         }

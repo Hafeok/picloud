@@ -31,7 +31,7 @@ impl Scenario for CsrWildcardRejection {
             };
         }
 
-        let enroll_path = "/enroll";
+        let enroll_path = "/auth/enroll";
         if !assertions::feature_available(ctx, enroll_path).await {
             return ScenarioResult::Skip {
                 reason: "enrollment endpoint not implemented yet".to_string(),

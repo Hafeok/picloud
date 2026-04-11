@@ -108,6 +108,38 @@ pub enum PiCloudError {
     #[error("Registry error: {reason}")]
     RegistryError { reason: String },
 
+    // --- Capability errors (ADR-055) ---
+    #[error("Capability not found: {name}")]
+    CapabilityNotFound { name: String },
+
+    #[error("Capability unfulfilled: no implementor for '{capability}' at version >= {min_version}")]
+    CapabilityUnfulfilled { capability: String, min_version: String },
+
+    #[error("Capability deletion blocked: {consumers} consumer(s) depend on '{capability}'")]
+    CapabilityDeletionBlocked { capability: String, consumers: usize },
+
+    #[error("Capability SHACL conformance failed for product '{product}' implementing '{capability}': {reason}")]
+    CapabilityShaclConformanceFailed { product: String, capability: String, reason: String },
+
+    #[error("Capability routing failed for '{capability}': {reason}")]
+    CapabilityRoutingFailed { capability: String, reason: String },
+
+    // --- Data Product / Domain errors (ADR-056) ---
+    #[error("Data domain not found: {name}")]
+    DataDomainNotFound { name: String },
+
+    #[error("Data domain deletion blocked: {members} data product(s) still assigned to '{domain}'")]
+    DataDomainDeletionBlocked { domain: String, members: usize },
+
+    #[error("Data product not found: {name}")]
+    DataProductNotFound { name: String },
+
+    #[error("Data product deletion blocked: {consumers} consumer(s) depend on '{data_product}'")]
+    DataProductDeletionBlocked { data_product: String, consumers: usize },
+
+    #[error("Cross-product graph access denied: {requester} cannot access {target}'s internal graph")]
+    CrossProductGraphAccessDenied { requester: String, target: String },
+
     // --- Generic ---
     #[error("Internal error: {0}")]
     Internal(String),

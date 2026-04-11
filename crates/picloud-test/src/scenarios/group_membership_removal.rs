@@ -30,13 +30,12 @@ impl Scenario for GroupMembershipRemoval {
 
         // 1. Add a tag to trigger group membership
         let tag_add = serde_json::json!({
-            "type": "TagAdded",
-            "resource_iri": "https://picloud.local/platform/identities/test-user",
+            "resource": "https://picloud.local/platform/identities/test-user",
             "key": "team",
-            "value": "backend",
+            "value": "backend"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", tag_add).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/tags/add", tag_add).await {
             return ScenarioResult::Skip {
                 reason: format!("tag endpoint not available: {}", e),
             };
@@ -61,13 +60,12 @@ impl Scenario for GroupMembershipRemoval {
 
         // 3. Remove the tag to trigger membership removal
         let tag_remove = serde_json::json!({
-            "type": "TagRemoved",
-            "resource_iri": "https://picloud.local/platform/identities/test-user",
+            "resource": "https://picloud.local/platform/identities/test-user",
             "key": "team",
-            "value": "backend",
+            "value": "backend"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", tag_remove).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/tags/remove", tag_remove).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to remove tag: {}", e),

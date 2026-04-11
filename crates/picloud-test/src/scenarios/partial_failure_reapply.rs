@@ -37,7 +37,7 @@ impl Scenario for PartialFailureReapply {
             };
         }
 
-        if !assertions::feature_available(ctx, "/api/resources").await {
+        if !assertions::feature_available(ctx, "/api/apply").await {
             return ScenarioResult::Skip {
                 reason: "resource API not available".to_string(),
             };
@@ -46,20 +46,22 @@ impl Scenario for PartialFailureReapply {
         let idempotency_key = format!("partial-fail-{}", uuid::Uuid::new_v4());
 
         let resource_body = serde_json::json!({
-            "type": "container",
-            "name": "partial-fail-test",
-            "product": "picloud-test",
-            "idempotencyKey": idempotency_key,
-            "spec": {
-                "image": "alpine:latest",
-                "command": ["sleep", "3600"]
-            }
+            "resources": [{
+                "type": "container",
+                "name": "partial-fail-test",
+                "product": "picloud-test",
+                "idempotencyKey": idempotency_key,
+                "spec": {
+                    "image": "alpine:latest",
+                    "command": ["sleep", "3600"]
+                }
+            }]
         });
 
         // First apply — attempt to apply the resource.
         info!("starting first apply (will attempt mid-apply interruption)");
         let first_result =
-            assertions::http_post(ctx, "/api/resources", resource_body.clone()).await;
+            assertions::http_post(ctx, "/api/apply", resource_body.clone()).await;
 
         match first_result {
             Ok(resp) => {
@@ -75,7 +77,7 @@ impl Scenario for PartialFailureReapply {
 
         // Re-apply with the same idempotency key.
         info!("re-applying with same idempotency key");
-        match assertions::http_post(ctx, "/api/resources", resource_body).await {
+        match assertions::http_post(ctx, "/api/apply", resource_body).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("re-apply completed successfully");
             }

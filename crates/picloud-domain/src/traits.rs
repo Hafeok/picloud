@@ -556,6 +556,94 @@ pub trait TokenExchange: Send + Sync {
     ) -> Result<crate::identity::ResolvedTokenClaims>;
 }
 
+// ---- Capability Resolution (ADR-055) ----
+
+/// Resolve capabilities to their implementing Products and route events.
+/// Implemented by: picloud-http (capability module)
+#[async_trait]
+pub trait CapabilityResolver: Send + Sync {
+    /// Find the active implementor for a capability, selecting the highest
+    /// version that satisfies the consumer's minVersion constraint.
+    async fn resolve_implementor(
+        &self,
+        capability_name: &str,
+        min_version: &str,
+    ) -> Result<CapabilityResolution>;
+
+    /// Route an input event to the implementing Product's event bus.
+    async fn route_capability_event(
+        &self,
+        capability_name: &str,
+        event: &EventEnvelope,
+    ) -> Result<()>;
+
+    /// List all capabilities and their fulfilment status.
+    async fn list_capabilities(&self) -> Result<Vec<CapabilityStatus>>;
+}
+
+/// The result of resolving a capability to an implementing Product.
+#[derive(Debug, Clone)]
+pub struct CapabilityResolution {
+    pub capability_name: String,
+    pub implementor_product: String,
+    pub implementor_version: String,
+}
+
+/// Status of a capability in the cluster.
+#[derive(Debug, Clone)]
+pub struct CapabilityStatus {
+    pub capability_iri: ResourceIri,
+    pub name: String,
+    pub version: String,
+    pub fulfilled: bool,
+    pub implementors: Vec<String>,
+    pub consumers: Vec<String>,
+}
+
+// ---- Data Product Projection (ADR-056) ----
+
+/// Run SPARQL CONSTRUCT projections and manage data product named graphs.
+/// Implemented by: picloud-rdf (data product module)
+#[async_trait]
+pub trait DataProductProjector: Send + Sync {
+    /// Execute a CONSTRUCT projection and atomically swap the data product graph.
+    async fn refresh_projection(
+        &self,
+        data_product_iri: &ResourceIri,
+        construct_query: &str,
+        source_graph_iri: &ResourceIri,
+    ) -> Result<DataProductRefreshResult>;
+
+    /// Query a data product's published named graph.
+    async fn query_data_product(
+        &self,
+        data_product_iri: &ResourceIri,
+        sparql: &str,
+    ) -> Result<QueryResult>;
+}
+
+/// Result of a data product projection refresh.
+#[derive(Debug, Clone)]
+pub struct DataProductRefreshResult {
+    pub triple_count: u64,
+    pub duration_ms: u64,
+}
+
+/// Monitor data product freshness and emit SLO breach/restore events.
+/// Implemented by: picloud-http (freshness monitor)
+#[async_trait]
+pub trait DataProductSLOMonitor: Send + Sync {
+    /// Check all data products for SLO breaches. Returns any breach/restore events.
+    async fn check_freshness(&self) -> Result<Vec<DataProductSLOAction>>;
+}
+
+/// An action produced by the freshness monitor.
+#[derive(Debug, Clone)]
+pub enum DataProductSLOAction {
+    Breach(crate::events::DataProductSLOBreachedPayload),
+    Restore(crate::events::DataProductSLORestoredPayload),
+}
+
 // ---- OCI Registry (ADR-054) ----
 
 /// Store and serve OCI container images via the Distribution API v2.

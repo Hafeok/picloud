@@ -33,7 +33,7 @@ fn has_leader(body: &str) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    json.pointer("/results/bindings")
+    json.pointer("/results")
         .and_then(|v| v.as_array())
         .map(|a| !a.is_empty())
         .unwrap_or(false)
@@ -84,12 +84,11 @@ impl Scenario for RollingUpgradeSequenceScenario {
             let mut gap_count = 0u64;
 
             while !poll_done.load(Ordering::Relaxed) {
-                let url = format!("{}/sparql", poll_base_url);
+                let url = format!("{}/graph", poll_base_url);
                 let leader_present = match poll_client
-                    .post(&url)
-                    .header("Content-Type", "application/sparql-query")
+                    .get(&url)
+                    .query(&[("query", LEADER_QUERY)])
                     .header("Accept", "application/sparql-results+json")
-                    .body(LEADER_QUERY.to_string())
                     .send()
                     .await
                 {

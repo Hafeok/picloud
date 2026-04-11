@@ -42,6 +42,7 @@ impl Scenario for NoCrossSliceImports {
                 name.starts_with("picloud-")
                     && name != "picloud-domain"
                     && name != "picloud-test"
+                    && name != "picloud-cli" // composition root, not a slice
                     && e.path().join("Cargo.toml").exists()
             })
             .map(|e| e.file_name().to_string_lossy().to_string())

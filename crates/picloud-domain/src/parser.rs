@@ -60,6 +60,14 @@ pub enum ResourceDeclaration {
     /// An M2M permission grant between products (ADR-051)
     #[serde(rename = "m2m-permission")]
     M2mPermission(M2mPermissionDecl),
+    /// A cluster-scoped capability interface contract (ADR-055)
+    Capability(CapabilityDecl),
+    /// A cluster-scoped data domain governance boundary (ADR-056)
+    #[serde(rename = "data-domain")]
+    DataDomain(DataDomainDecl),
+    /// A product-scoped data product analytical projection (ADR-056)
+    #[serde(rename = "data-product")]
+    DataProduct(DataProductDecl),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,9 +76,34 @@ pub struct ProductDecl {
     pub version: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Capabilities this product implements (ADR-055), e.g. ["gps-to-place@1.0.0"]
+    #[serde(default)]
+    pub implements: Vec<String>,
+    /// Capabilities this product depends on (ADR-055)
+    #[serde(default)]
+    pub capabilities: Vec<CapabilityDepDecl>,
+    /// Data products this product consumes (ADR-056)
+    #[serde(default, rename = "dataProducts")]
+    pub data_products: Vec<DataProductDepDecl>,
     /// Tags attached to this resource (ADR-036)
     #[serde(default)]
     pub tags: HashMap<String, String>,
+}
+
+/// A capability dependency as declared in a product resource (ADR-055)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityDepDecl {
+    pub capability: String,
+    #[serde(rename = "minVersion")]
+    pub min_version: String,
+}
+
+/// A data product dependency as declared in a product resource (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductDepDecl {
+    pub source: String,
+    #[serde(rename = "minVersion")]
+    pub min_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +394,91 @@ pub struct M2mPermissionDecl {
     pub tags: HashMap<String, String>,
 }
 
+/// A capability declaration (ADR-055)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityDecl {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub ontology: Option<String>,
+    #[serde(default)]
+    pub shapes: Option<String>,
+    pub events: CapabilityEventsDecl,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+/// The input/output event types for a capability (ADR-055)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityEventsDecl {
+    pub input: String,
+    pub output: String,
+}
+
+/// A data domain declaration (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataDomainDecl {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub steward: String,
+    #[serde(default = "default_sensitivity")]
+    pub sensitivity: String,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+fn default_sensitivity() -> String {
+    "internal".to_string()
+}
+
+/// Freshness configuration block for a data product (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FreshnessDeclBlock {
+    #[serde(rename = "maxAge")]
+    pub max_age: String,
+    pub triggers: Vec<String>,
+}
+
+/// Access configuration block for a data product (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessDeclBlock {
+    #[serde(default = "default_cluster_visibility")]
+    pub visibility: String,
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+fn default_cluster_visibility() -> String {
+    "cluster".to_string()
+}
+
+/// A data product declaration (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductDecl {
+    pub name: String,
+    pub product: String,
+    pub domain: String,
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub ontology: Option<String>,
+    #[serde(default)]
+    pub shapes: Option<String>,
+    pub projection: String,
+    pub freshness: FreshnessDeclBlock,
+    #[serde(default)]
+    pub access: Option<AccessDeclBlock>,
+    /// Tags attached to this resource (ADR-036)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
 fn default_scope() -> String {
     "platform".to_string()
 }
@@ -470,10 +588,14 @@ impl ResourceFile {
     /// the containers that mount them.
     pub fn sort_for_provisioning(&mut self) {
         self.resources.sort_by_key(|decl| match decl {
-            ResourceDeclaration::Product(_) => 0,
-            ResourceDeclaration::Volume(_) => 1,
-            ResourceDeclaration::Container(_) | ResourceDeclaration::Binary(_) => 2,
-            _ => 3,
+            // Capabilities and data domains are cluster-scoped, provision first
+            ResourceDeclaration::Capability(_) | ResourceDeclaration::DataDomain(_) => 0,
+            ResourceDeclaration::Product(_) => 1,
+            ResourceDeclaration::Volume(_) => 2,
+            ResourceDeclaration::Container(_) | ResourceDeclaration::Binary(_) => 3,
+            // Data products after their owning products
+            ResourceDeclaration::DataProduct(_) => 4,
+            _ => 5,
         });
     }
 }
@@ -598,6 +720,54 @@ impl ResourceDeclaration {
                 }
                 Ok(())
             }
+            ResourceDeclaration::Capability(c) => {
+                if c.name.is_empty() {
+                    return Err(validation_err("capability", "name cannot be empty"));
+                }
+                if c.version.is_empty() {
+                    return Err(validation_err(&c.name, "version cannot be empty"));
+                }
+                if c.events.input.is_empty() || c.events.output.is_empty() {
+                    return Err(validation_err(&c.name, "capability must declare both input and output events"));
+                }
+                if c.ontology.is_none() && c.shapes.is_none() {
+                    return Err(validation_err(&c.name, "capability must declare ontology or shapes (or both)"));
+                }
+                Ok(())
+            }
+            ResourceDeclaration::DataDomain(d) => {
+                if d.name.is_empty() {
+                    return Err(validation_err("data-domain", "name cannot be empty"));
+                }
+                if d.steward.is_empty() {
+                    return Err(validation_err(&d.name, "steward cannot be empty"));
+                }
+                Ok(())
+            }
+            ResourceDeclaration::DataProduct(dp) => {
+                if dp.name.is_empty() || dp.product.is_empty() {
+                    return Err(validation_err("data-product", "name and product cannot be empty"));
+                }
+                if dp.domain.is_empty() {
+                    return Err(validation_err(&dp.name, "data product must belong to a data domain"));
+                }
+                if dp.version.is_empty() {
+                    return Err(validation_err(&dp.name, "version cannot be empty"));
+                }
+                if dp.projection.is_empty() {
+                    return Err(validation_err(&dp.name, "projection query path cannot be empty"));
+                }
+                if dp.freshness.triggers.is_empty() {
+                    return Err(validation_err(&dp.name, "data product must declare at least one trigger event"));
+                }
+                if dp.freshness.max_age.is_empty() {
+                    return Err(validation_err(&dp.name, "data product must declare freshness.maxAge"));
+                }
+                if dp.ontology.is_none() && dp.shapes.is_none() {
+                    return Err(validation_err(&dp.name, "data product must declare ontology or shapes (or both)"));
+                }
+                Ok(())
+            }
         }
     }
 
@@ -618,6 +788,9 @@ impl ResourceDeclaration {
             ResourceDeclaration::InferenceRule(_) => None, // rules have their own scope field
             ResourceDeclaration::Scope(s) => Some(&s.product),
             ResourceDeclaration::M2mPermission(m) => Some(&m.product),
+            ResourceDeclaration::Capability(_) => None, // cluster-scoped
+            ResourceDeclaration::DataDomain(_) => None, // cluster-scoped
+            ResourceDeclaration::DataProduct(dp) => Some(&dp.product),
         }
     }
 
@@ -638,6 +811,9 @@ impl ResourceDeclaration {
             ResourceDeclaration::InferenceRule(r) => &r.name,
             ResourceDeclaration::Scope(s) => &s.name,
             ResourceDeclaration::M2mPermission(m) => &m.name,
+            ResourceDeclaration::Capability(c) => &c.name,
+            ResourceDeclaration::DataDomain(d) => &d.name,
+            ResourceDeclaration::DataProduct(dp) => &dp.name,
         }
     }
 
@@ -658,6 +834,9 @@ impl ResourceDeclaration {
             ResourceDeclaration::InferenceRule(r) => &r.tags,
             ResourceDeclaration::Scope(s) => &s.tags,
             ResourceDeclaration::M2mPermission(m) => &m.tags,
+            ResourceDeclaration::Capability(c) => &c.tags,
+            ResourceDeclaration::DataDomain(d) => &d.tags,
+            ResourceDeclaration::DataProduct(dp) => &dp.tags,
         }
     }
 
@@ -678,6 +857,9 @@ impl ResourceDeclaration {
             ResourceDeclaration::InferenceRule(_) => "inference-rule",
             ResourceDeclaration::Scope(_) => "scope",
             ResourceDeclaration::M2mPermission(_) => "m2m-permission",
+            ResourceDeclaration::Capability(_) => "capability",
+            ResourceDeclaration::DataDomain(_) => "data-domain",
+            ResourceDeclaration::DataProduct(_) => "data-product",
         }
     }
 }
@@ -1028,10 +1210,16 @@ fn parse_bicep_declaration(
 
     match resource_type {
         "product" => {
+            let implements = get_string_array(&kv, "implements").unwrap_or_default();
+            let capabilities = get_capability_deps(&kv, "capabilities")?;
+            let data_products = get_data_product_deps(&kv, "dataProducts")?;
             Ok(ResourceDeclaration::Product(ProductDecl {
                 name: name.to_string(),
                 version: get_string_required(&kv, "version", name)?,
                 description: get_string_optional(&kv, "description"),
+                implements,
+                capabilities,
+                data_products,
                 tags: get_tags_map(&kv, "tags"),
             }))
         }
@@ -1181,6 +1369,50 @@ fn parse_bicep_declaration(
                 client: get_string_required(&kv, "client", name)?,
                 scopes,
                 description: get_string_optional(&kv, "description"),
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "capability" => {
+            let input = get_nested_string(&kv, "events", "input")?
+                .ok_or_else(|| validation_err(name, "capability events.input is required"))?;
+            let output = get_nested_string(&kv, "events", "output")?
+                .ok_or_else(|| validation_err(name, "capability events.output is required"))?;
+            Ok(ResourceDeclaration::Capability(CapabilityDecl {
+                name: name.to_string(),
+                version: get_string_required(&kv, "version", name)?,
+                description: get_string_optional(&kv, "description"),
+                ontology: get_string_optional(&kv, "ontology"),
+                shapes: get_string_optional(&kv, "shapes"),
+                events: CapabilityEventsDecl { input, output },
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "data-domain" => {
+            Ok(ResourceDeclaration::DataDomain(DataDomainDecl {
+                name: name.to_string(),
+                description: get_string_optional(&kv, "description"),
+                steward: get_string_required(&kv, "steward", name)?,
+                sensitivity: get_string_optional(&kv, "sensitivity").unwrap_or_else(|| "internal".to_string()),
+                tags: get_tags_map(&kv, "tags"),
+            }))
+        }
+        "data-product" => {
+            let triggers = get_nested_string_array(&kv, "freshness", "triggers")?;
+            let max_age = get_nested_string(&kv, "freshness", "maxAge")?
+                .ok_or_else(|| validation_err(name, "freshness.maxAge is required"))?;
+            let visibility = get_nested_string(&kv, "access", "visibility")?.unwrap_or_else(|| "cluster".to_string());
+            let roles = get_nested_string_array(&kv, "access", "roles")?;
+            Ok(ResourceDeclaration::DataProduct(DataProductDecl {
+                name: name.to_string(),
+                product: get_string_required(&kv, "product", name)?,
+                domain: get_string_required(&kv, "domain", name)?,
+                version: get_string_required(&kv, "version", name)?,
+                description: get_string_optional(&kv, "description"),
+                ontology: get_string_optional(&kv, "ontology"),
+                shapes: get_string_optional(&kv, "shapes"),
+                projection: get_string_required(&kv, "projection", name)?,
+                freshness: FreshnessDeclBlock { max_age, triggers },
+                access: Some(AccessDeclBlock { visibility, roles }),
                 tags: get_tags_map(&kv, "tags"),
             }))
         }
@@ -1543,6 +1775,84 @@ fn get_config_entries(kv: &[(String, BicepValue)], key: &str) -> Result<Vec<Conf
                 }
                 _ => Err(PiCloudError::ResourceValidationFailed {
                     reason: "expected array for 'entries'".to_string(),
+                }),
+            };
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// Get a string from a nested object: kv[outer_key][inner_key]
+fn get_nested_string(kv: &[(String, BicepValue)], outer: &str, inner: &str) -> Result<Option<String>> {
+    for (k, v) in kv {
+        if k == outer {
+            if let BicepValue::Object(obj) = v {
+                return Ok(get_string_optional(obj, inner));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Get a string array from a nested object: kv[outer_key][inner_key]
+fn get_nested_string_array(kv: &[(String, BicepValue)], outer: &str, inner: &str) -> Result<Vec<String>> {
+    for (k, v) in kv {
+        if k == outer {
+            if let BicepValue::Object(obj) = v {
+                return get_string_array(obj, inner);
+            }
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// Parse capability dependencies from a bicep array of objects with {capability, minVersion}
+fn get_capability_deps(kv: &[(String, BicepValue)], key: &str) -> Result<Vec<CapabilityDepDecl>> {
+    for (k, v) in kv {
+        if k == key {
+            return match v {
+                BicepValue::Array(items) => {
+                    items.iter().map(|item| match item {
+                        BicepValue::Object(obj) => {
+                            Ok(CapabilityDepDecl {
+                                capability: get_string_required(obj, "capability", "capability-dep")?,
+                                min_version: get_string_required(obj, "minVersion", "capability-dep")?,
+                            })
+                        }
+                        _ => Err(PiCloudError::ResourceValidationFailed {
+                            reason: "expected object in capabilities array".to_string(),
+                        }),
+                    }).collect()
+                }
+                _ => Err(PiCloudError::ResourceValidationFailed {
+                    reason: "expected array for capabilities".to_string(),
+                }),
+            };
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// Parse data product dependencies from a bicep array of objects with {source, minVersion}
+fn get_data_product_deps(kv: &[(String, BicepValue)], key: &str) -> Result<Vec<DataProductDepDecl>> {
+    for (k, v) in kv {
+        if k == key {
+            return match v {
+                BicepValue::Array(items) => {
+                    items.iter().map(|item| match item {
+                        BicepValue::Object(obj) => {
+                            Ok(DataProductDepDecl {
+                                source: get_string_required(obj, "source", "data-product-dep")?,
+                                min_version: get_string_required(obj, "minVersion", "data-product-dep")?,
+                            })
+                        }
+                        _ => Err(PiCloudError::ResourceValidationFailed {
+                            reason: "expected object in dataProducts array".to_string(),
+                        }),
+                    }).collect()
+                }
+                _ => Err(PiCloudError::ResourceValidationFailed {
+                    reason: "expected array for dataProducts".to_string(),
                 }),
             };
         }

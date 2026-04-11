@@ -46,7 +46,7 @@ impl Scenario for FullReplicationCoverage {
             }
         });
 
-        match assertions::http_post(ctx, "/api/events", event_body).await {
+        match assertions::http_post(ctx, "/api/commands", event_body).await {
             Ok(resp) if resp.status().is_success() => {
                 info!(sentinel = %sentinel_id, "sentinel event written");
             }
@@ -65,7 +65,7 @@ impl Scenario for FullReplicationCoverage {
         // Query each node directly to verify the sentinel is present.
         for node in &ctx.config.nodes {
             let node_url = format!(
-                "https://{}:{}/sparql",
+                "https://{}:{}/graph",
                 node.ip, ctx.config.cluster.http_port
             );
 
@@ -81,10 +81,9 @@ impl Scenario for FullReplicationCoverage {
 
             let resp = match ctx
                 .http_client
-                .post(&node_url)
-                .header("Content-Type", "application/sparql-query")
+                .get(&node_url)
+                .query(&[("query", &query)])
                 .header("Accept", "application/sparql-results+json")
-                .body(query)
                 .send()
                 .await
             {

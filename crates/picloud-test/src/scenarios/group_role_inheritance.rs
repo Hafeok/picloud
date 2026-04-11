@@ -29,14 +29,13 @@ impl Scenario for GroupRoleInheritance {
         }
 
         // 1. Create a group with roles
-        let group_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "group",
+        let group_resource = serde_json::json!({
+            "type": "group",
             "name": "role-test-group",
-            "roles": ["product-developer", "log-viewer"],
+            "roles": ["product-developer", "log-viewer"]
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", group_cmd).await {
+        if let Err(e) = assertions::apply_resource(ctx, group_resource).await {
             return ScenarioResult::Skip {
                 reason: format!("group creation not available: {}", e),
             };
@@ -61,15 +60,14 @@ impl Scenario for GroupRoleInheritance {
             }
         }
 
-        // 3. Add a member to the group
+        // 3. Add a member to the group via tag
         let member_cmd = serde_json::json!({
-            "type": "TagAdded",
-            "resource_iri": "https://picloud.local/platform/identities/role-test-user",
+            "resource": "https://picloud.local/platform/identities/role-test-user",
             "key": "group",
-            "value": "role-test-group",
+            "value": "role-test-group"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", member_cmd).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/tags/add", member_cmd).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to add member: {}", e),
@@ -77,9 +75,17 @@ impl Scenario for GroupRoleInheritance {
         }
 
         // 4. Request a token for the user and verify inherited roles
-        let token_resp = match assertions::http_get(
+        let token_body = serde_json::json!({
+            "grant_type": "client_credentials",
+            "client_id": "role-test-user",
+            "client_secret": "test-secret",
+            "scope": "test-product"
+        });
+
+        let token_resp = match assertions::http_post(
             ctx,
-            "/api/iam/token?user=role-test-user&product=test-product",
+            "/auth/token",
+            token_body,
         )
         .await
         {

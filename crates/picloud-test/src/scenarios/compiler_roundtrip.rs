@@ -75,7 +75,7 @@ impl Scenario for CompilerRoundtrip {
         }
 
         // 5. Try to compile using picloud CLI (if available)
-        let output = Command::new("cargo")
+        let output = Command::new(crate::harness::cargo::cargo_bin())
             .args(["run", "-p", "picloud-cli", "--", "compile", picloud_file.to_str().unwrap()])
             .current_dir(ctx.workspace_root())
             .output()

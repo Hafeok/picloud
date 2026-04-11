@@ -29,16 +29,21 @@ impl Scenario for OrphanPrevention {
             };
         }
 
-        // Attempt to declare a container resource without a valid parent product.
-        let orphan_command = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": "nonexistent-product-orphan-test",
-            "resource_type": "container",
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
+        // Attempt to apply a container resource without a valid parent product.
+        let orphan_resource = serde_json::json!({
+            "type": "container",
             "name": "orphan-container",
-            "image": "test:latest",
+            "product": "nonexistent-product-orphan-test",
+            "image": "test:latest"
         });
 
-        match assertions::http_post(ctx, "/api/commands", orphan_command).await {
+        match assertions::apply_resource(ctx, orphan_resource).await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 // Expect 400 or 404 — the parent product does not exist.

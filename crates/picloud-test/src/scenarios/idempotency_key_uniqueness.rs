@@ -30,7 +30,7 @@ impl Scenario for IdempotencyKeyUniqueness {
             };
         }
 
-        if !assertions::feature_available(ctx, "/api/resources").await {
+        if !assertions::feature_available(ctx, "/api/apply").await {
             return ScenarioResult::Skip {
                 reason: "resource API not available".to_string(),
             };
@@ -40,29 +40,33 @@ impl Scenario for IdempotencyKeyUniqueness {
         let key_b = format!("uniqueness-test-b-{}", uuid::Uuid::new_v4());
 
         let body_a = serde_json::json!({
-            "type": "container",
-            "name": "uniqueness-test-a",
-            "product": "picloud-test",
-            "idempotencyKey": key_a,
-            "spec": {
-                "image": "alpine:latest",
-                "command": ["sleep", "3600"]
-            }
+            "resources": [{
+                "type": "container",
+                "name": "uniqueness-test-a",
+                "product": "picloud-test",
+                "idempotencyKey": key_a,
+                "spec": {
+                    "image": "alpine:latest",
+                    "command": ["sleep", "3600"]
+                }
+            }]
         });
 
         let body_b = serde_json::json!({
-            "type": "container",
-            "name": "uniqueness-test-b",
-            "product": "picloud-test",
-            "idempotencyKey": key_b,
-            "spec": {
-                "image": "alpine:latest",
-                "command": ["sleep", "3600"]
-            }
+            "resources": [{
+                "type": "container",
+                "name": "uniqueness-test-b",
+                "product": "picloud-test",
+                "idempotencyKey": key_b,
+                "spec": {
+                    "image": "alpine:latest",
+                    "command": ["sleep", "3600"]
+                }
+            }]
         });
 
         // Apply resource A.
-        match assertions::http_post(ctx, "/api/resources", body_a).await {
+        match assertions::http_post(ctx, "/api/apply", body_a).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!(key = %key_a, "resource A applied");
             }
@@ -79,7 +83,7 @@ impl Scenario for IdempotencyKeyUniqueness {
         }
 
         // Apply resource B.
-        match assertions::http_post(ctx, "/api/resources", body_b).await {
+        match assertions::http_post(ctx, "/api/apply", body_b).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!(key = %key_b, "resource B applied");
             }

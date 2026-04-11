@@ -32,7 +32,7 @@ impl Scenario for VersionAttributePresentScenario {
 
         // Query the telemetry/spans endpoint for spans from this run.
         let telemetry_url = format!(
-            "{}/api/telemetry/spans?run_id={}",
+            "{}/telemetry/spans?run_id={}",
             ctx.config.base_url(),
             run_id
         );

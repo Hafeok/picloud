@@ -29,19 +29,23 @@ impl Scenario for ProductFullLifecycle {
             };
         }
 
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
         let test_name = format!("test-lifecycle-{}", uuid::Uuid::new_v4().as_simple());
         let product_iri = format!("https://picloud.local/products/{}", test_name);
 
         // 1. Apply product.
-        let create_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": test_name,
-            "resource_type": "product",
+        let create_resource = serde_json::json!({
+            "type": "product",
             "name": test_name,
-            "version": "1.0.0",
+            "version": "1.0.0"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", create_cmd).await {
+        if let Err(e) = assertions::apply_resource(ctx, create_resource).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to create product: {}", e),
@@ -67,15 +71,13 @@ impl Scenario for ProductFullLifecycle {
         }
 
         // 3. Update product (new version).
-        let update_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": test_name,
-            "resource_type": "product",
+        let update_resource = serde_json::json!({
+            "type": "product",
             "name": test_name,
-            "version": "2.0.0",
+            "version": "2.0.0"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", update_cmd).await {
+        if let Err(e) = assertions::apply_resource(ctx, update_resource).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to update product: {}", e),
@@ -98,12 +100,12 @@ impl Scenario for ProductFullLifecycle {
         let _ = assertions::wait_for_sparql(ctx, &ask_updated, Duration::from_secs(5)).await;
 
         // 5. Delete product.
-        let delete_cmd = serde_json::json!({
-            "type": "ProductDeleted",
-            "product": test_name,
+        let delete_payload = serde_json::json!({
+            "type": "product",
+            "name": test_name,
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", delete_cmd).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/delete", delete_payload).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to delete product: {}", e),

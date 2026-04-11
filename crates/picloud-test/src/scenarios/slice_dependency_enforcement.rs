@@ -13,7 +13,7 @@ use crate::harness::runner::{Scenario, ScenarioResult, TestContext};
 pub struct SliceDependencyEnforcement;
 
 /// Crates that are NOT slices — they are allowed to depend on multiple picloud-* crates.
-const EXCLUDED_CRATES: &[&str] = &["picloud-test"];
+const EXCLUDED_CRATES: &[&str] = &["picloud-test", "picloud-cli"];
 
 /// The server binary is in src/main.rs, not a crate under crates/.
 /// picloud-cli is allowed picloud-domain only.

@@ -1,4 +1,4 @@
-//! ADR-019: Product SPARQL endpoint — POST a SPARQL query to
+//! ADR-019: Product SPARQL endpoint — GET a SPARQL query from
 //! /products/{name}/graph and assert a valid response.
 
 use std::time::Instant;
@@ -29,43 +29,16 @@ impl Scenario for ProductSparqlEndpoint {
             };
         }
 
-        // Discover an existing product.
-        let products_query = r#"
-            PREFIX picloud: <https://picloud.local/ontology#>
-            SELECT ?name WHERE {
-                ?p a picloud:Product ;
-                   picloud:name ?name .
-            } LIMIT 1
-        "#;
+        // Seed a test product so the RDF graph has data.
+        if let Err(_) =
+            assertions::apply_product_and_wait(ctx, "e2e-sparql-endpoint", "1.0.0").await
+        {
+            return ScenarioResult::Skip {
+                reason: "could not seed test product".to_string(),
+            };
+        }
 
-        let product_name = match assertions::sparql_query(ctx, products_query).await {
-            Ok(body) => {
-                let json: serde_json::Value = match serde_json::from_str(&body) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        return ScenarioResult::Skip {
-                            reason: "no products deployed".to_string(),
-                        };
-                    }
-                };
-                match json
-                    .pointer("/results/bindings/0/name/value")
-                    .and_then(|v| v.as_str())
-                {
-                    Some(name) => name.to_string(),
-                    None => {
-                        return ScenarioResult::Skip {
-                            reason: "no products deployed".to_string(),
-                        };
-                    }
-                }
-            }
-            Err(_) => {
-                return ScenarioResult::Skip {
-                    reason: "cannot query products".to_string(),
-                };
-            }
-        };
+        let product_name = "e2e-sparql-endpoint".to_string();
 
         // POST SPARQL to the product's graph endpoint.
         let sparql_url = format!(
@@ -78,10 +51,9 @@ impl Scenario for ProductSparqlEndpoint {
 
         let resp = match ctx
             .http_client
-            .post(&sparql_url)
-            .header("Content-Type", "application/sparql-query")
+            .get(&sparql_url)
+            .query(&[("query", sparql_query)])
             .header("Accept", "application/sparql-results+json")
-            .body(sparql_query.to_string())
             .send()
             .await
         {
@@ -89,7 +61,7 @@ impl Scenario for ProductSparqlEndpoint {
             Err(e) => {
                 return ScenarioResult::Fail {
                     duration: start.elapsed(),
-                    reason: format!("failed to POST SPARQL to product endpoint: {}", e),
+                    reason: format!("failed to query product SPARQL endpoint: {}", e),
                 };
             }
         };

@@ -29,28 +29,38 @@ impl Scenario for TagRemove {
             };
         }
 
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
         let test_product = format!("test-tagrem-{}", uuid::Uuid::new_v4().as_simple());
 
-        // Apply a resource with a tag.
-        let apply_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": test_product,
-            "resource_type": "product",
-            "name": test_product,
-            "tags": {
-                "environment": "staging"
-            }
-        });
-
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", apply_cmd).await {
+        // Apply the product resource.
+        if let Err(e) = assertions::apply_product_and_wait(ctx, &test_product, "1.0.0").await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: format!("failed to apply tagged resource: {}", e),
+                reason: format!("failed to apply product: {}", e),
+            };
+        }
+
+        // Add a tag to the product.
+        let product_iri = format!("https://picloud.local/products/{}", test_product);
+        let add_tag_cmd = serde_json::json!({
+            "resource": product_iri,
+            "key": "environment",
+            "value": "staging"
+        });
+
+        if let Err(e) = assertions::http_post(ctx, "/api/tags/add", add_tag_cmd).await {
+            return ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: format!("failed to add tag: {}", e),
             };
         }
 
         // Wait for the tag to appear.
-        let product_iri = format!("https://picloud.local/products/{}", test_product);
         let tag_ask = format!(
             r#"
             PREFIX picloud: <https://picloud.local/ontology#>
@@ -68,13 +78,12 @@ impl Scenario for TagRemove {
 
         // Remove the tag.
         let remove_cmd = serde_json::json!({
-            "type": "TagRemoved",
             "resource": product_iri,
             "key": "environment",
-            "value": "staging",
+            "value": "staging"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", remove_cmd).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/tags/remove", remove_cmd).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to remove tag: {}", e),

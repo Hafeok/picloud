@@ -29,21 +29,41 @@ impl Scenario for CascadingDelete {
             };
         }
 
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
         // Apply a product with child resources.
         let test_name = format!("test-cascade-{}", uuid::Uuid::new_v4().as_simple());
-        let command = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": test_name,
-            "resource_type": "product",
-            "name": test_name,
-            "resources": [
-                { "type": "container", "name": "api-server" },
-                { "type": "container", "name": "worker" },
-                { "type": "volume", "name": "data-store" },
-            ]
-        });
+        let resources = vec![
+            serde_json::json!({
+                "type": "product",
+                "name": test_name,
+                "version": "1.0.0"
+            }),
+            serde_json::json!({
+                "type": "container",
+                "name": "api-server",
+                "product": test_name,
+                "image": "test:1.0"
+            }),
+            serde_json::json!({
+                "type": "container",
+                "name": "worker",
+                "product": test_name,
+                "image": "test:1.0"
+            }),
+            serde_json::json!({
+                "type": "volume",
+                "name": "data-store",
+                "product": test_name,
+                "size_gb": 10
+            }),
+        ];
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", command).await {
+        if let Err(e) = assertions::apply_resources(ctx, resources).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to apply product: {}", e),
@@ -71,12 +91,12 @@ impl Scenario for CascadingDelete {
         }
 
         // DELETE the product.
-        let delete_cmd = serde_json::json!({
-            "type": "ProductDeleted",
-            "product": test_name,
+        let delete_payload = serde_json::json!({
+            "type": "product",
+            "name": test_name,
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", delete_cmd).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/delete", delete_payload).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to delete product: {}", e),

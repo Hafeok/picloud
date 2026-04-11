@@ -30,13 +30,12 @@ impl Scenario for CircularGroupRejection {
 
         // 1. Attempt to create group A containing group B
         let group_a = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "group",
+            "type": "group",
             "name": "group-a",
-            "members": ["group-b"],
+            "roles": ["member-group-b"]
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", group_a).await {
+        if let Err(e) = assertions::apply_resource(ctx, group_a).await {
             return ScenarioResult::Skip {
                 reason: format!("group creation endpoint not available: {}", e),
             };
@@ -44,13 +43,12 @@ impl Scenario for CircularGroupRejection {
 
         // 2. Attempt to create group B containing group A (circular)
         let group_b = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "group",
+            "type": "group",
             "name": "group-b",
-            "members": ["group-a"],
+            "roles": ["member-group-a"]
         });
 
-        match assertions::http_post(ctx, "/api/commands", group_b).await {
+        match assertions::apply_resource(ctx, group_b).await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 // Circular membership must be rejected — expect 400 or 409

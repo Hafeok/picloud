@@ -31,6 +31,12 @@ impl Scenario for ConfigApiLifecycle {
             };
         }
 
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
         let config_path = "/products/test-app/config";
 
         // Check if config API is available.

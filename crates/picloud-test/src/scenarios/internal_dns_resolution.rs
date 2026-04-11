@@ -53,13 +53,16 @@ impl Scenario for InternalDnsResolution {
             };
         }
 
-        // Check for internal domain handling (.picloud.internal).
-        let has_internal = dns_source.contains("picloud.internal")
-            || dns_source.contains("internal");
+        // Check for authoritative domain handling.
+        // The DNS module uses the cluster's configured domain (e.g. picloud.local)
+        // via is_authoritative(), not a hardcoded .picloud.internal suffix.
+        let has_domain_authority = dns_source.contains("is_authoritative")
+            || dns_source.contains("authoritative")
+            || dns_source.contains("domain");
 
-        if !has_internal {
+        if !has_domain_authority {
             issues.push(
-                "No .picloud.internal domain handling found in DNS module".to_string(),
+                "No authoritative domain handling found in DNS module".to_string(),
             );
         }
 

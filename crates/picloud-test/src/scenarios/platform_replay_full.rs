@@ -29,7 +29,7 @@ impl Scenario for PlatformReplayFull {
         }
 
         // 1. Check cluster replay endpoint
-        if !assertions::feature_available(ctx, "/api/cluster/replay").await {
+        if !assertions::feature_available(ctx, "/api/replay").await {
             return ScenarioResult::Skip {
                 reason: "cluster replay endpoint not available".to_string(),
             };
@@ -52,7 +52,7 @@ impl Scenario for PlatformReplayFull {
             "from": "1970-01-01T00:00:00Z",
         });
 
-        let resp = match assertions::http_post(ctx, "/api/cluster/replay", replay_body).await {
+        let resp = match assertions::http_post(ctx, "/api/replay", replay_body).await {
             Ok(r) => r,
             Err(e) => {
                 return ScenarioResult::Fail {

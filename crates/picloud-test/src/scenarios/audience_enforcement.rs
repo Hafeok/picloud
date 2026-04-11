@@ -42,6 +42,7 @@ impl Scenario for AudienceEnforcement {
         let token_req = serde_json::json!({
             "grant_type": "client_credentials",
             "client_id": "test-app",
+            "client_secret": "test-secret",
             "audience": "https://picloud.local/products/nonexistent-product",
             "scope": "read"
         });

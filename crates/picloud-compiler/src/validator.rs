@@ -379,6 +379,9 @@ fn required_fields(resource_type: &str) -> Vec<&'static str> {
         "role"               => vec!["product"],
         "scope"              => vec!["product"],
         "m2m-permission"     => vec!["product", "client", "scopes"],
+        "capability"         => vec!["version", "events"],
+        "data-domain"        => vec!["steward"],
+        "data-product"       => vec!["product", "domain", "version", "projection", "freshness"],
         _                    => vec![],
     }
 }
@@ -402,6 +405,9 @@ fn type_label(resource_type: &str) -> &str {
         "role"               => "Role",
         "scope"              => "Scope",
         "m2m-permission"     => "M2mPermission",
+        "capability"         => "Capability",
+        "data-domain"        => "DataDomain",
+        "data-product"       => "DataProduct",
         other                => other,
     }
 }

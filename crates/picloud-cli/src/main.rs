@@ -121,6 +121,21 @@ enum Commands {
         #[command(subcommand)]
         command: RegistryCommands,
     },
+    /// Capability management (ADR-055)
+    Capability {
+        #[command(subcommand)]
+        command: CapabilityCommands,
+    },
+    /// Data domain management (ADR-056)
+    DataDomain {
+        #[command(subcommand)]
+        command: DataDomainCommands,
+    },
+    /// Data product management (ADR-056)
+    DataProduct {
+        #[command(subcommand)]
+        command: DataProductCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -652,6 +667,30 @@ enum RegistryCommands {
     Gc,
     /// Show registry storage status
     Status,
+}
+
+// --- Capability CLI commands (ADR-055) ---
+
+#[derive(Subcommand)]
+enum CapabilityCommands {
+    /// List all capabilities, implementors, consumers, and fulfilment status
+    List,
+}
+
+// --- Data Domain CLI commands (ADR-056) ---
+
+#[derive(Subcommand)]
+enum DataDomainCommands {
+    /// List all data domains and their member data products
+    List,
+}
+
+// --- Data Product CLI commands (ADR-056) ---
+
+#[derive(Subcommand)]
+enum DataProductCommands {
+    /// List all data products with freshness status
+    List,
 }
 
 /// HTTP client for communicating with the PiCloud cluster
@@ -2367,6 +2406,101 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match client.get("/v2/").await {
                     Ok(_) => println!("Registry: online"),
                     Err(_) => println!("Registry: offline"),
+                }
+            }
+        },
+        Commands::Capability { command } => match command {
+            CapabilityCommands::List => {
+                let sparql = "SELECT ?cap ?name ?version ?status ?input ?output WHERE { \
+                    ?cap a <https://picloud.local/ontology#Capability> . \
+                    ?cap <https://picloud.local/ontology#name> ?name . \
+                    ?cap <https://picloud.local/ontology#version> ?version . \
+                    ?cap <https://picloud.local/ontology#status> ?status . \
+                    ?cap <https://picloud.local/ontology#inputEvent> ?input . \
+                    ?cap <https://picloud.local/ontology#outputEvent> ?output . \
+                } ORDER BY ?name";
+                match client.get(&format!("/api/graph/query?sparql={}", urlencoding(sparql))).await {
+                    Ok(body) => {
+                        if let Some(bindings) = body.get("bindings").and_then(|b| b.as_array()) {
+                            if bindings.is_empty() {
+                                println!("No capabilities declared.");
+                            } else {
+                                println!("{:<25} {:<10} {:<12} {:<25} {:<25}", "NAME", "VERSION", "STATUS", "INPUT EVENT", "OUTPUT EVENT");
+                                println!("{}", "-".repeat(97));
+                                for row in bindings {
+                                    let name = row.get("name").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let version = row.get("version").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let status = row.get("status").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let input = row.get("input").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let output = row.get("output").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    println!("{:<25} {:<10} {:<12} {:<25} {:<25}", name, version, status, input, output);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to list capabilities: {e}"),
+                }
+            }
+        },
+        Commands::DataDomain { command } => match command {
+            DataDomainCommands::List => {
+                let sparql = "SELECT ?domain ?name ?steward ?sensitivity WHERE { \
+                    ?domain a <https://picloud.local/ontology#DataDomain> . \
+                    ?domain <https://picloud.local/ontology#name> ?name . \
+                    ?domain <https://picloud.local/ontology#steward> ?steward . \
+                    ?domain <https://picloud.local/ontology#sensitivity> ?sensitivity . \
+                } ORDER BY ?name";
+                match client.get(&format!("/api/graph/query?sparql={}", urlencoding(sparql))).await {
+                    Ok(body) => {
+                        if let Some(bindings) = body.get("bindings").and_then(|b| b.as_array()) {
+                            if bindings.is_empty() {
+                                println!("No data domains declared.");
+                            } else {
+                                println!("{:<25} {:<25} {:<15}", "NAME", "STEWARD", "SENSITIVITY");
+                                println!("{}", "-".repeat(65));
+                                for row in bindings {
+                                    let name = row.get("name").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let steward = row.get("steward").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let sensitivity = row.get("sensitivity").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    println!("{:<25} {:<25} {:<15}", name, steward, sensitivity);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to list data domains: {e}"),
+                }
+            }
+        },
+        Commands::DataProduct { command } => match command {
+            DataProductCommands::List => {
+                let sparql = "SELECT ?dp ?name ?product ?domain ?version ?status WHERE { \
+                    ?dp a <https://picloud.local/ontology#DataProduct> . \
+                    ?dp <https://picloud.local/ontology#name> ?name . \
+                    ?dp <https://picloud.local/ontology#product> ?product . \
+                    ?dp <https://picloud.local/ontology#domain> ?domain . \
+                    ?dp <https://picloud.local/ontology#version> ?version . \
+                    ?dp <https://picloud.local/ontology#status> ?status . \
+                } ORDER BY ?product ?name";
+                match client.get(&format!("/api/graph/query?sparql={}", urlencoding(sparql))).await {
+                    Ok(body) => {
+                        if let Some(bindings) = body.get("bindings").and_then(|b| b.as_array()) {
+                            if bindings.is_empty() {
+                                println!("No data products declared.");
+                            } else {
+                                println!("{:<25} {:<20} {:<20} {:<10} {:<12}", "NAME", "PRODUCT", "DOMAIN", "VERSION", "STATUS");
+                                println!("{}", "-".repeat(87));
+                                for row in bindings {
+                                    let name = row.get("name").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let product = row.get("product").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let domain = row.get("domain").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let version = row.get("version").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    let status = row.get("status").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
+                                    println!("{:<25} {:<20} {:<20} {:<10} {:<12}", name, product, domain, version, status);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to list data products: {e}"),
                 }
             }
         },

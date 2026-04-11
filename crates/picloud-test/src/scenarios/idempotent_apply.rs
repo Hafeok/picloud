@@ -30,7 +30,7 @@ impl Scenario for IdempotentApply {
             };
         }
 
-        if !assertions::feature_available(ctx, "/api/resources").await {
+        if !assertions::feature_available(ctx, "/api/apply").await {
             return ScenarioResult::Skip {
                 reason: "resource API not available".to_string(),
             };
@@ -44,7 +44,7 @@ impl Scenario for IdempotentApply {
             }
         "#;
 
-        let first_apply_body = serde_json::json!({
+        let resource_json = serde_json::json!({
             "type": "container",
             "name": "idempotent-test",
             "product": "picloud-test",
@@ -55,8 +55,12 @@ impl Scenario for IdempotentApply {
             }
         });
 
+        let first_apply_body = serde_json::json!({
+            "resources": [resource_json]
+        });
+
         // First apply.
-        match assertions::http_post(ctx, "/api/resources", first_apply_body.clone()).await {
+        match assertions::http_post(ctx, "/api/apply", first_apply_body.clone()).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("first apply completed");
             }
@@ -92,7 +96,7 @@ impl Scenario for IdempotentApply {
         info!(count = count_after_first, "event count after first apply");
 
         // Second apply with same idempotency key.
-        match assertions::http_post(ctx, "/api/resources", first_apply_body).await {
+        match assertions::http_post(ctx, "/api/apply", first_apply_body).await {
             Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
                 info!("second apply completed");
             }

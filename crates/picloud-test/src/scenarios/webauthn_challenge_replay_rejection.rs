@@ -30,7 +30,7 @@ impl Scenario for WebauthnChallengeReplayRejection {
             };
         }
 
-        if !assertions::feature_available(ctx, "/auth/passkeys/register").await {
+        if !assertions::feature_available(ctx, "/auth/register/begin").await {
             return ScenarioResult::Skip {
                 reason: "passkey registration endpoint not available".to_string(),
             };
@@ -43,7 +43,7 @@ impl Scenario for WebauthnChallengeReplayRejection {
         });
 
         let challenge_resp =
-            match assertions::http_post(ctx, "/auth/passkeys/register", register_body).await {
+            match assertions::http_post(ctx, "/auth/register/begin", register_body).await {
                 Ok(r) => r,
                 Err(e) => {
                     return ScenarioResult::Skip {
@@ -107,7 +107,7 @@ impl Scenario for WebauthnChallengeReplayRejection {
         // First submission.
         let first_resp = match assertions::http_post(
             ctx,
-            "/auth/passkeys/verify",
+            "/auth/login/complete",
             replay_body.clone(),
         )
         .await
@@ -132,7 +132,7 @@ impl Scenario for WebauthnChallengeReplayRejection {
         // Second submission with the same challenge (replay).
         let second_resp = match assertions::http_post(
             ctx,
-            "/auth/passkeys/verify",
+            "/auth/login/complete",
             replay_body,
         )
         .await

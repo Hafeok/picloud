@@ -140,6 +140,20 @@ fn resource_iri(builder: &IriBuilder, resource: &ResourceDecl) -> Result<String>
             })?;
             Ok(builder.resource(product, "m2m-permissions", &resource.name).to_string())
         }
+        "capability" => {
+            // Cluster-scoped — no product required
+            Ok(builder.cluster_resource("capabilities", &resource.name).to_string())
+        }
+        "data-domain" => {
+            // Cluster-scoped — no product required
+            Ok(builder.cluster_resource("data-domains", &resource.name).to_string())
+        }
+        "data-product" => {
+            let product = product.ok_or_else(|| PiCloudError::ResourceValidationFailed {
+                reason: format!("DataProduct '{}' missing required property: product", resource.name),
+            })?;
+            Ok(builder.resource(product, "data-products", &resource.name).to_string())
+        }
         other => Err(PiCloudError::ResourceValidationFailed {
             reason: format!("Unknown resource type: '{}'", other),
         }),
@@ -269,6 +283,9 @@ fn resource_rdf_type(resource_type: &str) -> &str {
         "role"               => "ProductRole",
         "scope"              => "ProductScope",
         "m2m-permission"     => "M2mPermission",
+        "capability"         => "Capability",
+        "data-domain"        => "DataDomain",
+        "data-product"       => "DataProduct",
         _                    => "Resource",
     }
 }
@@ -289,6 +306,9 @@ fn nested_rdf_type(key: &str) -> Option<&str> {
         "tag"        => Some("Tag"),
         "otel"       => Some("OtelConfig"),
         "resources"  => Some("ResourceLimits"),
+        "freshness"  => Some("FreshnessConfig"),
+        "access"     => Some("DataProductAccess"),
+        "events"     => Some("CapabilityEvents"),
         _            => None,
     }
 }

@@ -30,10 +30,10 @@ impl Scenario for BootstrapTokenExpiry {
             };
         }
 
-        // Check if bootstrap token API exists.
-        if !assertions::feature_available(ctx, "/api/auth/bootstrap").await {
+        // Check if enrollment API exists.
+        if !assertions::feature_available(ctx, "/api/enroll-node").await {
             return ScenarioResult::Skip {
-                reason: "bootstrap token API not available".to_string(),
+                reason: "enrollment API not available".to_string(),
             };
         }
 
@@ -45,7 +45,7 @@ impl Scenario for BootstrapTokenExpiry {
             "displayName": "Expiry Test Admin"
         });
 
-        match assertions::http_post(ctx, "/api/auth/bootstrap/enroll", enroll_body).await {
+        match assertions::http_post(ctx, "/auth/enroll", enroll_body).await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
 

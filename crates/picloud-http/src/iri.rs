@@ -84,6 +84,12 @@ pub enum IriRoute {
         resource_type: String,
         name: String,
     },
+    /// GET /capabilities/{name} — a cluster-scoped capability (ADR-055)
+    Capability { name: String },
+    /// GET /data-domains/{name} — a cluster-scoped data domain (ADR-056)
+    DataDomain { name: String },
+    /// GET /products/{product}/data-products/{name}/graph — data product named graph (ADR-056)
+    DataProductGraph { product: String, name: String },
     /// No matching route
     NotFound,
 }
@@ -140,6 +146,19 @@ pub fn route_iri(path: &str) -> IriRoute {
             event_type: event_type.to_string(),
             version: version.to_string(),
         },
+        // Cluster-scoped resources (ADR-055, ADR-056)
+        ["capabilities", name] => IriRoute::Capability {
+            name: name.to_string(),
+        },
+        ["data-domains", name] => IriRoute::DataDomain {
+            name: name.to_string(),
+        },
+        // Data product named graph (ADR-056)
+        ["products", product, "data-products", name, "graph"] => IriRoute::DataProductGraph {
+            product: product.to_string(),
+            name: name.to_string(),
+        },
+        // Generic product-scoped resource (must be after more specific patterns)
         ["products", product, resource_type, name] => IriRoute::Resource {
             product: product.to_string(),
             resource_type: resource_type.to_string(),

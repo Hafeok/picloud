@@ -55,6 +55,15 @@ pub struct Product {
     pub meta: ResourceMeta,
     pub version: String,
     pub description: Option<String>,
+    /// Capabilities this product implements (ADR-055), e.g. ["gps-to-place@1.0.0"]
+    #[serde(default)]
+    pub implements: Vec<CapabilityImplementsRef>,
+    /// Capabilities this product depends on (ADR-055)
+    #[serde(default)]
+    pub capabilities: Vec<CapabilityDependency>,
+    /// Data products this product consumes (ADR-056)
+    #[serde(default)]
+    pub data_products: Vec<DataProductDependency>,
 }
 
 /// A Volume — block storage with declared intent (ADR-024)
@@ -460,6 +469,126 @@ pub fn builtin_alert_rules() -> Vec<BuiltInAlertRule> {
             message_template: "Disk usage above 90%",
         },
     ]
+}
+
+// --- Capability resources (ADR-055) ---
+
+/// A Capability — a cluster-scoped interface contract (ADR-055)
+///
+/// A capability is a pure interface declaration: a named, versioned contract
+/// expressed as an event schema and SHACL shapes. It has no workload, no
+/// container, no code. Products separately declare `implements` (they fulfil
+/// the contract) or `capabilities` (they depend on the contract being available).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Capability {
+    pub meta: ResourceMeta,
+    pub version: String,
+    pub description: Option<String>,
+    /// Path to the OWL ontology file for this capability
+    pub ontology: Option<String>,
+    /// Path to the SHACL shapes file for this capability
+    pub shapes: Option<String>,
+    /// The event type that consumers emit to invoke the capability
+    pub input_event: String,
+    /// The event type that implementors emit as the result
+    pub output_event: String,
+}
+
+/// A capability dependency declared by a consuming Product (ADR-055)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityDependency {
+    /// Name of the required capability
+    pub capability: String,
+    /// Minimum version required (semver)
+    pub min_version: String,
+}
+
+/// A capability implementation reference: "capability_name@version"
+pub type CapabilityImplementsRef = String;
+
+// --- Data Domain / Data Product resources (ADR-056) ---
+
+/// Sensitivity classification for a data domain (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DataSensitivity {
+    Public,
+    Internal,
+    Confidential,
+    Restricted,
+}
+
+/// A Data Domain — a cluster-scoped governance boundary (ADR-056)
+///
+/// Groups related data products across Products. Declares a steward identity,
+/// sensitivity classification, and domain-level constraints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataDomain {
+    pub meta: ResourceMeta,
+    pub description: Option<String>,
+    /// IRI of the steward identity responsible for this domain
+    pub steward: String,
+    /// Data sensitivity classification
+    pub sensitivity: DataSensitivity,
+}
+
+/// Freshness SLO for a data product (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FreshnessConfig {
+    /// Maximum age before the data product is considered stale (e.g. "15m", "1h")
+    pub max_age: String,
+    /// Event types that trigger a projection rebuild
+    pub triggers: Vec<String>,
+}
+
+/// Access configuration for a data product (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductAccess {
+    /// Visibility: "cluster" or "product"
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+    /// Roles required to access this data product
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+fn default_visibility() -> String {
+    "cluster".to_string()
+}
+
+/// A Data Product — a published analytical projection (ADR-056)
+///
+/// A data product publishes a curated, versioned projection of selected
+/// domain data into a separate named graph. Push-only: rebuilds on
+/// declared trigger events via SPARQL CONSTRUCT.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProduct {
+    pub meta: ResourceMeta,
+    /// The product that owns this data product
+    pub product: String,
+    /// The data domain this data product belongs to
+    pub domain: String,
+    pub version: String,
+    pub description: Option<String>,
+    /// Path to the OWL ontology file
+    pub ontology: Option<String>,
+    /// Path to the SHACL shapes file
+    pub shapes: Option<String>,
+    /// Path to the SPARQL CONSTRUCT query file
+    pub projection: String,
+    /// Freshness SLO configuration
+    pub freshness: FreshnessConfig,
+    /// Access control configuration
+    pub access: DataProductAccess,
+}
+
+/// A data product dependency declared by a consuming Product (ADR-056)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductDependency {
+    /// Source in "product/data-product-name" format
+    pub source: String,
+    /// Minimum version required
+    pub min_version: String,
 }
 
 // --- OCI Registry resources (ADR-054) ---

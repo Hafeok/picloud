@@ -9,18 +9,24 @@ use hickory_resolver::TokioResolver;
 use crate::config::NodeConfig;
 use crate::harness::runner::TestContext;
 
-/// POST a SPARQL query to the cluster and return the raw response body.
+/// Execute a SPARQL query against the cluster graph and return the response body.
+///
+/// Uses GET /graph?query=<sparql> which is the server's SPARQL endpoint.
+/// Normalizes the response to standard SPARQL JSON results format so that
+/// scenarios can use `/results/bindings/0/...` JSON pointers uniformly.
+///
+/// Server returns: `{"type":"SparqlResult","results":[{...}]}`
+/// Normalized to:  `{"results":{"bindings":[{...}]}}`
 pub async fn sparql_query(
     ctx: &TestContext,
     query: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("{}/sparql", ctx.config.base_url());
+    let url = format!("{}/graph", ctx.config.base_url());
     let resp = ctx
         .http_client
-        .post(&url)
-        .header("Content-Type", "application/sparql-query")
+        .get(&url)
+        .query(&[("query", query)])
         .header("Accept", "application/sparql-results+json")
-        .body(query.to_string())
         .send()
         .await?;
     let status = resp.status();
@@ -28,6 +34,22 @@ pub async fn sparql_query(
     if !status.is_success() {
         return Err(format!("SPARQL query failed ({}): {}", status, body).into());
     }
+
+    // Normalize: if server returns {"results":[...]} (flat array),
+    // wrap it as {"results":{"bindings":[...]}} for standard SPARQL compat.
+    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&body) {
+        if let Some(results) = json.get("results").cloned() {
+            if results.is_array() {
+                // Server format: {"type":"SparqlResult","results":[...]}
+                // Standard format: {"results":{"bindings":[...]}}
+                json["results"] = serde_json::json!({"bindings": results});
+                return Ok(serde_json::to_string(&json)?);
+            }
+        }
+        // Also handle ASK queries: {"type":"SparqlResult","boolean":true/false}
+        // Already in standard format, pass through.
+    }
+
     Ok(body)
 }
 
@@ -42,17 +64,29 @@ pub async fn http_get(
 }
 
 /// POST to a cluster HTTP endpoint with a JSON body.
+///
+/// Uses a 10-second timeout per request to avoid hanging on Raft consensus
+/// issues (e.g., /api/commands blocks waiting for quorum).
 pub async fn http_post(
     ctx: &TestContext,
     path: &str,
     body: serde_json::Value,
 ) -> Result<reqwest::Response, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}{}", ctx.config.base_url(), path);
-    let resp = ctx.http_client.post(&url).json(&body).send().await?;
+    let resp = ctx
+        .http_client
+        .post(&url)
+        .json(&body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
     Ok(resp)
 }
 
 /// Resolve a hostname using the cluster's DNS (first node IP, port 53).
+///
+/// Times out after 10 seconds to avoid blocking the test suite when DNS
+/// is unreachable (the default hickory timeout retries for minutes).
 pub async fn dns_lookup(
     ctx: &TestContext,
     hostname: &str,
@@ -75,7 +109,14 @@ pub async fn dns_lookup(
         TokioConnectionProvider::default(),
     )
     .build();
-    let response = resolver.lookup_ip(hostname).await?;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        resolver.lookup_ip(hostname),
+    )
+    .await
+    .map_err(|_| format!("DNS lookup for {} timed out after 10s", hostname))??;
+
     let addrs: Vec<IpAddr> = response.iter().collect();
     Ok(addrs)
 }
@@ -140,6 +181,20 @@ pub async fn ssh_command(node: &NodeConfig, command: &str) -> Result<String, Str
     Ok(stdout)
 }
 
+/// Check if the command endpoint is available and responsive.
+/// Returns false if POST to /api/commands times out (Raft quorum issue).
+pub async fn commands_available(ctx: &TestContext) -> bool {
+    // Send a harmless ping-style command to test if Raft can process writes.
+    let ping = serde_json::json!({
+        "type": "Ping",
+        "payload": {}
+    });
+    match http_post(ctx, "/api/commands", ping).await {
+        Ok(resp) => resp.status().is_success() || resp.status().as_u16() == 202,
+        Err(_) => false,
+    }
+}
+
 /// Check if a feature endpoint is available (not 404, 501, or connection error).
 pub async fn feature_available(
     ctx: &TestContext,
@@ -173,8 +228,16 @@ pub async fn wait_for_sparql(
         match sparql_query(ctx, ask_query).await {
             Ok(body) => {
                 let json: serde_json::Value = serde_json::from_str(&body)?;
+                // Server may return {"boolean":true} or {"type":"SparqlResult","boolean":true}
                 if json.get("boolean").and_then(|v| v.as_bool()) == Some(true) {
                     return Ok(());
+                }
+                // Fallback: check results array for any bindings (ASK returns boolean,
+                // but if someone uses SELECT, check for non-empty results)
+                if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
+                    if !results.is_empty() {
+                        return Ok(());
+                    }
                 }
             }
             Err(_) => {} // keep polling
@@ -200,4 +263,56 @@ pub async fn assert_http_status(
         .into());
     }
     Ok(())
+}
+
+/// Apply a single resource via POST /api/apply.
+///
+/// Wraps the resource declaration in a ResourceFile JSON envelope and posts
+/// it to the server's apply endpoint. Returns the response.
+pub async fn apply_resource(
+    ctx: &TestContext,
+    resource: serde_json::Value,
+) -> Result<reqwest::Response, Box<dyn std::error::Error + Send + Sync>> {
+    let resource_file = serde_json::json!({
+        "resources": [resource]
+    });
+    http_post(ctx, "/api/apply", resource_file).await
+}
+
+/// Apply multiple resources via POST /api/apply.
+pub async fn apply_resources(
+    ctx: &TestContext,
+    resources: Vec<serde_json::Value>,
+) -> Result<reqwest::Response, Box<dyn std::error::Error + Send + Sync>> {
+    let resource_file = serde_json::json!({
+        "resources": resources
+    });
+    http_post(ctx, "/api/apply", resource_file).await
+}
+
+/// Apply a product resource and wait for it to appear in the RDF graph.
+/// Returns Ok(()) when the product is projected, Err if it times out.
+pub async fn apply_product_and_wait(
+    ctx: &TestContext,
+    name: &str,
+    version: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let product = serde_json::json!({
+        "type": "product",
+        "name": name,
+        "version": version
+    });
+    let resp = apply_resource(ctx, product).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("apply product failed ({}): {}", status, body).into());
+    }
+
+    // Wait for the product to appear in the graph.
+    let ask = format!(
+        "ASK {{ <https://picloud.local/products/{}> a <https://picloud.local/ontology#Product> }}",
+        name
+    );
+    wait_for_sparql(ctx, &ask, Duration::from_secs(15)).await
 }

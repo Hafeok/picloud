@@ -55,6 +55,8 @@ impl Scenario for UpgradeGateEnforcementScenario {
                 domain: "test.local".to_string(),
                 http_port: 7443,
                 platform_version: "0.0.0-test".to_string(),
+                tls: false,
+                base_host: None,
             },
             operator: None,
             nodes: vec![],

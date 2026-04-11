@@ -27,6 +27,12 @@ pub struct ClusterSection {
     pub http_port: u16,
     #[serde(default = "default_platform_version")]
     pub platform_version: String,
+    /// Whether the cluster uses TLS (default: false — plain HTTP)
+    #[serde(default)]
+    pub tls: bool,
+    /// Override hostname for base_url (e.g. a node IP to avoid DNS resolution)
+    #[serde(default)]
+    pub base_host: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,8 +69,13 @@ impl ClusterConfig {
     }
 
     /// Return the base URL for HTTP requests to the cluster.
+    /// Uses `base_host` if set (to bypass DNS), otherwise `domain`.
+    /// Uses `http://` or `https://` based on the `tls` field.
     pub fn base_url(&self) -> String {
-        format!("https://{}:{}", self.cluster.domain, self.cluster.http_port)
+        let scheme = if self.cluster.tls { "https" } else { "http" };
+        let host = self.cluster.base_host.as_deref()
+            .unwrap_or(&self.cluster.domain);
+        format!("{scheme}://{host}:{}", self.cluster.http_port)
     }
 
     /// Return the first node IP, useful for direct-node probes.

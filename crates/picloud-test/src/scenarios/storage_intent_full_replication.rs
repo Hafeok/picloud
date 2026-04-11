@@ -29,18 +29,29 @@ impl Scenario for StorageIntentFullReplication {
             };
         }
 
-        // Apply a volume with full-replication durability.
-        let test_product = format!("test-fullrep-{}", uuid::Uuid::new_v4().as_simple());
-        let command = serde_json::json!({
-            "type": "ResourceDeclared",
-            "product": test_product,
-            "resource_type": "volume",
-            "name": "replicated-vol",
-            "durability": "full-replication",
-            "size_gb": 5,
-        });
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", command).await {
+        // Apply a product first, then a volume with full-replication durability.
+        let test_product = format!("test-fullrep-{}", uuid::Uuid::new_v4().as_simple());
+        let resources = vec![
+            serde_json::json!({
+                "type": "product",
+                "name": test_product,
+                "version": "1.0.0"
+            }),
+            serde_json::json!({
+                "type": "volume",
+                "name": "replicated-vol",
+                "product": test_product,
+                "size_gb": 5
+            }),
+        ];
+
+        if let Err(e) = assertions::apply_resources(ctx, resources).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("failed to apply volume: {}", e),

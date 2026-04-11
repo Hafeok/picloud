@@ -30,6 +30,24 @@ impl Scenario for DirectNetworkBlocked {
             };
         }
 
+        // Seed two test products so cross-product isolation can be tested.
+        if let Err(_) =
+            assertions::apply_product_and_wait(ctx, "e2e-blocked-a", "1.0.0").await
+        {
+            return ScenarioResult::Skip {
+                reason: "could not seed test product".to_string(),
+            };
+        }
+        if let Err(_) =
+            assertions::apply_product_and_wait(ctx, "e2e-blocked-b", "1.0.0").await
+        {
+            return ScenarioResult::Skip {
+                reason: "could not seed test product".to_string(),
+            };
+        }
+
+        info!("two test products seeded — isolation check applicable");
+
         // Verify that cross-product network isolation is enforced by checking
         // that the platform has network policies or routing rules.
 
@@ -60,54 +78,6 @@ impl Scenario for DirectNetworkBlocked {
             }
             Err(e) => {
                 info!(error = %e, "isolation policy query failed — checking alternative indicators");
-            }
-        }
-
-        // Verify internal DNS scoping: cross-product names should not resolve.
-        let cross_product_query = r#"
-            PREFIX picloud: <https://picloud.local/ontology#>
-            SELECT ?product WHERE {
-                ?product a picloud:Product .
-            }
-            LIMIT 2
-        "#;
-
-        match assertions::sparql_query(ctx, cross_product_query).await {
-            Ok(body) => {
-                let json: serde_json::Value = match serde_json::from_str(&body) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return ScenarioResult::Fail {
-                            duration: start.elapsed(),
-                            reason: format!("failed to parse products query: {}", e),
-                        };
-                    }
-                };
-
-                let bindings = json
-                    .pointer("/results/bindings")
-                    .and_then(|v| v.as_array());
-
-                if let Some(arr) = bindings {
-                    if arr.len() < 2 {
-                        return ScenarioResult::Skip {
-                            reason: "fewer than 2 products deployed — cannot test cross-product isolation".to_string(),
-                        };
-                    }
-                    info!(
-                        products = arr.len(),
-                        "multiple products found — isolation check applicable"
-                    );
-                } else {
-                    return ScenarioResult::Skip {
-                        reason: "no products found in cluster".to_string(),
-                    };
-                }
-            }
-            Err(e) => {
-                return ScenarioResult::Skip {
-                    reason: format!("cannot query products: {}", e),
-                };
             }
         }
 

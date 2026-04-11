@@ -30,37 +30,16 @@ impl Scenario for SparqlDirectMtls {
             };
         }
 
-        // Find a product SPARQL endpoint to test against.
-        let product_query = r#"
-            PREFIX picloud: <https://picloud.local/ontology#>
-            SELECT ?product WHERE {
-                ?product a picloud:Product .
-            }
-            LIMIT 1
-        "#;
+        // Seed a test product so the RDF graph has data.
+        if let Err(_) =
+            assertions::apply_product_and_wait(ctx, "e2e-sparql-mtls", "1.0.0").await
+        {
+            return ScenarioResult::Skip {
+                reason: "could not seed test product".to_string(),
+            };
+        }
 
-        let product_name = match assertions::sparql_query(ctx, product_query).await {
-            Ok(body) => {
-                let json: serde_json::Value =
-                    serde_json::from_str(&body).unwrap_or_default();
-                json.pointer("/results/bindings/0/product/value")
-                    .and_then(|v| v.as_str())
-                    .map(|s| {
-                        // Extract product name from IRI.
-                        s.rsplit('/').next().unwrap_or(s).to_string()
-                    })
-            }
-            Err(_) => None,
-        };
-
-        let product = match product_name {
-            Some(p) => p,
-            None => {
-                return ScenarioResult::Skip {
-                    reason: "no products deployed — cannot test product SPARQL mTLS".to_string(),
-                };
-            }
-        };
+        let product = "e2e-sparql-mtls".to_string();
 
         // Try accessing the product SPARQL endpoint without client cert.
         let sparql_path = format!("/products/{}/graph", product);
@@ -75,10 +54,9 @@ impl Scenario for SparqlDirectMtls {
         let test_query = "SELECT * WHERE { ?s ?p ?o } LIMIT 1";
 
         match no_cert_client
-            .post(&url)
-            .header("Content-Type", "application/sparql-query")
+            .get(&url)
+            .query(&[("query", test_query)])
             .header("Accept", "application/sparql-results+json")
-            .body(test_query)
             .send()
             .await
         {

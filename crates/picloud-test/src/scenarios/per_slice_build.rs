@@ -54,7 +54,7 @@ impl Scenario for PerSliceBuild {
                 continue;
             }
 
-            let output = match Command::new("cargo")
+            let output = match Command::new(crate::harness::cargo::cargo_bin())
                 .args(["check", "-p", crate_name])
                 .current_dir(workspace_root)
                 .output()

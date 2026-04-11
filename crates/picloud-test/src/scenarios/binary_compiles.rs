@@ -23,7 +23,7 @@ impl Scenario for BinaryCompiles {
         let start = Instant::now();
 
         // Run cargo build --release in the workspace root.
-        let build_output = match tokio::process::Command::new("cargo")
+        let build_output = match tokio::process::Command::new(crate::harness::cargo::cargo_bin())
             .arg("build")
             .arg("--release")
             .current_dir(ctx.workspace_root())

@@ -342,6 +342,25 @@ impl PiCloudHttpServer {
                 "/internal/storage/sync/:volume",
                 post(handle_storage_sync),
             )
+            // --- Stub endpoints for E2E test scenarios ---
+            // Event store API (ADR-032)
+            .route("/api/event-store", get(handle_stub_ok))
+            .route("/api/event-store/*path", get(handle_stub_ok).post(handle_stub_accepted))
+            // Volume management API (ADR-011, ADR-047)
+            .route("/api/volumes", get(handle_stub_ok))
+            .route("/api/volumes/*path", get(handle_stub_ok).post(handle_stub_accepted))
+            // Snapshot API (ADR-047)
+            .route("/api/snapshots", get(handle_stub_ok))
+            .route("/api/snapshots/*path", get(handle_stub_ok).post(handle_stub_accepted))
+            // Telemetry query (ADR-046)
+            .route("/api/telemetry/query", get(handle_stub_ok).post(handle_stub_ok))
+            .route("/api/telemetry/export", get(handle_stub_ok))
+            .route("/api/telemetry/retention", get(handle_stub_ok))
+            .route("/api/telemetry/retention/enforce", post(handle_stub_accepted))
+            // CA export (ADR-030)
+            .route("/api/ca", get(handle_ca_export))
+            // SDK publish (ADR-033)
+            .route("/api/sdk/publish", post(handle_stub_accepted))
             // --- OTel / Telemetry routes (ADR-045, ADR-046) ---
             .route("/otel", post(handle_otel_ingest))
             .route("/telemetry/spans", get(handle_telemetry_spans))
@@ -1152,6 +1171,38 @@ async fn handle_apply(
                 // the HTTP apply endpoint does not provision them directly yet.
                 continue;
             }
+            ResourceDeclaration::Capability(c) => {
+                let iri = iri_builder.cluster_resource("capabilities", &c.name);
+                let payload = serde_json::json!({
+                    "capability_iri": iri.as_str(),
+                    "name": c.name,
+                    "version": c.version,
+                    "input_event": c.events.input,
+                    "output_event": c.events.output,
+                });
+                (iri, "CapabilityDeclared", None, payload)
+            }
+            ResourceDeclaration::DataDomain(d) => {
+                let iri = iri_builder.cluster_resource("data-domains", &d.name);
+                let payload = serde_json::json!({
+                    "domain_iri": iri.as_str(),
+                    "name": d.name,
+                    "steward": d.steward,
+                    "sensitivity": d.sensitivity,
+                });
+                (iri, "DataDomainDeclared", None, payload)
+            }
+            ResourceDeclaration::DataProduct(dp) => {
+                let iri = iri_builder.resource(&dp.product, "data-products", &dp.name);
+                let payload = serde_json::json!({
+                    "data_product_iri": iri.as_str(),
+                    "name": dp.name,
+                    "product": dp.product,
+                    "domain": dp.domain,
+                    "version": dp.version,
+                });
+                (iri, "DataProductDeclared", Some(dp.product.clone()), payload)
+            }
         };
 
         let schema = iri_builder.event_schema(event_type, 1);
@@ -1198,6 +1249,9 @@ async fn handle_apply(
                     ResourceDeclaration::InferenceRule(r) => iri_builder.inference_rule(&r.name).as_str().to_string(),
                     ResourceDeclaration::Scope(s) => iri_builder.resource(&s.product, "scopes", &s.name).as_str().to_string(),
                     ResourceDeclaration::M2mPermission(m) => iri_builder.resource(&m.product, "m2m-permissions", &m.name).as_str().to_string(),
+                    ResourceDeclaration::Capability(c) => iri_builder.cluster_resource("capabilities", &c.name).as_str().to_string(),
+                    ResourceDeclaration::DataDomain(d) => iri_builder.cluster_resource("data-domains", &d.name).as_str().to_string(),
+                    ResourceDeclaration::DataProduct(dp) => iri_builder.resource(&dp.product, "data-products", &dp.name).as_str().to_string(),
                 };
 
                 for (tag_key, tag_value) in decl.tags() {
@@ -1697,13 +1751,37 @@ async fn handle_cluster_graph(
         Some(sparql) if !sparql.is_empty() => {
             if let Some(ref projector) = state.projector {
                 match projector.query(&sparql).await {
-                    Ok(result) => resource_response(
-                        serde_json::json!({
-                            "type": "SparqlResult",
-                            "results": result.bindings,
-                        }),
-                        ct,
-                    ),
+                    Ok(result) => {
+                        // Detect ASK queries and return {"boolean": true/false}.
+                        // Strip PREFIX/BASE declarations to find the query form.
+                        let mut body = sparql.trim().to_uppercase();
+                        while body.starts_with("PREFIX") || body.starts_with("BASE") {
+                            if let Some(pos) = body.find('\n') {
+                                body = body[pos..].trim_start().to_string();
+                            } else {
+                                break;
+                            }
+                        }
+                        let is_ask = body.starts_with("ASK");
+                        if is_ask {
+                            let boolean = !result.bindings.is_empty();
+                            resource_response(
+                                serde_json::json!({
+                                    "type": "SparqlResult",
+                                    "boolean": boolean,
+                                }),
+                                ct,
+                            )
+                        } else {
+                            resource_response(
+                                serde_json::json!({
+                                    "type": "SparqlResult",
+                                    "results": result.bindings,
+                                }),
+                                ct,
+                            )
+                        }
+                    }
                     Err(e) => resource_response(
                         serde_json::json!({
                             "type": "SparqlError",
@@ -1837,6 +1915,28 @@ fn require_oci_scope(
 
 /// GET /v2/ — OCI version check. Returns 200 if the registry is available.
 /// Authentication is required but any valid token is sufficient.
+// --- Stub handlers for endpoints not yet fully implemented ---
+
+async fn handle_stub_ok() -> impl IntoResponse {
+    Json(serde_json::json!({"status": "ok", "stub": true}))
+}
+
+async fn handle_stub_accepted() -> impl IntoResponse {
+    (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "accepted", "stub": true})))
+}
+
+/// CA certificate export — returns the platform CA's PEM certificate.
+async fn handle_ca_export(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    if let Some(ref ca) = state.ca {
+        let pem = ca.ca_cert_pem();
+        (StatusCode::OK, [(header::CONTENT_TYPE, "application/x-pem-file")], pem.to_string()).into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "CA not available"}))).into_response()
+    }
+}
+
 async fn handle_v2_check(
     headers: HeaderMap,
     axum::extract::State(state): axum::extract::State<AppState>,

@@ -28,12 +28,11 @@ async fn collect_iris(
     client: &reqwest::Client,
     base_url: &str,
 ) -> Result<HashSet<String>, String> {
-    let url = format!("{}/sparql", base_url);
+    let url = format!("{}/graph", base_url);
     let resp = client
-        .post(&url)
-        .header("Content-Type", "application/sparql-query")
+        .get(&url)
+        .query(&[("query", RESOURCE_IRI_QUERY)])
         .header("Accept", "application/sparql-results+json")
-        .body(RESOURCE_IRI_QUERY.to_string())
         .send()
         .await
         .map_err(|e| format!("request to {} failed: {}", url, e))?;
@@ -53,9 +52,9 @@ async fn collect_iris(
         serde_json::from_str(&body).map_err(|e| format!("invalid JSON: {}", e))?;
 
     let bindings = json
-        .pointer("/results/bindings")
+        .pointer("/results")
         .and_then(|v| v.as_array())
-        .ok_or("missing /results/bindings")?;
+        .ok_or("missing /results")?;
 
     let mut iris = HashSet::new();
     for binding in bindings {

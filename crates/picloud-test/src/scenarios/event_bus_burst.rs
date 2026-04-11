@@ -29,7 +29,7 @@ impl Scenario for EventBusBurst {
             };
         }
 
-        if !assertions::feature_available(ctx, "/api/events").await {
+        if !assertions::feature_available(ctx, "/api/commands").await {
             return ScenarioResult::Skip {
                 reason: "event bus API not available".to_string(),
             };
@@ -50,7 +50,7 @@ impl Scenario for EventBusBurst {
                 }
             });
 
-            match assertions::http_post(ctx, "/api/events", event_body).await {
+            match assertions::http_post(ctx, "/api/commands", event_body).await {
                 Ok(resp) if resp.status().is_success() => {
                     success_count += 1;
                 }

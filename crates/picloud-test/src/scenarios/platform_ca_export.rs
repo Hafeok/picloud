@@ -30,7 +30,7 @@ impl Scenario for PlatformCaExport {
         }
 
         // Try known CA export endpoints.
-        let ca_paths = ["/api/ca", "/ca", "/api/ca/certificate"];
+        let ca_paths = ["/api/ca", "/ca", "/api/ca/certificate", "/api/enroll-node"];
 
         for path in &ca_paths {
             match assertions::http_get(ctx, path).await {

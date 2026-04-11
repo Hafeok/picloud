@@ -31,7 +31,7 @@ impl Scenario for PasskeyRegistration {
         }
 
         // Check if the passkey registration endpoint exists.
-        if !assertions::feature_available(ctx, "/auth/passkeys/register").await {
+        if !assertions::feature_available(ctx, "/auth/register/begin").await {
             return ScenarioResult::Skip {
                 reason: "passkey registration endpoint not available".to_string(),
             };
@@ -43,7 +43,7 @@ impl Scenario for PasskeyRegistration {
             "displayName": "Test User"
         });
 
-        match assertions::http_post(ctx, "/auth/passkeys/register", register_body).await {
+        match assertions::http_post(ctx, "/auth/register/begin", register_body).await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 let body = resp.text().await.unwrap_or_default();

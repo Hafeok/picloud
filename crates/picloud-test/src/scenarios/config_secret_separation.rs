@@ -29,6 +29,12 @@ impl Scenario for ConfigSecretSeparation {
             };
         }
 
+        if !assertions::commands_available(ctx).await {
+            return ScenarioResult::Skip {
+                reason: "command endpoint not responsive (Raft quorum unavailable)".to_string(),
+            };
+        }
+
         // 1. Check config endpoint exists
         if !assertions::feature_available(ctx, "/products/test-product/config").await {
             return ScenarioResult::Skip {

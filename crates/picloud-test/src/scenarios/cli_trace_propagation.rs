@@ -33,7 +33,7 @@ impl Scenario for CliTracePropagation {
         }
 
         // Check if telemetry spans endpoint is available.
-        let spans_path = "/api/telemetry/spans";
+        let spans_path = "/telemetry/spans";
         if !assertions::feature_available(ctx, spans_path).await {
             return ScenarioResult::Skip {
                 reason: "telemetry spans endpoint not implemented yet".to_string(),

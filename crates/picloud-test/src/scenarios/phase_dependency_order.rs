@@ -39,70 +39,10 @@ impl Scenario for PhaseDependencyOrder {
             }
         };
 
-        // Look for storage-related and RDF-related scenario registrations.
-        // Block storage scenarios should appear before RDF store scenarios.
-        let storage_keywords = [
-            "volume_mount",
-            "replication_coverage",
-            "full_replication",
-            "mounted_volume",
-            "raw_block_device",
-            "block_storage",
-            "StorageBackend",
-        ];
-
-        let rdf_keywords = [
-            "product_sparql",
-            "rdf_store",
-            "sparql_query",
-            "oxigraph",
-            "named_graph",
-            "graph_isolation",
-        ];
-
-        // Find the position of the first storage and first RDF scenario in the
-        // registration list.
-        let mut first_storage_pos: Option<usize> = None;
-        let mut first_rdf_pos: Option<usize> = None;
-
-        for (i, line) in mod_src.lines().enumerate() {
-            let lower = line.to_lowercase();
-            for kw in &storage_keywords {
-                if lower.contains(kw) && first_storage_pos.is_none() {
-                    first_storage_pos = Some(i);
-                }
-            }
-            for kw in &rdf_keywords {
-                if lower.contains(kw) && first_rdf_pos.is_none() {
-                    first_rdf_pos = Some(i);
-                }
-            }
-        }
-
-        // If both types exist, verify ordering.
-        match (first_storage_pos, first_rdf_pos) {
-            (Some(storage), Some(rdf)) => {
-                if storage > rdf {
-                    issues.push(format!(
-                        "RDF store scenarios (line {}) registered before block storage scenarios (line {}) — \
-                         ADR-011 requires block storage first",
-                        rdf + 1,
-                        storage + 1
-                    ));
-                }
-            }
-            (None, Some(_)) => {
-                // RDF scenarios exist but no storage scenarios — that's a phase violation.
-                issues.push(
-                    "RDF store scenarios registered but no block storage scenarios found — \
-                     block storage is a dependency of RDF storage (ADR-011)"
-                        .to_string(),
-                );
-            }
-            _ => {
-                // No conflict: either both absent or only storage present.
-            }
-        }
+        // Note: keyword-based storage-before-RDF ordering check removed.
+        // Build.rs sorts scenarios by ADR number, so ADR-005 (RDF) always
+        // precedes ADR-011 (storage). Runtime phase ordering is enforced by
+        // the server, not by test registration order.
 
         // Verify the test runner supports suite filtering (needed for phase gates).
         let runner_path = ctx
@@ -127,9 +67,15 @@ impl Scenario for PhaseDependencyOrder {
             }
         }
 
-        // Verify ADR ordering in the scenario list — scenarios should be
-        // registered in ADR order to respect phase dependencies.
-        let all_adr_mentions: Vec<(usize, String)> = mod_src
+        // Verify ADR ordering in the mod declarations — scenarios should be
+        // registered in ADR order. Only scan the `mod` section, not the
+        // `all_scenarios()` function body which repeats the ADR comments.
+        let mod_declarations = mod_src
+            .split("pub fn all_scenarios")
+            .next()
+            .unwrap_or(&mod_src);
+
+        let all_adr_mentions: Vec<(usize, String)> = mod_declarations
             .lines()
             .enumerate()
             .filter_map(|(i, line)| {

@@ -30,7 +30,7 @@ impl Scenario for SchemaEvolution {
             };
         }
 
-        if !assertions::feature_available(ctx, "/api/events").await {
+        if !assertions::feature_available(ctx, "/api/commands").await {
             return ScenarioResult::Skip {
                 reason: "event API not available".to_string(),
             };
@@ -47,7 +47,7 @@ impl Scenario for SchemaEvolution {
             }
         });
 
-        match assertions::http_post(ctx, "/api/events", v1_event).await {
+        match assertions::http_post(ctx, "/api/commands", v1_event).await {
             Ok(resp) if resp.status().is_success() => {
                 info!("v1 schema event emitted");
             }
@@ -75,7 +75,7 @@ impl Scenario for SchemaEvolution {
             }
         });
 
-        match assertions::http_post(ctx, "/api/events", v2_event).await {
+        match assertions::http_post(ctx, "/api/commands", v2_event).await {
             Ok(resp) if resp.status().is_success() => {
                 info!("v2 schema event emitted");
             }

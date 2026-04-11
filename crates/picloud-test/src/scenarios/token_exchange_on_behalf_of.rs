@@ -45,7 +45,7 @@ impl Scenario for TokenExchangeOnBehalfOf {
             "scope": "users:read",
         });
 
-        match assertions::http_post(ctx, "/auth/token", exchange_body).await {
+        match assertions::http_post(ctx, "/auth/token/exchange", exchange_body).await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 if status == 404 || status == 501 {

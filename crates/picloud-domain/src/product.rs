@@ -13,6 +13,15 @@ pub struct ProductSpec {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    /// Capabilities this product implements (ADR-055), e.g. ["gps-to-place@1.0.0"]
+    #[serde(default)]
+    pub implements: Vec<String>,
+    /// Capabilities this product depends on (ADR-055)
+    #[serde(default)]
+    pub capabilities: Vec<crate::resources::CapabilityDependency>,
+    /// Data products this product consumes (ADR-056)
+    #[serde(default)]
+    pub data_products: Vec<crate::resources::DataProductDependency>,
 }
 
 /// Upgrade state for atomic cutover deployments (ADR-021)

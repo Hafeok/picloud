@@ -31,7 +31,7 @@ impl Scenario for OtlpTraceIngestion {
         }
 
         // Try the OTLP traces endpoint.
-        let otlp_path = "/otel/v1/traces";
+        let otlp_path = "/otel";
         if !assertions::feature_available(ctx, otlp_path).await {
             return ScenarioResult::Skip {
                 reason: "OTLP traces endpoint not implemented yet".to_string(),

@@ -1,7 +1,7 @@
 //! ADR-017: OIDC client credentials — POST /auth/token with client_credentials
 //! grant. Assert token or structured error.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use tracing::info;
@@ -37,13 +37,17 @@ impl Scenario for OidcClientCredentials {
             };
         }
 
-        // POST client credentials grant.
+        // POST client credentials grant (server expects JSON, not form-urlencoded).
         let token_url = format!("{}/auth/token", ctx.config.base_url());
         let resp = match ctx
             .http_client
             .post(&token_url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body("grant_type=client_credentials&client_id=test-client&client_secret=test-secret")
+            .json(&serde_json::json!({
+                "grant_type": "client_credentials",
+                "client_id": "test-client",
+                "client_secret": "test-secret"
+            }))
+            .timeout(Duration::from_secs(10))
             .send()
             .await
         {

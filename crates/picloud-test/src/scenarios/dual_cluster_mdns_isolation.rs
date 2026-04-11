@@ -31,12 +31,12 @@ impl Scenario for DualClusterMdnsIsolation {
             };
         }
 
-        // Query the cluster identity endpoint.
-        let resp = match assertions::http_get(ctx, "/api/cluster/identity").await {
+        // Query the cluster root (/) which returns cluster identity info.
+        let resp = match assertions::http_get(ctx, "/").await {
             Ok(r) => r,
             Err(e) => {
                 return ScenarioResult::Skip {
-                    reason: format!("cluster identity endpoint not available: {}", e),
+                    reason: format!("cluster root not available: {}", e),
                 };
             }
         };

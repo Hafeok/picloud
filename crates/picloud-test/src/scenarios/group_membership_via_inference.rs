@@ -30,30 +30,27 @@ impl Scenario for GroupMembershipViaInference {
         }
 
         // 1. Create a group with an inference rule
-        let group_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "group",
+        let group_resource = serde_json::json!({
+            "type": "group",
             "name": "test-inference-group",
-            "roles": ["test-role"],
+            "roles": ["test-role"]
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", group_cmd).await {
+        if let Err(e) = assertions::apply_resource(ctx, group_resource).await {
             return ScenarioResult::Skip {
                 reason: format!("group creation not available: {}", e),
             };
         }
 
         // 2. Create an inference rule for group membership
-        let rule_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "inference-rule",
+        let rule_resource = serde_json::json!({
+            "type": "inference-rule",
             "name": "test-group-membership-rule",
-            "scope": "platform",
-            "trigger": "event",
-            "construct": "CONSTRUCT { <https://picloud.local/groups/test-inference-group> picloud:hasMember ?user . } WHERE { ?user a picloud:HumanIdentity ; picloud:tag [ picloud:tagKey \"dept\" ; picloud:tagValue \"engineering\" ] . }",
+            "product": "platform",
+            "construct": "CONSTRUCT { <https://picloud.local/groups/test-inference-group> picloud:hasMember ?user . } WHERE { ?user a picloud:HumanIdentity ; picloud:tag [ picloud:tagKey \"dept\" ; picloud:tagValue \"engineering\" ] . }"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", rule_cmd).await {
+        if let Err(e) = assertions::apply_resource(ctx, rule_resource).await {
             return ScenarioResult::Skip {
                 reason: format!("inference rule creation not available: {}", e),
             };
@@ -61,13 +58,12 @@ impl Scenario for GroupMembershipViaInference {
 
         // 3. Add a matching tag to a user
         let tag_cmd = serde_json::json!({
-            "type": "TagAdded",
-            "resource_iri": "https://picloud.local/platform/identities/inference-test-user",
+            "resource": "https://picloud.local/platform/identities/inference-test-user",
             "key": "dept",
-            "value": "engineering",
+            "value": "engineering"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", tag_cmd).await {
+        if let Err(e) = assertions::http_post(ctx, "/api/tags/add", tag_cmd).await {
             return ScenarioResult::Skip {
                 reason: format!("tag addition not available: {}", e),
             };

@@ -198,27 +198,71 @@
 - [T] **ADR test coverage completeness** — scenario parses ADRs, asserts Test coverage section present
 - [T] **Scenario catalogue sync** — scenario verifies every ADR-named .rs file exists
 
-## ADR-055: Staged Platform Upgrade via Isolated Staging Cluster
+## ADR-055: Capability as a First-Class Interface Contract
+
+- [T] **Capability resource type** — cluster-scoped, version/ontology/shapes/input+output events
+- [T] **CapabilityDependency type** — capability name + minVersion on Product
+- [T] **Product `implements` field** — list of capability@version refs
+- [T] **Product `capabilities` field** — list of CapabilityDependency objects
+- [T] **Capability events** — CapabilityDeclared/Ready/ImplementorAdded/Removed/Unfulfilled/Deleted/RoutingFailed
+- [T] **Capability error variants** — NotFound/Unfulfilled/DeletionBlocked/ShaclConformanceFailed/RoutingFailed
+- [T] **CapabilityResolver trait** — resolve_implementor, route_capability_event, list_capabilities
+- [T] **RDF projection** — CapabilityDeclared/Ready/ImplementorAdded/Removed/Deleted projected to Oxigraph
+- [T] **Parser declarations** — capability type in JSON and bicep .picloud files with validation
+- [T] **IRI routing** — /capabilities/{name} route
+- [T] **HTTP apply** — CapabilityDeclared event emitted on resource apply
+- [T] **CLI** — `picloud capability list` via SPARQL
+- [T] **Compiler** — capability maps to Capability RDF class
+- [ ] **Capability-aware event routing** — platform routes input events to highest-version implementor
+- [ ] **SHACL conformance check** — validate implements declarations at deploy time
+- [ ] **Capability consumer blocking** — block deploy if required capability unfulfilled
+
+## ADR-056: Data Products and Data Domains
+
+- [T] **DataDomain resource type** — cluster-scoped, steward/sensitivity/description
+- [T] **DataProduct resource type** — product-scoped, projection/freshness/access/domain
+- [T] **DataProductDependency type** — source + minVersion on Product
+- [T] **Product `dataProducts` field** — list of DataProductDependency objects
+- [T] **FreshnessConfig / DataProductAccess types** — maxAge, triggers, visibility, roles
+- [T] **DataSensitivity enum** — Public/Internal/Confidential/Restricted
+- [T] **Data domain events** — DataDomainDeclared/Deleted
+- [T] **Data product events** — DataProductDeclared/Ready/Refreshed/SLOBreached/SLORestored/Deleted
+- [T] **Data product error variants** — DomainNotFound/DomainDeletionBlocked/ProductNotFound/DeletionBlocked/CrossProductGraphAccessDenied
+- [T] **DataProductProjector trait** — refresh_projection, query_data_product
+- [T] **DataProductSLOMonitor trait** — check_freshness with breach/restore actions
+- [T] **RDF projection** — DataDomainDeclared/Deleted/DataProductDeclared/Refreshed/Deleted projected
+- [T] **Parser declarations** — data-domain and data-product types in JSON and bicep with validation
+- [T] **IRI routing** — /data-domains/{name} and /products/{p}/data-products/{n}/graph routes
+- [T] **HTTP apply** — DataDomainDeclared/DataProductDeclared events emitted on resource apply
+- [T] **CLI** — `picloud data-domain list` and `picloud data-product list` via SPARQL
+- [T] **Compiler** — DataDomain/DataProduct map to RDF classes
+- [T] **IriBuilder** — cluster_resource() and data_product_graph() methods
+- [ ] **Projection runner** — SPARQL CONSTRUCT on trigger events, atomic graph swap
+- [ ] **Freshness monitor** — maxAge tracking, SLOBreached/Restored events
+- [ ] **Cross-product internal graph access blocked** — 403 for non-owner, non-admin identities
+- [ ] **Consumer dependency validation** — block deploy if referenced data product missing
+
+## ADR-055 (legacy): Staged Platform Upgrade via Isolated Staging Cluster
 
 - [T] **Upgrade compatibility scenario** — triple count comparison pre/post upgrade
 - [T] **Rolling upgrade sequence scenario** — followers-first order, leader quorum polling
 - [T] **Upgrade gate enforcement scenario** — mock-fail scenario halts pipeline
 - [x] **Rolling upgrade subcommand** — `picloud-test upgrade --binary <path>`, SSH/SCP-based
 
-## ADR-056: Shared Hardware Staging with Port Isolation
+## ADR-056 (legacy): Shared Hardware Staging with Port Isolation
 
 - [T] **Server config file** — `--config <path>` TOML with all ports/storage/domain configurable
 - [T] **Shared hardware isolation scenario** — SPARQL cross-contamination check
 - [T] **Port non-conflict scenario** — systemd service + HTTP health check on both ports
 
-## ADR-057: OTel Test Data Versioning via Resource Attributes
+## ADR-057 (removed): OTel Test Data Versioning via Resource Attributes
 
 - [x] **DNS TXT version lookup** — hickory-resolver TXT query with fallback chain
 - [x] **OTel tracer init** — resource attributes per ADR-057, OTLP export
 - [T] **Version attribute present scenario** — asserts picloud.platform_version on all spans
 - [T] **Version matches cluster scenario** — asserts version matches DNS TXT record
 
-## ADR-058: picloud-test as First-Class Workspace Crate
+## ADR-058 (removed): picloud-test as First-Class Workspace Crate
 
 - [T] **Crate scaffold** — workspace member, binary, harness, config, scenarios, invariants, probes
 - [T] **Test crate builds independently scenario** — cargo check -p picloud-test

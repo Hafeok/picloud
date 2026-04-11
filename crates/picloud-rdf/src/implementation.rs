@@ -1650,6 +1650,187 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    // ---- Capability Projection (ADR-055) ----
+
+    fn project_capability_declared(&self, event: &EventEnvelope) -> Result<()> {
+        let name = event.payload["name"].as_str().unwrap_or_default();
+        let version = event.payload["version"].as_str().unwrap_or_default();
+        let input_event = event.payload["input_event"].as_str().unwrap_or_default();
+        let output_event = event.payload["output_event"].as_str().unwrap_or_default();
+        let capability_iri = event.payload["capability_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        self.insert_triple(capability_iri, RDF_TYPE, picloud_term("Capability").into())?;
+        self.insert_triple(capability_iri, &format!("{PICLOUD_NS}name"), Literal::new_simple_literal(name).into())?;
+        self.insert_triple(capability_iri, &format!("{PICLOUD_NS}version"), Literal::new_simple_literal(version).into())?;
+        self.insert_triple(capability_iri, &format!("{PICLOUD_NS}inputEvent"), Literal::new_simple_literal(input_event).into())?;
+        self.insert_triple(capability_iri, &format!("{PICLOUD_NS}outputEvent"), Literal::new_simple_literal(output_event).into())?;
+        self.insert_triple(capability_iri, &format!("{PICLOUD_NS}status"), Literal::new_simple_literal("declared").into())?;
+
+        debug!(capability = name, "projected CapabilityDeclared");
+        Ok(())
+    }
+
+    fn project_capability_ready(&self, event: &EventEnvelope) -> Result<()> {
+        let capability_iri = event.payload["capability_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.update_status(capability_iri, "ready", None)?;
+        debug!(capability_iri = capability_iri, "projected CapabilityReady");
+        Ok(())
+    }
+
+    fn project_capability_implementor_added(&self, event: &EventEnvelope) -> Result<()> {
+        let capability_iri = event.payload["capability_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let product_iri = event.payload["product_iri"].as_str().unwrap_or_default();
+        let product_name = event.payload["product_name"].as_str().unwrap_or_default();
+
+        self.insert_triple(
+            capability_iri,
+            &format!("{PICLOUD_NS}implementedBy"),
+            NamedNode::new(product_iri)
+                .map_err(|e| PiCloudError::Internal(format!("invalid product IRI: {e}")))?
+                .into(),
+        )?;
+
+        debug!(capability_iri = capability_iri, product = product_name, "projected CapabilityImplementorAdded");
+        Ok(())
+    }
+
+    fn project_capability_implementor_removed(&self, event: &EventEnvelope) -> Result<()> {
+        let capability_iri = event.payload["capability_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let product_iri = event.payload["product_iri"].as_str().unwrap_or_default();
+
+        // Remove the implementedBy triple
+        if let (Ok(subj), Ok(pred), Ok(obj)) = (
+            NamedNode::new(capability_iri),
+            NamedNode::new(format!("{PICLOUD_NS}implementedBy")),
+            NamedNode::new(product_iri),
+        ) {
+            let _ = self.store.remove(&Quad::new(subj, pred, obj, GraphName::DefaultGraph));
+        }
+
+        debug!(capability_iri = capability_iri, "projected CapabilityImplementorRemoved");
+        Ok(())
+    }
+
+    fn project_capability_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let capability_iri = event.payload["capability_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.remove_triples_about_all_graphs(capability_iri)?;
+        debug!(capability_iri = capability_iri, "projected CapabilityDeleted");
+        Ok(())
+    }
+
+    // ---- Data Domain / Data Product Projection (ADR-056) ----
+
+    fn project_data_domain_declared(&self, event: &EventEnvelope) -> Result<()> {
+        let name = event.payload["name"].as_str().unwrap_or_default();
+        let steward = event.payload["steward"].as_str().unwrap_or_default();
+        let sensitivity = event.payload["sensitivity"].as_str().unwrap_or("internal");
+        let domain_iri = event.payload["domain_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        self.insert_triple(domain_iri, RDF_TYPE, picloud_term("DataDomain").into())?;
+        self.insert_triple(domain_iri, &format!("{PICLOUD_NS}name"), Literal::new_simple_literal(name).into())?;
+        self.insert_triple(domain_iri, &format!("{PICLOUD_NS}steward"), Literal::new_simple_literal(steward).into())?;
+        self.insert_triple(domain_iri, &format!("{PICLOUD_NS}sensitivity"), Literal::new_simple_literal(sensitivity).into())?;
+        self.insert_triple(domain_iri, &format!("{PICLOUD_NS}status"), Literal::new_simple_literal("declared").into())?;
+
+        debug!(domain = name, "projected DataDomainDeclared");
+        Ok(())
+    }
+
+    fn project_data_domain_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let domain_iri = event.payload["domain_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.remove_triples_about_all_graphs(domain_iri)?;
+        debug!(domain_iri = domain_iri, "projected DataDomainDeleted");
+        Ok(())
+    }
+
+    fn project_data_product_declared(&self, event: &EventEnvelope) -> Result<()> {
+        let name = event.payload["name"].as_str().unwrap_or_default();
+        let product = event.payload["product"].as_str().unwrap_or_default();
+        let domain = event.payload["domain"].as_str().unwrap_or_default();
+        let version = event.payload["version"].as_str().unwrap_or_default();
+        let dp_iri = event.payload["data_product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        self.insert_triple(dp_iri, RDF_TYPE, picloud_term("DataProduct").into())?;
+        self.insert_triple(dp_iri, &format!("{PICLOUD_NS}name"), Literal::new_simple_literal(name).into())?;
+        self.insert_triple(dp_iri, &format!("{PICLOUD_NS}product"), Literal::new_simple_literal(product).into())?;
+        self.insert_triple(dp_iri, &format!("{PICLOUD_NS}domain"), Literal::new_simple_literal(domain).into())?;
+        self.insert_triple(dp_iri, &format!("{PICLOUD_NS}version"), Literal::new_simple_literal(version).into())?;
+        self.insert_triple(dp_iri, &format!("{PICLOUD_NS}status"), Literal::new_simple_literal("declared").into())?;
+
+        // Link to the data domain
+        let cluster_root = self.iri_builder.cluster_root();
+        let domain_iri = format!("{}/data-domains/{domain}", cluster_root.as_str().trim_end_matches('/'));
+        if let Ok(domain_node) = NamedNode::new(&domain_iri) {
+            self.insert_triple(dp_iri, &format!("{PICLOUD_NS}belongsToDomain"), domain_node.into())?;
+        }
+
+        // Link to the owning product
+        let product_iri = self.iri_builder.product(product);
+        if let Ok(product_node) = NamedNode::new(product_iri.as_str()) {
+            self.insert_triple(dp_iri, &format!("{PICLOUD_NS}producedBy"), product_node.into())?;
+        }
+
+        debug!(data_product = name, product = product, "projected DataProductDeclared");
+        Ok(())
+    }
+
+    fn project_data_product_refreshed(&self, event: &EventEnvelope) -> Result<()> {
+        let dp_iri = event.payload["data_product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let triple_count = event.payload["triple_count"].as_u64().unwrap_or(0);
+        let ts_fallback = event.timestamp.to_rfc3339();
+        let ts = event.payload["refreshed_at"]
+            .as_str()
+            .unwrap_or(&ts_fallback);
+
+        self.update_status(dp_iri, "ready", None)?;
+        self.insert_triple(
+            dp_iri,
+            &format!("{PICLOUD_NS}lastRefreshed"),
+            Literal::new_typed_literal(
+                ts.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#dateTime").expect("valid XSD IRI"),
+            ).into(),
+        )?;
+        self.insert_triple(
+            dp_iri,
+            &format!("{PICLOUD_NS}tripleCount"),
+            Literal::new_typed_literal(
+                triple_count.to_string(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#unsignedLong").expect("valid XSD IRI"),
+            ).into(),
+        )?;
+
+        debug!(data_product = dp_iri, triple_count = triple_count, "projected DataProductRefreshed");
+        Ok(())
+    }
+
+    fn project_data_product_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let dp_iri = event.payload["data_product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.remove_triples_about_all_graphs(dp_iri)?;
+        debug!(data_product = dp_iri, "projected DataProductDeleted");
+        Ok(())
+    }
+
     // ---- RDFS Inference (ADR-039) ----
 
     /// Materialise RDFS subclass inference.
@@ -2068,6 +2249,26 @@ impl StateProjector for OxigraphProjector {
             "RegistryGCCompleted" => self.project_registry_gc_completed(event),
             "RegistryAuthFailed" => {
                 debug!("RegistryAuthFailed event — no RDF projection");
+                Ok(())
+            }
+            // Capability events (ADR-055)
+            "CapabilityDeclared" => self.project_capability_declared(event),
+            "CapabilityReady" => self.project_capability_ready(event),
+            "CapabilityImplementorAdded" => self.project_capability_implementor_added(event),
+            "CapabilityImplementorRemoved" => self.project_capability_implementor_removed(event),
+            "CapabilityDeleted" => self.project_capability_deleted(event),
+            "CapabilityUnfulfilled" | "CapabilityRoutingFailed" => {
+                debug!(event_type = %event.event_type, "capability lifecycle event — recorded");
+                Ok(())
+            }
+            // Data Domain / Data Product events (ADR-056)
+            "DataDomainDeclared" => self.project_data_domain_declared(event),
+            "DataDomainDeleted" => self.project_data_domain_deleted(event),
+            "DataProductDeclared" => self.project_data_product_declared(event),
+            "DataProductRefreshed" => self.project_data_product_refreshed(event),
+            "DataProductDeleted" => self.project_data_product_deleted(event),
+            "DataProductReady" | "DataProductSLOBreached" | "DataProductSLORestored" => {
+                debug!(event_type = %event.event_type, "data product lifecycle event — recorded");
                 Ok(())
             }
             // Telemetry events (ADR-045) — no RDF projection needed

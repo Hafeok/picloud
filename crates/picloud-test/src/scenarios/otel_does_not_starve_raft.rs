@@ -31,31 +31,30 @@ impl Scenario for OtelDoesNotStarveRaft {
 
         // 1. Measure baseline Raft append latency
         let baseline_start = Instant::now();
-        let baseline_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "product",
+        let baseline_resource = serde_json::json!({
+            "type": "product",
             "name": "raft-baseline-test",
-            "product": "raft-baseline-test",
+            "version": "1.0.0"
         });
 
-        match assertions::http_post(ctx, "/api/commands", baseline_cmd).await {
+        match assertions::apply_resource(ctx, baseline_resource).await {
             Ok(resp) => {
                 if resp.status().as_u16() == 404 || resp.status().as_u16() == 501 {
                     return ScenarioResult::Skip {
-                        reason: "command endpoint not available".to_string(),
+                        reason: "apply endpoint not available".to_string(),
                     };
                 }
             }
             Err(e) => {
                 return ScenarioResult::Skip {
-                    reason: format!("command endpoint not reachable: {}", e),
+                    reason: format!("apply endpoint not reachable: {}", e),
                 };
             }
         }
         let baseline_latency = baseline_start.elapsed();
 
         // 2. Check OTel endpoint exists
-        if !assertions::feature_available(ctx, "/otel/v1/traces").await {
+        if !assertions::feature_available(ctx, "/otel").await {
             return ScenarioResult::Skip {
                 reason: "OTel endpoint not available".to_string(),
             };
@@ -80,19 +79,18 @@ impl Scenario for OtelDoesNotStarveRaft {
 
         // Fire spans concurrently
         for _ in 0..10 {
-            let _ = assertions::http_post(ctx, "/otel/v1/traces", otel_payload.clone()).await;
+            let _ = assertions::http_post(ctx, "/otel", otel_payload.clone()).await;
         }
 
         // 4. Measure Raft append latency under load
         let loaded_start = Instant::now();
-        let loaded_cmd = serde_json::json!({
-            "type": "ResourceDeclared",
-            "resource_type": "product",
+        let loaded_resource = serde_json::json!({
+            "type": "product",
             "name": "raft-loaded-test",
-            "product": "raft-loaded-test",
+            "version": "1.0.0"
         });
 
-        if let Err(e) = assertions::http_post(ctx, "/api/commands", loaded_cmd).await {
+        if let Err(e) = assertions::apply_resource(ctx, loaded_resource).await {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
                 reason: format!("Raft append failed under OTel load: {}", e),

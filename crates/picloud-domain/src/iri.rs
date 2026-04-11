@@ -220,6 +220,22 @@ impl IriBuilder {
             self.domain.0
         ))
     }
+
+    /// IRI for a cluster-scoped resource: /{type}/{name} (ADR-055, ADR-056)
+    pub fn cluster_resource(&self, resource_type: &str, name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/{}/{}",
+            self.domain.0, resource_type, name
+        ))
+    }
+
+    /// IRI for a data product's published named graph (ADR-056)
+    pub fn data_product_graph(&self, product_name: &str, dp_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/data-products/{}/graph",
+            self.domain.0, product_name, dp_name
+        ))
+    }
 }
 
 #[cfg(test)]

@@ -29,7 +29,7 @@ impl Scenario for AutoEnrollMode {
         }
 
         // 1. Check enrollment endpoint exists
-        if !assertions::feature_available(ctx, "/enroll").await {
+        if !assertions::feature_available(ctx, "/auth/enroll").await {
             return ScenarioResult::Skip {
                 reason: "enrollment endpoint not available".to_string(),
             };

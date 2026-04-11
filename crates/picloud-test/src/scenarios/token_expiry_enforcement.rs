@@ -32,11 +32,13 @@ impl Scenario for TokenExpiryEnforcement {
         // Attempt to use an expired/invalid token against an IAM-gated endpoint.
         let expired_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0IiwiZXhwIjoxMDAwMDAwMDAwfQ.invalid";
 
-        let url = format!("{}/api/commands", ctx.config.base_url());
+        // Use a GET endpoint that exists — /products accepts GET.
+        let url = format!("{}/products", ctx.config.base_url());
         let resp = match ctx
             .http_client
             .get(&url)
             .header("Authorization", format!("Bearer {}", expired_token))
+            .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
         {
