@@ -317,25 +317,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // 2b-i. Optionally configure mTLS for Raft inter-node RPCs.
+    //
+    // When PICLOUD_TLS=true and the CA directory exists, issue a node
+    // certificate and construct a RaftTlsConfig so all Raft RPCs use HTTPS
+    // with mutual TLS.
+    let raft_tls_config: Option<picloud_cluster::RaftTlsConfig> = {
+        let tls_enabled = matches!(
+            std::env::var("PICLOUD_TLS")
+                .unwrap_or_else(|_| "false".to_string())
+                .as_str(),
+            "true" | "1" | "yes"
+        );
+        if tls_enabled {
+            match PlatformCa::load_from_dir(&config.ca_path) {
+                Ok(Some(ca)) => {
+                    match ca.issue_node_certificate(&config.node_name) {
+                        Ok(node_cert) => {
+                            info!("Raft mTLS enabled — using node certificate for inter-node RPCs");
+                            Some(picloud_cluster::RaftTlsConfig {
+                                ca_cert_pem: ca.ca_certificate_pem(),
+                                client_cert_pem: node_cert.certificate_pem,
+                                client_key_pem: node_cert.private_key_pem,
+                            })
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Failed to issue node cert for Raft mTLS — using plain HTTP");
+                            None
+                        }
+                    }
+                }
+                _ => {
+                    warn!("PICLOUD_TLS set but no CA available yet — Raft will use plain HTTP");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+
     let raft = if std::env::var("PICLOUD_RAFT_MEMORY_ONLY").is_ok() {
         info!("PICLOUD_RAFT_MEMORY_ONLY set — using in-memory Raft storage");
-        picloud_cluster::create_raft_node(
+        picloud_cluster::create_raft_node_with_tls(
             raft_node_id,
             &raft_addr,
             Some(apply_cb),
             initial_members,
+            raft_tls_config.clone(),
         )
         .await
         .expect("failed to create Raft node")
     } else {
         let raft_db_path = std::path::PathBuf::from(format!("{}/raft/", config.data_root));
         info!(?raft_db_path, "Using persistent sled-backed Raft storage");
-        match picloud_cluster::create_persistent_raft_node(
+        match picloud_cluster::create_persistent_raft_node_with_tls(
             raft_node_id,
             &raft_addr,
             Some(apply_cb.clone()),
             initial_members.clone(),
             &raft_db_path,
+            raft_tls_config.clone(),
         )
         .await
         {
@@ -345,11 +387,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     error = %e,
                     "Failed to open sled Raft storage — falling back to in-memory"
                 );
-                picloud_cluster::create_raft_node(
+                picloud_cluster::create_raft_node_with_tls(
                     raft_node_id,
                     &raft_addr,
                     Some(apply_cb),
                     initial_members,
+                    raft_tls_config,
                 )
                 .await
                 .expect("failed to create Raft node")

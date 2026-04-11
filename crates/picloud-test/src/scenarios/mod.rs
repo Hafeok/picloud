@@ -5,6 +5,7 @@
 mod binary_compiles;
 mod no_runtime_panics;
 // ADR-002
+mod multi_node_failover;
 mod raft_leader_election;
 mod raft_leader_failover;
 mod raft_learner_join;
@@ -15,6 +16,7 @@ mod product_fqdn_dns;
 // ADR-004
 mod event_log_replay;
 mod event_ordering;
+mod multi_node_persistence;
 mod projection_consistency;
 // ADR-005
 mod graph_isolation;
@@ -50,6 +52,7 @@ mod raw_block_device;
 mod volume_mount_restart;
 // ADR-013
 mod full_replication_coverage;
+mod multi_node_replication;
 mod replication_on_node_join;
 // ADR-014
 mod cross_product_isolation;
@@ -251,6 +254,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         Box::new(binary_compiles::BinaryCompiles),
         Box::new(no_runtime_panics::NoRuntimePanics),
         // ADR-002
+        Box::new(multi_node_failover::MultiNodeFailover),
         Box::new(raft_leader_election::RaftLeaderElection),
         Box::new(raft_leader_failover::RaftLeaderFailover),
         Box::new(raft_learner_join::RaftLearnerJoin),
@@ -261,6 +265,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         // ADR-004
         Box::new(event_log_replay::EventLogReplay),
         Box::new(event_ordering::EventOrdering),
+        Box::new(multi_node_persistence::MultiNodePersistence),
         Box::new(projection_consistency::ProjectionConsistency),
         // ADR-005
         Box::new(graph_isolation::GraphIsolation),
@@ -296,6 +301,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         Box::new(volume_mount_restart::VolumeMountRestart),
         // ADR-013
         Box::new(full_replication_coverage::FullReplicationCoverage),
+        Box::new(multi_node_replication::MultiNodeReplication),
         Box::new(replication_on_node_join::ReplicationOnNodeJoin),
         // ADR-014
         Box::new(cross_product_isolation::CrossProductIsolation),

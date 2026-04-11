@@ -888,16 +888,50 @@ impl RaftSnapshotBuilder<PiCloudTypeConfig> for MemStateMachine {
 // Network — HTTP-based RPCs
 // ---------------------------------------------------------------------------
 
+/// TLS configuration for Raft inter-node RPCs (mTLS).
+///
+/// When present, the `HttpNetworkFactory` will use HTTPS with mutual TLS
+/// for all Raft RPC calls. The CA cert validates peer servers, and the
+/// client cert+key authenticates this node to peers.
+#[derive(Clone)]
+pub struct RaftTlsConfig {
+    pub ca_cert_pem: String,
+    pub client_cert_pem: String,
+    pub client_key_pem: String,
+}
+
 /// Factory that creates network connections to peer Raft nodes.
 pub struct HttpNetworkFactory {
     client: reqwest::Client,
+    use_tls: bool,
 }
 
 impl HttpNetworkFactory {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
+            use_tls: false,
         }
+    }
+
+    /// Create a factory with mTLS enabled for all Raft RPCs.
+    pub fn with_tls(tls_config: RaftTlsConfig) -> Result<Self, Box<dyn std::error::Error>> {
+        let ca_cert = reqwest::Certificate::from_pem(tls_config.ca_cert_pem.as_bytes())?;
+
+        let mut id_pem = tls_config.client_cert_pem.as_bytes().to_vec();
+        id_pem.push(b'\n');
+        id_pem.extend_from_slice(tls_config.client_key_pem.as_bytes());
+        let identity = reqwest::Identity::from_pem(&id_pem)?;
+
+        let client = reqwest::Client::builder()
+            .add_root_certificate(ca_cert)
+            .identity(identity)
+            .build()?;
+
+        Ok(Self {
+            client,
+            use_tls: true,
+        })
     }
 }
 
@@ -914,6 +948,7 @@ impl openraft::RaftNetworkFactory<PiCloudTypeConfig> for HttpNetworkFactory {
         HttpNetwork {
             addr: node.addr.clone(),
             client: self.client.clone(),
+            use_tls: self.use_tls,
         }
     }
 }
@@ -922,6 +957,15 @@ impl openraft::RaftNetworkFactory<PiCloudTypeConfig> for HttpNetworkFactory {
 pub struct HttpNetwork {
     addr: String,
     client: reqwest::Client,
+    use_tls: bool,
+}
+
+impl HttpNetwork {
+    /// Build the base URL for a Raft RPC, using HTTPS when TLS is enabled.
+    fn base_url(&self, path: &str) -> String {
+        let scheme = if self.use_tls { "https" } else { "http" };
+        format!("{scheme}://{}/{path}", self.addr)
+    }
 }
 
 impl openraft::RaftNetwork<PiCloudTypeConfig> for HttpNetwork {
@@ -937,7 +981,7 @@ impl openraft::RaftNetwork<PiCloudTypeConfig> for HttpNetwork {
             openraft::error::RaftError<u64>,
         >,
     > {
-        let url = format!("http://{}/raft/append", self.addr);
+        let url = self.base_url("raft/append");
         let resp = self
             .client
             .post(&url)
@@ -965,7 +1009,7 @@ impl openraft::RaftNetwork<PiCloudTypeConfig> for HttpNetwork {
             openraft::error::RaftError<u64, openraft::error::InstallSnapshotError>,
         >,
     > {
-        let url = format!("http://{}/raft/snapshot", self.addr);
+        let url = self.base_url("raft/snapshot");
         let resp = self
             .client
             .post(&url)
@@ -993,7 +1037,7 @@ impl openraft::RaftNetwork<PiCloudTypeConfig> for HttpNetwork {
             openraft::error::RaftError<u64>,
         >,
     > {
-        let url = format!("http://{}/raft/vote", self.addr);
+        let url = self.base_url("raft/vote");
         let resp = self
             .client
             .post(&url)
@@ -1038,6 +1082,17 @@ pub async fn create_raft_node(
     apply_callback: Option<ApplyCallback>,
     members: Option<BTreeMap<u64, BasicNode>>,
 ) -> Result<PiCloudRaft, Box<dyn std::error::Error>> {
+    create_raft_node_with_tls(node_id, _addr, apply_callback, members, None).await
+}
+
+/// Create and initialise a Raft node with optional mTLS for inter-node RPCs.
+pub async fn create_raft_node_with_tls(
+    node_id: u64,
+    _addr: &str,
+    apply_callback: Option<ApplyCallback>,
+    members: Option<BTreeMap<u64, BasicNode>>,
+    tls_config: Option<RaftTlsConfig>,
+) -> Result<PiCloudRaft, Box<dyn std::error::Error>> {
     let config = Config {
         cluster_name: "picloud".to_string(),
         heartbeat_interval: 500,
@@ -1052,7 +1107,10 @@ pub async fn create_raft_node(
     if let Some(cb) = apply_callback {
         sm = sm.with_apply_callback(cb);
     }
-    let network = HttpNetworkFactory::new();
+    let network = match tls_config {
+        Some(tls) => HttpNetworkFactory::with_tls(tls)?,
+        None => HttpNetworkFactory::new(),
+    };
 
     let raft = PiCloudRaft::new(node_id, config, network, log_store, sm).await?;
 
@@ -1078,6 +1136,18 @@ pub async fn create_persistent_raft_node(
     members: Option<BTreeMap<u64, BasicNode>>,
     db_path: &std::path::Path,
 ) -> Result<PiCloudRaft, Box<dyn std::error::Error>> {
+    create_persistent_raft_node_with_tls(node_id, _addr, apply_callback, members, db_path, None).await
+}
+
+/// Create and initialise a persistent Raft node with optional mTLS.
+pub async fn create_persistent_raft_node_with_tls(
+    node_id: u64,
+    _addr: &str,
+    apply_callback: Option<ApplyCallback>,
+    members: Option<BTreeMap<u64, BasicNode>>,
+    db_path: &std::path::Path,
+    tls_config: Option<RaftTlsConfig>,
+) -> Result<PiCloudRaft, Box<dyn std::error::Error>> {
     let config = Config {
         cluster_name: "picloud".to_string(),
         heartbeat_interval: 500,
@@ -1090,7 +1160,10 @@ pub async fn create_persistent_raft_node(
     let db = sled::open(db_path)?;
     let log_store = SledLogStore::new(db.clone())?;
     let state_machine = SledStateMachine::new(db, apply_callback)?;
-    let network = HttpNetworkFactory::new();
+    let network = match tls_config {
+        Some(tls) => HttpNetworkFactory::with_tls(tls)?,
+        None => HttpNetworkFactory::new(),
+    };
 
     let raft = PiCloudRaft::new(node_id, config, network, log_store, state_machine).await?;
 
