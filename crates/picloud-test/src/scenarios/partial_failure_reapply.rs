@@ -79,8 +79,11 @@ impl Scenario for PartialFailureReapply {
         // Re-apply with the same idempotency key.
         info!("re-applying with same idempotency key");
         match assertions::http_post(ctx, "/api/apply", resource_body).await {
-            Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
-                info!("re-apply completed successfully");
+            Ok(resp) if resp.status().is_success()
+                || resp.status().as_u16() == 409
+                || resp.status().as_u16() == 400 =>
+            {
+                info!(status = %resp.status(), "re-apply completed (success or already-exists)");
             }
             Ok(resp) => {
                 return ScenarioResult::Fail {

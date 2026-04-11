@@ -876,7 +876,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_extra_router(raft_router)
         .with_otel(otel_stream.clone(), telemetry_store_trait.clone())
         .with_storage_path(config.storage_path.clone())
-        .with_registry(registry.clone());
+        .with_registry(registry.clone())
+        .with_ca(Arc::new(ca) as Arc<dyn picloud_domain::traits::CertificateAuthority>);
     if let Some(tls) = tls_config {
         http_server = http_server.with_tls_config(tls);
     }

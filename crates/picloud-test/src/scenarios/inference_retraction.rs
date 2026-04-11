@@ -90,26 +90,27 @@ impl Scenario for InferenceRetraction {
         }
 
         // 4. Wait and verify the alert triple was retracted
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let retracted_query = format!(
+            r#"
+            PREFIX picloud: <https://picloud.local/ontology#>
+            ASK {{
+                FILTER NOT EXISTS {{
+                    <{}> a picloud:Alert ;
+                         picloud:alertResource <{}> .
+                }}
+            }}
+            "#,
+            alert_iri, resource_iri
+        );
 
-        match assertions::sparql_query(ctx, &alert_query).await {
-            Ok(body) => {
-                let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-                if json.get("boolean").and_then(|v| v.as_bool()) == Some(false) {
-                    ScenarioResult::Pass {
-                        duration: start.elapsed(),
-                    }
-                } else {
-                    ScenarioResult::Fail {
-                        duration: start.elapsed(),
-                        reason: "inferred alert triple was not retracted after condition cleared"
-                            .to_string(),
-                    }
-                }
-            }
-            Err(e) => ScenarioResult::Fail {
+        match assertions::wait_for_sparql(ctx, &retracted_query, Duration::from_secs(15)).await {
+            Ok(()) => ScenarioResult::Pass {
                 duration: start.elapsed(),
-                reason: format!("SPARQL query failed: {}", e),
+            },
+            Err(_) => ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: "inferred alert triple was not retracted after condition cleared"
+                    .to_string(),
             },
         }
     }

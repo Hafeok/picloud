@@ -511,6 +511,30 @@ impl OxigraphProjector {
             }
         }
 
+        // Project volume-specific triples (ADR-012)
+        if resource_type == "Volume" || resource_type == "volume" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("Volume").into(),
+            )?;
+            if let Some(size_gb) = event.payload.get("size_gb") {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}sizeGb"),
+                    Literal::new_simple_literal(&size_gb.to_string()).into(),
+                )?;
+            }
+            // Assign a block device path based on the volume name
+            let vol_name = event.payload["name"].as_str().unwrap_or("unknown");
+            let block_device = format!("/dev/picloud/{}", vol_name);
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}blockDevice"),
+                Literal::new_simple_literal(&block_device).into(),
+            )?;
+        }
+
         // Project inference-rule-specific triples (ADR-038)
         if resource_type == "InferenceRule" || resource_type == "inference-rule" {
             self.insert_triple(

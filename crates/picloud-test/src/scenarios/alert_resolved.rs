@@ -88,25 +88,26 @@ impl Scenario for AlertResolved {
         }
 
         // 4. Wait for alert triple to be retracted (AlertResolved)
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let retracted_query = format!(
+            r#"
+            PREFIX picloud: <https://picloud.local/ontology#>
+            ASK {{
+                FILTER NOT EXISTS {{
+                    <{}> a picloud:Alert ;
+                         picloud:alertResource <{}> .
+                }}
+            }}
+            "#,
+            alert_iri, resource_iri
+        );
 
-        match assertions::sparql_query(ctx, &fired_query).await {
-            Ok(body) => {
-                let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-                if json.get("boolean").and_then(|v| v.as_bool()) == Some(false) {
-                    ScenarioResult::Pass {
-                        duration: start.elapsed(),
-                    }
-                } else {
-                    ScenarioResult::Fail {
-                        duration: start.elapsed(),
-                        reason: "alert triple not retracted after condition cleared — AlertResolved not working".to_string(),
-                    }
-                }
-            }
-            Err(e) => ScenarioResult::Fail {
+        match assertions::wait_for_sparql(ctx, &retracted_query, Duration::from_secs(15)).await {
+            Ok(()) => ScenarioResult::Pass {
                 duration: start.elapsed(),
-                reason: format!("SPARQL query failed: {}", e),
+            },
+            Err(_) => ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: "alert triple not retracted after condition cleared — AlertResolved not working".to_string(),
             },
         }
     }

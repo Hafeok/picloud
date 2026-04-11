@@ -29,6 +29,35 @@ impl Scenario for SniCertSelection {
             };
         }
 
+        // 0. Apply test ingress resources to ensure we have at least 2 hostnames.
+        let product_resource = serde_json::json!({
+            "type": "product",
+            "name": "sni-test-product",
+            "version": "1.0.0"
+        });
+        let _ = assertions::apply_resource(ctx, product_resource).await;
+
+        let ingress1 = serde_json::json!({
+            "type": "ingress",
+            "name": "sni-host-alpha",
+            "product": "sni-test-product",
+            "hostname": "alpha.sni-test.picloud.local",
+            "target": "sni-test-product/containers/api-server",
+            "port": 8080
+        });
+        let ingress2 = serde_json::json!({
+            "type": "ingress",
+            "name": "sni-host-beta",
+            "product": "sni-test-product",
+            "hostname": "beta.sni-test.picloud.local",
+            "target": "sni-test-product/containers/api-server",
+            "port": 8080
+        });
+        let _ = assertions::apply_resources(ctx, vec![ingress1, ingress2]).await;
+
+        // Brief pause for RDF projection
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
         // 1. Query for ingress resources with distinct hostnames
         let query = r#"
             PREFIX picloud: <https://picloud.local/ontology#>
@@ -66,7 +95,7 @@ impl Scenario for SniCertSelection {
 
         if hostnames.len() < 2 {
             return ScenarioResult::Skip {
-                reason: "fewer than 2 ingress hostnames found — SNI selection requires at least 2"
+                reason: "fewer than 2 ingress hostnames found after applying test resources — SNI selection requires at least 2 (TLS certs may not be available in test environment)"
                     .to_string(),
             };
         }

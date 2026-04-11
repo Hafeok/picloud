@@ -8,7 +8,7 @@
 [cluster]
 domain = "picloud.local"
 http_port = 7443
-platform_version = "auto"
+platform_version = "0.1.0"
 tls = false
 base_host = "192.168.88.22"   # node3 IP — avoids DNS resolution issues
 

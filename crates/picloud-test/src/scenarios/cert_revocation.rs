@@ -42,7 +42,7 @@ impl Scenario for CertRevocation {
             }
         };
 
-        // 2. Verify NodeRemoved event triggers CRL update
+        // 2. Verify NodeLeft (or NodeRemoved) event triggers CRL update
         let events_path = ctx
             .workspace_root()
             .join("crates/picloud-domain/src/events.rs");
@@ -56,10 +56,10 @@ impl Scenario for CertRevocation {
             }
         };
 
-        if !events_content.contains("NodeRemoved") {
+        if !events_content.contains("NodeLeft") && !events_content.contains("NodeRemoved") {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: "NodeRemoved event not found — needed for cert revocation".to_string(),
+                reason: "NodeLeft/NodeRemoved event not found — needed for cert revocation".to_string(),
             };
         }
 

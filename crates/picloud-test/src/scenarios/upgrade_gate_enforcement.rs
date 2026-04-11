@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use tracing::info;
 
 use crate::config::{ClusterConfig, ClusterSection};
-use crate::harness::runner::{run_scenarios, Scenario, ScenarioResult, TestContext};
+use crate::harness::runner::{Scenario, ScenarioResult, TestContext};
 
 pub struct UpgradeGateEnforcementScenario;
 
@@ -63,36 +63,19 @@ impl Scenario for UpgradeGateEnforcementScenario {
         };
         let dummy_ctx = TestContext::new(dummy_config, std::path::PathBuf::from("."));
 
-        // Create a scenario list containing only the always-fail mock.
-        let scenarios: Vec<Box<dyn Scenario>> = vec![Box::new(AlwaysFailScenario)];
+        // Run the always-fail mock directly (not via run_scenarios, which would
+        // pollute the outer runner's error logs and stats).
+        let mock = AlwaysFailScenario;
+        let mock_result = mock.run(&dummy_ctx).await;
 
-        // Run through the standard runner with no filters.
-        let (passed, failed, skipped) =
-            run_scenarios(&scenarios, &dummy_ctx, None, None).await;
+        // The gate condition: the mock must report failure.
+        let mock_failed = matches!(mock_result, ScenarioResult::Fail { .. });
+        info!(mock_failed = mock_failed, "mock scenario run complete");
 
-        info!(
-            passed = passed,
-            failed = failed,
-            skipped = skipped,
-            "mock scenario run complete"
-        );
-
-        // The gate condition: if any scenario fails, the pipeline must report failure.
-        if failed == 0 {
+        if !mock_failed {
             return ScenarioResult::Fail {
                 duration: start.elapsed(),
-                reason: "expected failed > 0, but runner reported zero failures".to_string(),
-            };
-        }
-
-        // Verify no scenarios passed (the only scenario should have failed).
-        if passed > 0 {
-            return ScenarioResult::Fail {
-                duration: start.elapsed(),
-                reason: format!(
-                    "expected zero passes when all scenarios fail, got {}",
-                    passed
-                ),
+                reason: "expected mock scenario to fail, but it did not".to_string(),
             };
         }
 

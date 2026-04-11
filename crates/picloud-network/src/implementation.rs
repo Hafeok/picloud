@@ -11,8 +11,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use picloud_domain::error::{PiCloudError, Result};
+use picloud_domain::events::CertType;
 use picloud_domain::iri::ResourceIri;
-use picloud_domain::traits::DnsRegistry;
+use picloud_domain::traits::{CertificateAuthority, DnsRegistry, SignedCert};
 
 // ---------------------------------------------------------------------------
 // In-memory DNS Registry
@@ -311,6 +312,88 @@ impl PlatformCa {
             private_key_pem: ee_key.serialize_pem(),
             expires_at,
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CertificateAuthority trait implementation
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl CertificateAuthority for PlatformCa {
+    async fn sign_node_csr(
+        &self,
+        _csr_der: &[u8],
+        node_name: &str,
+        _node_ip: &str,
+    ) -> Result<SignedCert> {
+        let cert = self.issue_node_certificate(node_name)?;
+        let fingerprint = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(cert.certificate_pem.as_bytes());
+            let result = hasher.finalize();
+            let hex = result.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            format!("sha256:{hex}")
+        };
+        Ok(SignedCert {
+            cert_pem: cert.certificate_pem,
+            expires_at: cert.expires_at,
+            fingerprint,
+        })
+    }
+
+    async fn sign_workload_cert(
+        &self,
+        workload_iri: &ResourceIri,
+        product: &str,
+    ) -> Result<SignedCert> {
+        let cert = self.issue_service_certificate(
+            &format!("{}.{}", workload_iri.as_str().split('/').last().unwrap_or("workload"), product),
+            "picloud.local",
+        )?;
+        let fingerprint = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(cert.certificate_pem.as_bytes());
+            let result = hasher.finalize();
+            let hex = result.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            format!("sha256:{hex}")
+        };
+        Ok(SignedCert {
+            cert_pem: cert.certificate_pem,
+            expires_at: cert.expires_at,
+            fingerprint,
+        })
+    }
+
+    async fn sign_ingress_cert(&self, hostname: &str) -> Result<SignedCert> {
+        let cert = self.issue_service_certificate(hostname, "picloud.local")?;
+        let fingerprint = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(cert.certificate_pem.as_bytes());
+            let result = hasher.finalize();
+            let hex = result.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            format!("sha256:{hex}")
+        };
+        Ok(SignedCert {
+            cert_pem: cert.certificate_pem,
+            expires_at: cert.expires_at,
+            fingerprint,
+        })
+    }
+
+    fn ca_cert_pem(&self) -> &str {
+        &self.ca_cert_pem
+    }
+
+    fn cert_lifetime(&self, cert_type: &CertType) -> std::time::Duration {
+        match cert_type {
+            CertType::Node => std::time::Duration::from_secs(90 * 24 * 3600),
+            CertType::Workload => std::time::Duration::from_secs(24 * 3600),
+            CertType::Ingress => std::time::Duration::from_secs(90 * 24 * 3600),
+        }
     }
 }
 

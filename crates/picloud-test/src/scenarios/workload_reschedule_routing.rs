@@ -32,6 +32,36 @@ impl Scenario for WorkloadRescheduleRouting {
             };
         }
 
+        // 0. Apply test resources (product + container + ingress) so there is data in the graph.
+        let product_resource = serde_json::json!({
+            "type": "product",
+            "name": "reschedule-test",
+            "version": "1.0.0"
+        });
+        let _ = assertions::apply_resource(ctx, product_resource).await;
+
+        let container_resource = serde_json::json!({
+            "type": "container",
+            "name": "api-server",
+            "product": "reschedule-test",
+            "image": "registry.picloud.local/reschedule-test/api-server:latest",
+            "port": 8080
+        });
+        let _ = assertions::apply_resource(ctx, container_resource).await;
+
+        let ingress_resource = serde_json::json!({
+            "type": "ingress",
+            "name": "api-ingress",
+            "product": "reschedule-test",
+            "hostname": "reschedule-test.picloud.local",
+            "target": "reschedule-test/containers/api-server",
+            "port": 8080
+        });
+        let _ = assertions::apply_resource(ctx, ingress_resource).await;
+
+        // Brief pause for RDF projection
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
         // Query the RDF graph for any ingress resources with their target addresses.
         let query = r#"
             PREFIX picloud: <https://picloud.local/ontology#>
