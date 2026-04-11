@@ -4,14 +4,14 @@
 > Each feature maps to a PRD section and/or ADR.
 > Status: [ ] not started, [~] partial/stub, [x] implemented, [T] tested, [V] verified on cluster
 >
-> Last updated: 2026-04-10
+> Last updated: 2026-04-11
 
 ---
 
 ## Core Platform (ADR-001 — ADR-006)
 
 - [V] **Rust single binary** (ADR-001) — one binary runs on every node
-- [V] **Raft consensus** (ADR-002) — openraft with in-memory log store, leader election, append/vote/snapshot RPCs
+- [V] **Raft consensus** (ADR-002) — openraft with sled-backed persistent log store, leader election, append/vote/snapshot RPCs
 - [V] **mDNS discovery** (ADR-003) — domain-scoped `_pc-{hash}._tcp.local.`, peer add/remove, self-filter
 - [V] **Event sourcing** (ADR-004) — append-only event log, idempotent dedup, broadcast pub/sub
 - [V] **RDF graph projection** (ADR-005) — Oxigraph projector handles 16+ event types, SPARQL query
@@ -66,7 +66,7 @@
 
 - [T] **Ingress router** (ADR-028) — IngressRouter with longest-prefix-wins, external/internal tables
 - [T] **Proxy forwarding** (ADR-028) — reqwest with connect/read timeouts, 502/503 handling
-- [~] **Platform CA with BYO-CA** (ADR-030) — PlatformCa generates certs, BYO-CA not supported yet
+- [T] **Platform CA with BYO-CA** (ADR-030) — PlatformCa generates certs, persists to disk, BYO-CA import endpoint
 
 ## Observability (ADR-040, ADR-041, ADR-045, ADR-046)
 
@@ -213,7 +213,8 @@
 - [T] **HTTP apply** — CapabilityDeclared event emitted on resource apply
 - [T] **CLI** — `picloud capability list` via SPARQL
 - [T] **Compiler** — capability maps to Capability RDF class
-- [ ] **Capability-aware event routing** — platform routes input events to highest-version implementor
+- [T] **Capability-aware event routing** — CapabilityResolverImpl with SPARQL-based implementor resolution, semver comparison, POST /api/capabilities/route
+- [T] **Capability listing endpoint** — GET /api/capabilities returns all capabilities with fulfillment status
 - [ ] **SHACL conformance check** — validate implements declarations at deploy time
 - [ ] **Capability consumer blocking** — block deploy if required capability unfulfilled
 
@@ -237,8 +238,9 @@
 - [T] **CLI** — `picloud data-domain list` and `picloud data-product list` via SPARQL
 - [T] **Compiler** — DataDomain/DataProduct map to RDF classes
 - [T] **IriBuilder** — cluster_resource() and data_product_graph() methods
-- [ ] **Projection runner** — SPARQL CONSTRUCT on trigger events, atomic graph swap
-- [ ] **Freshness monitor** — maxAge tracking, SLOBreached/Restored events
+- [T] **Projection runner** — OxigraphDataProductProjector: SPARQL CONSTRUCT on trigger events, atomic named graph swap, POST /api/data-products/:product/:name/refresh
+- [T] **Freshness monitor** — RdfDataProductSLOMonitor: maxAge tracking, SLOBreached/Restored events, 30s background check interval
+- [T] **Product graph auth** — product-scoped SPARQL requires Bearer token, 401/403 for unauthenticated
 - [ ] **Cross-product internal graph access blocked** — 403 for non-owner, non-admin identities
 - [ ] **Consumer dependency validation** — block deploy if referenced data product missing
 
@@ -273,10 +275,22 @@
 
 ---
 
+## Production Readiness
+
+- [T] **Raft persistence** — sled-backed SledLogStore + SledStateMachine, survives restart
+- [T] **CA certificate persistence** — PlatformCa save_to_dir/load_from_dir, stable across restarts
+- [T] **mDNS peer cleanup** — last_seen timestamps, 30s sweep, Raft membership removal
+- [T] **Raft mTLS** — RaftTlsConfig with CA cert + client identity, https:// RPCs when PICLOUD_TLS=true
+- [T] **Systemd service** — picloud.service with CAP_NET_BIND_SERVICE, health check, proper ports
+- [T] **Deploy scripts** — setup-node.sh (data dirs, firewall, avahi), deploy.sh (build + rsync + restart)
+- [T] **Multi-node E2E tests** — failover, replication, persistence scenarios (auto-registered)
+- [T] **Config secret rejection** — sensitive keys rejected with 400, must use secrets store
+- [T] **Overwrite protection** — 409 Conflict on duplicate product apply (event log check)
+- [V] **182/182 E2E pass** — all scenarios pass on Pi 5 cluster (single-node verified)
+
 ## PRD Gaps (not covered by any ADR)
 
 - [ ] **Node drain** (PRD 10) — graceful workload migration before node removal
-- [ ] **Multi-node Raft persistence** — in-memory log store only (disk deferred)
 - [ ] **NFS mount support** (PRD 9) — NAS backup via NFS subprocess mount
 - [ ] **Rate limiting** (PRD 11) — no HTTP rate limiting
 - [ ] **Audit log** (PRD 8) — security audit events not implemented
