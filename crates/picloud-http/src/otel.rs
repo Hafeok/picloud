@@ -248,17 +248,114 @@ impl OtelAggregator {
 }
 
 /// Parse simplified OTLP JSON into OtelDatum items.
-/// Accepts a JSON body with optional "spans", "metrics", and "logs" arrays.
+/// Accepts a JSON body with optional "spans", "metrics", and "logs" arrays,
+/// and also the standard OTLP format with "resourceSpans".
 pub fn parse_otlp_json(body: &serde_json::Value) -> Vec<OtelDatum> {
     let mut data = Vec::new();
 
-    // Parse spans
+    // Parse spans (simplified format)
     if let Some(spans) = body.get("spans").and_then(|v| v.as_array()) {
         for span_json in spans {
             if let Ok(span) = serde_json::from_value::<SpanRecord>(span_json.clone()) {
                 data.push(OtelDatum::Span(span));
             } else {
                 warn!("Failed to parse span record from OTLP JSON");
+            }
+        }
+    }
+
+    // Parse standard OTLP format: resourceSpans -> scopeSpans -> spans
+    if let Some(resource_spans) = body.get("resourceSpans").and_then(|v| v.as_array()) {
+        for rs in resource_spans {
+            // Extract service.name from resource attributes
+            let service_name = rs
+                .pointer("/resource/attributes")
+                .and_then(|a| a.as_array())
+                .and_then(|attrs| {
+                    attrs.iter().find_map(|attr| {
+                        let key = attr.get("key")?.as_str()?;
+                        if key == "service.name" {
+                            attr.pointer("/value/stringValue").and_then(|v| v.as_str()).map(|s| s.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+
+            // Extract picloud.platform_version from resource attributes
+            let platform_version = rs
+                .pointer("/resource/attributes")
+                .and_then(|a| a.as_array())
+                .and_then(|attrs| {
+                    attrs.iter().find_map(|attr| {
+                        let key = attr.get("key")?.as_str()?;
+                        if key == "picloud.platform_version" {
+                            attr.pointer("/value/stringValue").and_then(|v| v.as_str()).map(|s| s.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+            if let Some(scope_spans) = rs.get("scopeSpans").and_then(|v| v.as_array()) {
+                for ss in scope_spans {
+                    if let Some(spans) = ss.get("spans").and_then(|v| v.as_array()) {
+                        for span_json in spans {
+                            let trace_id = span_json.get("traceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let span_id = span_json.get("spanId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let parent_span_id = span_json.get("parentSpanId").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let name = span_json.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let start_ns: u64 = span_json.get("startTimeUnixNano")
+                                .and_then(|v| v.as_str().or_else(|| v.as_u64().map(|_| "")).and_then(|s| s.parse().ok()).or_else(|| v.as_u64()))
+                                .unwrap_or(0);
+                            let end_ns: u64 = span_json.get("endTimeUnixNano")
+                                .and_then(|v| v.as_str().or_else(|| v.as_u64().map(|_| "")).and_then(|s| s.parse().ok()).or_else(|| v.as_u64()))
+                                .unwrap_or(0);
+                            let duration_ms = (end_ns.saturating_sub(start_ns)) / 1_000_000;
+
+                            // Parse span-level attributes into a JSON map
+                            let mut attrs = serde_json::Map::new();
+                            if let Some(span_attrs) = span_json.get("attributes").and_then(|v| v.as_array()) {
+                                for attr in span_attrs {
+                                    if let (Some(key), Some(val)) = (
+                                        attr.get("key").and_then(|v| v.as_str()),
+                                        attr.pointer("/value/stringValue").and_then(|v| v.as_str()),
+                                    ) {
+                                        attrs.insert(key.to_string(), serde_json::Value::String(val.to_string()));
+                                    }
+                                }
+                            }
+                            // Also include resource-level attributes
+                            if let Some(ref ver) = platform_version {
+                                attrs.insert("picloud.platform_version".to_string(), serde_json::Value::String(ver.clone()));
+                            }
+
+                            let start_time = chrono::DateTime::from_timestamp(
+                                (start_ns / 1_000_000_000) as i64,
+                                (start_ns % 1_000_000_000) as u32,
+                            ).unwrap_or_default();
+                            let end_time = chrono::DateTime::from_timestamp(
+                                (end_ns / 1_000_000_000) as i64,
+                                (end_ns % 1_000_000_000) as u32,
+                            ).unwrap_or_default();
+
+                            let span = SpanRecord {
+                                trace_id,
+                                span_id,
+                                parent_span_id,
+                                operation_name: name,
+                                service_name: service_name.clone(),
+                                start_time,
+                                end_time,
+                                duration_ms,
+                                status: "OK".to_string(),
+                                attributes: serde_json::Value::Object(attrs),
+                            };
+                            data.push(OtelDatum::Span(span));
+                        }
+                    }
+                }
             }
         }
     }

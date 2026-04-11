@@ -1042,22 +1042,43 @@ async fn handle_apply(
             ResourceDeclaration::Product(p) => {
                 let iri = iri_builder.product(&p.name);
 
-                // Overwrite protection: check if product already exists in the graph
-                if let Some(ref projector) = state.projector {
-                    let check = format!(
-                        "SELECT ?s WHERE {{ <{}> a <https://picloud.local/ontology#Product> }} LIMIT 1",
-                        iri.as_str()
-                    );
-                    if let Ok(result) = projector.query(&check).await {
-                        if !result.bindings.is_empty() {
-                            return (
-                                StatusCode::CONFLICT,
-                                Json(serde_json::json!({
-                                    "error": format!("product '{}' already exists — use picloud resource apply --overwrite or delete first", p.name),
-                                })),
-                            );
+                // Overwrite protection: check event log directly (avoids projection lag)
+                // First check event log for any existing ProductDeployed event
+                let mut product_exists = false;
+                {
+                    let events = event_log.events_since(0).await;
+                    for evt in &events {
+                        if evt.event_type == "ProductDeployed" {
+                            if let Some(name) = evt.payload.get("product_name").and_then(|v| v.as_str()) {
+                                if name == p.name {
+                                    product_exists = true;
+                                    break;
+                                }
+                            }
                         }
                     }
+                }
+                // Fallback: also check the RDF graph in case events were compacted
+                if !product_exists {
+                    if let Some(ref projector) = state.projector {
+                        let check = format!(
+                            "SELECT ?s WHERE {{ <{}> a <https://picloud.local/ontology#Product> }} LIMIT 1",
+                            iri.as_str()
+                        );
+                        if let Ok(result) = projector.query(&check).await {
+                            if !result.bindings.is_empty() {
+                                product_exists = true;
+                            }
+                        }
+                    }
+                }
+                if product_exists {
+                    return (
+                        StatusCode::CONFLICT,
+                        Json(serde_json::json!({
+                            "error": format!("product '{}' already exists — use picloud resource apply --overwrite or delete first", p.name),
+                        })),
+                    );
                 }
 
                 let payload = serde_json::json!({
@@ -1140,6 +1161,8 @@ async fn handle_apply(
                     "resource_type": "Ingress",
                     "product": i.product,
                     "name": i.name,
+                    "hostname": i.host,
+                    "host": i.host,
                     "target": i.target,
                     "port": i.port,
                     "path": i.path,
@@ -4492,8 +4515,30 @@ async fn handle_otel_ingest(
     let data = crate::otel::parse_otlp_json(&body);
     let count = data.len();
 
+    // Collect spans and metrics for direct store write (avoids stream flush delay)
+    let mut span_batch = Vec::new();
+    let mut metric_batch = Vec::new();
+
+    for datum in &data {
+        match datum {
+            crate::otel::OtelDatum::Span(s) => span_batch.push(s.clone()),
+            crate::otel::OtelDatum::Metric(m) => metric_batch.push(m.clone()),
+            _ => {}
+        }
+    }
+
     for datum in data {
         otel_stream.publish(datum);
+    }
+
+    // Also write directly to the telemetry store for immediate queryability
+    if let Some(ref store) = state.telemetry_store {
+        if !span_batch.is_empty() {
+            let _ = store.write_spans(span_batch).await;
+        }
+        if !metric_batch.is_empty() {
+            let _ = store.write_metrics(metric_batch).await;
+        }
     }
 
     (

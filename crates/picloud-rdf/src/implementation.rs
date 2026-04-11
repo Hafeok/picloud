@@ -535,6 +535,102 @@ impl OxigraphProjector {
             )?;
         }
 
+        // Project ingress-specific triples (ADR-048)
+        if resource_type == "Ingress" || resource_type == "ingress" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("Ingress").into(),
+            )?;
+            if let Some(name) = event.payload["name"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}name"),
+                    Literal::new_simple_literal(name).into(),
+                )?;
+            }
+            if let Some(hostname) = event.payload["hostname"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}hostname"),
+                    Literal::new_simple_literal(hostname).into(),
+                )?;
+            }
+            if let Some(host) = event.payload["host"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}hostname"),
+                    Literal::new_simple_literal(host).into(),
+                )?;
+            }
+            if let Some(target) = event.payload["target"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}targetAddress"),
+                    Literal::new_simple_literal(target).into(),
+                )?;
+            }
+            if let Some(port) = event.payload.get("port") {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}port"),
+                    Literal::new_simple_literal(&port.to_string()).into(),
+                )?;
+            }
+        }
+
+        // Project container-specific triples (ADR-008)
+        if resource_type == "Container" || resource_type == "container" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("Container").into(),
+            )?;
+            if let Some(name) = event.payload["name"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}name"),
+                    Literal::new_simple_literal(name).into(),
+                )?;
+            }
+            if let Some(image) = event.payload["image"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}image"),
+                    Literal::new_simple_literal(image).into(),
+                )?;
+            }
+        }
+
+        // Project feature-flag-specific triples when declared via apply (ADR-044)
+        if resource_type == "FeatureFlag" || resource_type == "feature-flag" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("FeatureFlag").into(),
+            )?;
+            if let Some(name) = event.payload["name"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}flagName"),
+                    Literal::new_simple_literal(name).into(),
+                )?;
+            }
+            let enabled = event.payload["enabled"].as_bool().unwrap_or(false);
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}flagEnabled"),
+                Literal::new_simple_literal(if enabled { "true" } else { "false" }).into(),
+            )?;
+            if let Some(version) = event.payload["version"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}flagVersion"),
+                    Literal::new_simple_literal(version).into(),
+                )?;
+            }
+        }
+
         // Project inference-rule-specific triples (ADR-038)
         if resource_type == "InferenceRule" || resource_type == "inference-rule" {
             self.insert_triple(
