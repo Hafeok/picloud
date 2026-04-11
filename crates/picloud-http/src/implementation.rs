@@ -543,11 +543,19 @@ async fn handle_cluster_root(
         vec![]
     };
 
+    // Include cluster_id if cluster identity store is available
+    let cluster_id = if let Some(ref cluster) = state.cluster {
+        cluster.local_node_id().await.to_string()
+    } else {
+        String::new()
+    };
+
     resource_response(
         serde_json::json!({
             "@id": state.cluster_root_iri,
             "type": "PiCloudCluster",
             "domain": state.cluster_domain.0,
+            "cluster_id": cluster_id,
             "nodes": nodes,
         }),
         ct,
@@ -778,6 +786,28 @@ async fn handle_graph(
     Path(name): Path<String>,
     Query(params): Query<GraphQuery>,
 ) -> Response {
+    // Product-scoped SPARQL requires authentication (ADR-051)
+    if let Some(auth) = headers.get(header::AUTHORIZATION) {
+        let auth_str = auth.to_str().unwrap_or("");
+        if let Some(token) = auth_str.strip_prefix("Bearer ") {
+            // Validate the token if IAM is available
+            if let Some(ref iam) = state.iam {
+                if iam.validate_token(token).await.is_err() {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({"error": "invalid or expired token"})),
+                    ).into_response();
+                }
+            }
+        }
+    } else if state.iam.is_some() {
+        // IAM is configured but no token provided — require authentication
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "authentication required for product graph access"})),
+        ).into_response();
+    }
+
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let ct = content_type_from_headers(&headers);
 
@@ -922,15 +952,10 @@ async fn handle_command(
         .source
         .unwrap_or_else(|| format!("{}/api/commands", state.cluster_root_iri));
 
-    let source = match ResourceIri::new(&source_str) {
-        Ok(iri) => iri,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("invalid source IRI: {e}") })),
-            );
-        }
-    };
+    // Accept any source string — if it's not a valid IRI, wrap it as an external source
+    let source = ResourceIri::new(&source_str).unwrap_or_else(|_| {
+        ResourceIri(format!("{}/external/{}", state.cluster_root_iri, source_str))
+    });
 
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let schema = iri_builder.event_schema(&event_type, 1);
@@ -995,6 +1020,25 @@ async fn handle_apply(
         let (resource_iri, event_type, product, payload) = match decl {
             ResourceDeclaration::Product(p) => {
                 let iri = iri_builder.product(&p.name);
+
+                // Overwrite protection: check if product already exists in the graph
+                if let Some(ref projector) = state.projector {
+                    let check = format!(
+                        "SELECT ?s WHERE {{ <{}> a <https://picloud.local/ontology#Product> }} LIMIT 1",
+                        iri.as_str()
+                    );
+                    if let Ok(result) = projector.query(&check).await {
+                        if !result.bindings.is_empty() {
+                            return (
+                                StatusCode::CONFLICT,
+                                Json(serde_json::json!({
+                                    "error": format!("product '{}' already exists — use picloud resource apply --overwrite or delete first", p.name),
+                                })),
+                            );
+                        }
+                    }
+                }
+
                 let payload = serde_json::json!({
                     "product_iri": iri.as_str(),
                     "product_name": p.name,
@@ -1355,6 +1399,7 @@ async fn handle_delete(
 
 #[derive(Deserialize)]
 struct TagAddPayload {
+    #[serde(alias = "resource")]
     resource_iri: String,
     key: String,
     value: String,
@@ -1421,6 +1466,7 @@ async fn handle_tag_add(
 
 #[derive(Deserialize)]
 struct TagRemovePayload {
+    #[serde(alias = "resource")]
     resource_iri: String,
     key: String,
     value: String,
@@ -1726,17 +1772,18 @@ async fn handle_ontology(
         }
     }
 
-    // Ontology not yet loaded or projector unavailable — return metadata stub
-    resource_response(
-        serde_json::json!({
-            "@id": ontology_iri.as_str(),
-            "type": "Ontology",
-            "product": name,
-            "status": "not_loaded",
-            "hint": "Declare an Ontology resource in your .picloud file to serve it here",
-        }),
-        ct,
-    )
+    // Ontology not yet loaded or projector unavailable — return minimal RDF
+    let turtle = format!(
+        "@prefix picloud: <https://picloud.local/ontology#> .\n\
+         @prefix owl: <http://www.w3.org/2002/07/owl#> .\n\n\
+         <{}> a owl:Ontology ;\n    picloud:product \"{}\" ;\n    picloud:status \"not_loaded\" .\n",
+        ontology_iri.as_str(), name
+    );
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/turtle; charset=utf-8")],
+        turtle,
+    ).into_response()
 }
 
 /// Handle SPARQL query against the cluster-level graph (not product-scoped).
@@ -2880,7 +2927,11 @@ async fn handle_authorize(
 #[derive(Deserialize)]
 struct RegisterBeginRequest {
     /// The identity IRI to register a passkey for.
+    /// Also accepts "username" for convenience — constructed as /identities/{username}.
+    #[serde(alias = "username")]
     identity_iri: String,
+    #[serde(default)]
+    display_name: Option<String>,
 }
 
 async fn handle_register_begin(
@@ -3134,12 +3185,18 @@ async fn handle_enroll(
 #[derive(Deserialize)]
 #[allow(dead_code)]
 struct NodeEnrollRequest {
-    /// DER-encoded CSR (base64)
-    csr_der: String,
+    /// DER-encoded CSR (base64) — optional for token generation requests
+    #[serde(default)]
+    csr_der: Option<String>,
     /// Hostname of the new node
-    node_name: String,
+    #[serde(default)]
+    node_name: Option<String>,
     /// IP address of the new node
-    node_ip: String,
+    #[serde(default)]
+    node_ip: Option<String>,
+    /// TTL for enrollment token generation (seconds)
+    #[serde(default)]
+    ttl_seconds: Option<u64>,
     /// Enrollment token (required in Token mode)
     #[serde(default)]
     enrollment_token: Option<String>,
@@ -3159,8 +3216,26 @@ async fn handle_node_enroll(
             .into_response();
     };
 
+    // Token generation mode: if no CSR provided, generate an enrollment token
+    if req.csr_der.is_none() {
+        let ttl = req.ttl_seconds.unwrap_or(3600);
+        let token = uuid::Uuid::new_v4().to_string();
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "token": token,
+                "ttl_seconds": ttl,
+                "expires_at": (chrono::Utc::now() + chrono::Duration::seconds(ttl as i64)).to_rfc3339(),
+            })),
+        ).into_response();
+    }
+
+    let csr_der_str = req.csr_der.unwrap();
+    let node_name = req.node_name.unwrap_or_else(|| "unknown".to_string());
+    let node_ip = req.node_ip.unwrap_or_else(|| "0.0.0.0".to_string());
+
     // Decode the CSR from base64
-    let csr_der = match base64::engine::general_purpose::STANDARD.decode(&req.csr_der) {
+    let csr_der = match base64::engine::general_purpose::STANDARD.decode(&csr_der_str) {
         Ok(bytes) => bytes,
         Err(e) => {
             return (
@@ -3172,7 +3247,7 @@ async fn handle_node_enroll(
     };
 
     // Sign the node's CSR
-    match ca.sign_node_csr(&csr_der, &req.node_name, &req.node_ip).await {
+    match ca.sign_node_csr(&csr_der, &node_name, &node_ip).await {
         Ok(signed) => {
             let body = serde_json::json!({
                 "node_cert_pem": signed.cert_pem,
@@ -3369,6 +3444,18 @@ async fn handle_config_set(
             Json(serde_json::json!({ "error": "event log not available" })),
         );
     };
+
+    // Reject sensitive keys — they must use the secrets store instead (ADR-009)
+    const SENSITIVE_PATTERNS: &[&str] = &["password", "secret", "token", "api_key", "private_key", "credential"];
+    let key_lower = payload.key.to_lowercase();
+    if SENSITIVE_PATTERNS.iter().any(|p| key_lower.contains(p)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("config key '{}' looks like a secret — use the secrets store (picloud secret set) instead", payload.key),
+            })),
+        );
+    }
 
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
     let config_iri = iri_builder.config_entry(&name, &payload.key);
@@ -4455,7 +4542,7 @@ mod tests {
     // -- Phase 3: Ontology serving tests --
 
     #[tokio::test]
-    async fn ontology_returns_stub_without_projector() {
+    async fn ontology_returns_turtle_stub_without_projector() {
         let app = test_server().build_router();
         let req = Request::builder()
             .uri("/products/photo-app/ontology")
@@ -4464,17 +4551,15 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/turtle"), "expected turtle, got {ct}");
+
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
             .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            json["@id"],
-            "https://picloud.local/products/photo-app/ontology"
-        );
-        assert_eq!(json["type"], "Ontology");
-        assert_eq!(json["product"], "photo-app");
-        assert_eq!(json["status"], "not_loaded");
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(body_str.contains("owl:Ontology"), "turtle should contain owl:Ontology");
+        assert!(body_str.contains("photo-app"), "turtle should contain product name");
     }
 
     // -- Phase 3: Cluster graph endpoint tests --

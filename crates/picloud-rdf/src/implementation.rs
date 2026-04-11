@@ -380,6 +380,40 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_leader_elected(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        // Remove old leader designation from all nodes
+        let sparql = format!(
+            "SELECT ?node WHERE {{ ?node <{PICLOUD_NS}hasRole> <{PICLOUD_NS}Leader> }}"
+        );
+        if let Ok(result) = self.execute_query(&sparql) {
+            for row in &result.bindings {
+                if let Some(node) = row.get("node").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
+                    if let (Ok(subj), Ok(pred), Ok(obj)) = (
+                        NamedNode::new(node),
+                        NamedNode::new(format!("{PICLOUD_NS}hasRole")),
+                        NamedNode::new(format!("{PICLOUD_NS}Leader")),
+                    ) {
+                        let _ = self.store.remove(&Quad::new(subj, pred, obj, GraphName::DefaultGraph));
+                    }
+                }
+            }
+        }
+
+        // Set the new leader
+        self.insert_triple(
+            node_iri_str,
+            &format!("{PICLOUD_NS}hasRole"),
+            picloud_term("Leader").into(),
+        )?;
+
+        debug!(leader = node_iri_str, "projected LeaderElected");
+        Ok(())
+    }
+
     fn project_node_left(&self, event: &EventEnvelope) -> Result<()> {
         let node_iri_str = event.payload["node_iri"]
             .as_str()
@@ -685,6 +719,24 @@ impl OxigraphProjector {
                 self.store
                     .remove(quad)
                     .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
+        }
+
+        // Also remove child resources from the default graph.
+        // Children are linked via picloud:product "{product_name}" literal.
+        if let Some(product_name) = event.payload["product_iri"].as_str()
+            .and_then(|iri| iri.rsplit('/').next())
+            .or(event.product.as_deref())
+        {
+            let child_query = format!(
+                "SELECT ?child WHERE {{ ?child <{PICLOUD_NS}product> \"{}\" }}", product_name
+            );
+            if let Ok(result) = self.execute_query(&child_query) {
+                for row in &result.bindings {
+                    if let Some(child_iri) = row.get("child").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
+                        let _ = self.remove_triples_about_all_graphs(child_iri);
+                    }
+                }
             }
         }
 
@@ -1650,6 +1702,46 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    // ---- Alert Projection (ADR-041) ----
+
+    fn project_alert_fired(&self, event: &EventEnvelope) -> Result<()> {
+        let alert_type = event.payload["alert_type"].as_str().unwrap_or_default();
+        let severity = event.payload["severity"].as_str().unwrap_or("warning");
+        let resource_iri = event.payload["resource_iri"].as_str().unwrap_or(event.source.as_str());
+        let rule_iri = event.payload["rule_iri"].as_str().unwrap_or_default();
+        let message = event.payload["message"].as_str().unwrap_or_default();
+
+        // Create a deterministic alert IRI from type + resource
+        let alert_iri = format!("{}/alerts/{}", resource_iri, alert_type.to_lowercase());
+
+        self.insert_triple(&alert_iri, RDF_TYPE, picloud_term("Alert").into())?;
+        self.insert_triple(&alert_iri, &format!("{PICLOUD_NS}alertType"), Literal::new_simple_literal(alert_type).into())?;
+        self.insert_triple(&alert_iri, &format!("{PICLOUD_NS}severity"), Literal::new_simple_literal(severity).into())?;
+        self.insert_triple(&alert_iri, &format!("{PICLOUD_NS}message"), Literal::new_simple_literal(message).into())?;
+        if let Ok(node) = NamedNode::new(resource_iri) {
+            self.insert_triple(&alert_iri, &format!("{PICLOUD_NS}alertResource"), node.into())?;
+        }
+        if !rule_iri.is_empty() {
+            if let Ok(node) = NamedNode::new(rule_iri) {
+                self.insert_triple(&alert_iri, &format!("{PICLOUD_NS}alertRule"), node.into())?;
+            }
+        }
+
+        debug!(alert_type = alert_type, resource = resource_iri, "projected AlertFired");
+        Ok(())
+    }
+
+    fn project_alert_resolved(&self, event: &EventEnvelope) -> Result<()> {
+        let alert_type = event.payload["alert_type"].as_str().unwrap_or_default();
+        let resource_iri = event.payload["resource_iri"].as_str().unwrap_or(event.source.as_str());
+
+        let alert_iri = format!("{}/alerts/{}", resource_iri, alert_type.to_lowercase());
+        self.remove_triples_about_all_graphs(&alert_iri)?;
+
+        debug!(alert_type = alert_type, resource = resource_iri, "projected AlertResolved");
+        Ok(())
+    }
+
     // ---- Capability Projection (ADR-055) ----
 
     fn project_capability_declared(&self, event: &EventEnvelope) -> Result<()> {
@@ -2212,6 +2304,7 @@ impl StateProjector for OxigraphProjector {
         let result = match event.event_type.as_str() {
             "NodeJoined" => self.project_node_joined(event),
             "NodeLeft" => self.project_node_left(event),
+            "LeaderElected" => self.project_leader_elected(event),
             "ResourceDeclared" => self.project_resource_declared(event),
             "ResourceReady" => self.project_resource_ready(event),
             "ResourceFailed" => self.project_resource_failed(event),
@@ -2225,6 +2318,8 @@ impl StateProjector for OxigraphProjector {
             "ConfigChanged" => self.project_config_changed(event),
             "FeatureFlagChanged" => self.project_feature_flag_changed(event),
             "GroupMembershipChanged" => self.project_group_membership_changed(event),
+            "AlertFired" => self.project_alert_fired(event),
+            "AlertResolved" => self.project_alert_resolved(event),
             // Replay lifecycle events are projected for audit (ADR-035)
             "ReplayStarted" | "ReplayProgress" | "ReplayCompleted" | "ReplayFailed" => {
                 debug!(event_type = %event.event_type, "replay lifecycle event — recorded");

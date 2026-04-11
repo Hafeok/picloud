@@ -189,6 +189,9 @@ pub struct Role {
     pub product: Option<String>,
     /// List of permission strings (e.g. "photo-app/containers/api-server:read")
     pub permissions: Vec<String>,
+    /// Roles this role inherits from (OWL subClassOf hierarchy)
+    #[serde(default)]
+    pub inherits: Vec<String>,
 }
 
 /// The type of a configuration value (ADR-043)

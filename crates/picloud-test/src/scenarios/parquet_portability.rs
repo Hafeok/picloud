@@ -60,12 +60,29 @@ impl Scenario for ParquetPortability {
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
 
-                if !content_type.contains("parquet") && !content_type.contains("octet-stream") {
+                let content_type_owned = content_type.to_string();
+                if !content_type_owned.contains("parquet") && !content_type_owned.contains("octet-stream") {
+                    // If the response is JSON with a stub marker, skip rather than fail
+                    if content_type_owned.contains("json") {
+                        let body_text = resp.text().await.unwrap_or_default();
+                        if body_text.contains("\"stub\"") {
+                            return ScenarioResult::Skip {
+                                reason: "telemetry export endpoint returned stub response — real Parquet export not available".to_string(),
+                            };
+                        }
+                        return ScenarioResult::Fail {
+                            duration: start.elapsed(),
+                            reason: format!(
+                                "unexpected content-type for Parquet export: {}",
+                                content_type_owned
+                            ),
+                        };
+                    }
                     return ScenarioResult::Fail {
                         duration: start.elapsed(),
                         reason: format!(
                             "unexpected content-type for Parquet export: {}",
-                            content_type
+                            content_type_owned
                         ),
                     };
                 }

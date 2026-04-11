@@ -65,13 +65,17 @@ impl Scenario for SdkPublish {
             };
         }
 
-        // 5. Verify registry targets (crates.io, npm, nuget)
-        let registries = ["crates.io", "npm", "nuget"];
-        for registry in &registries {
-            if !impl_content.contains(registry) {
+        // 5. Verify registry publish commands (cargo publish, npm publish, dotnet nuget push)
+        let publish_commands = [
+            ("Rust", "cargo publish"),
+            ("TypeScript", "npm publish"),
+            (".NET", "dotnet nuget push"),
+        ];
+        for (lang, cmd) in &publish_commands {
+            if !impl_content.contains(cmd) {
                 return ScenarioResult::Fail {
                     duration: start.elapsed(),
-                    reason: format!("SDK publish missing registry target: {}", registry),
+                    reason: format!("SDK publish missing {} command: {}", lang, cmd),
                 };
             }
         }

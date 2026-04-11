@@ -4063,282 +4063,270 @@ Exit criteria:
 
 ---
 
-## ADR-055: Staged Platform Upgrade via Isolated Staging Cluster
+## ADR-055: Capability as a First-Class Interface Contract
 
 **Status:** Accepted
 
-**Context:** PiCloud is a stateful distributed platform with a permanent, append-only event log. Upgrading the platform binary on a live cluster carries risk: a projector bug in the new version could corrupt the RDF graph, a schema change could make old events unreadable, or a Raft protocol change could disrupt quorum. There is no rollback mechanism for a corrupted event log. Platform upgrades must be validated before reaching production.
+**Context:** As the number of Products in a PiCloud cluster grows, shared functionality emerges naturally. The naive solution — letting one Product depend directly on another that happens to implement the functionality — violates the stable dependency principle. A dependency on `photo-app` for GPS resolution means consumers are coupled to `photo-app`'s deployment lifecycle, versioning, and ownership. If `photo-app` is deprecated, every consumer breaks. If the GPS logic needs to evolve, the photo-app team must accommodate all consumers' timelines.
 
-**Decision:** Every platform release is validated against a dedicated two-node staging cluster before being promoted to production. The staging cluster runs on separate hardware (or shared hardware with port isolation per ADR-056), uses a distinct domain (`staging.picloud.local`), and is fully isolated from production by the tenant boundary established in ADR-042. The `picloud-test` suite is the promotion gate — production is only upgraded if the full staging test run exits green.
+The root problem is that PiCloud lacked a way to express a named, versioned *interface contract* independently of any *implementation*. Products are hermetically sealed deployment units — they are the wrong primitive for expressing a shared capability that multiple Products may implement over time.
 
-**Upgrade sequence:**
-1. Build the new platform binary from the release branch.
-2. Rolling-upgrade the staging cluster via `picloud-test --config cluster-staging.toml upgrade --binary ...`. Followers are upgraded first. Each node must rejoin Raft (verified by SPARQL query) before the next node is upgraded. The Raft leader is upgraded last.
-3. Run the full `picloud-test` suite against staging, including the `upgrade_compatibility` scenario.
-4. If all suites pass: rolling-upgrade production in the same order.
-5. Run compliance probes against production to confirm clean landing.
-6. If any suite fails on staging: stop. Production is never touched until staging is green.
+**Decision:** Introduce `capability` as a first-class, cluster-scoped resource type. A capability is a pure interface contract: a named, versioned declaration of an event schema and SHACL shapes that describes a service interaction. A capability has no workload, no container, no code. It declares only the contract.
 
-**Event log compatibility is the primary gate.** A new binary that cannot correctly project events written by the previous binary fails `upgrade_compatibility.rs` and blocks promotion. Schema IRIs (ADR-031) are the mechanism that makes compatibility achievable; the scenario proves it worked for the specific release.
+Products separately declare `implements` (they fulfil a capability's contract) and `capabilities` (they depend on a capability being available in the cluster). Consumers bind to the capability, not to any specific Product.
 
-**Staging hardware:** two Pi 5 nodes (4 GB RAM, 256 GB NVMe sufficient). Tests requiring three-node quorum are tagged `requires_three_nodes` and skipped on staging — they run on production post-upgrade as final verification.
+**Resource definition:**
+
+```bicep
+// Cluster-scoped — no product: field
+capability 'gps-to-place' = {
+  version: '1.0.0'
+  description: 'Translates GPS coordinates to a named place with confidence score'
+  ontology: './capabilities/gps-to-place.ttl'
+  shapes:   './capabilities/gps-to-place.shacl'
+  events: {
+    input:  'CoordinatesReceived'
+    output: 'PlaceResolved'
+  }
+}
+
+// Photo-app is the first implementor — it does not own the capability
+product 'photo-app' = {
+  version: '2.0.0'
+  implements: ['gps-to-place@1.0.0']
+}
+
+// Maps-app depends on the capability, not on photo-app
+product 'maps-app' = {
+  version: '1.0.0'
+  capabilities: [
+    { capability: 'gps-to-place', minVersion: '1.0.0' }
+  ]
+}
+```
+
+**Enforcement rules (applied at `resource apply` time):**
+
+1. A `capability` must declare at least one `input` event and one `output` event — capabilities with no declared interface are rejected.
+2. A `capability` must declare either `ontology` or `shapes` (or both) — the contract must be expressed in the type system, not just in prose.
+3. A Product declaring `implements` must have an `event-subscription` to the capability's `input` event type and must emit the capability's `output` event type — the platform validates structural conformance against the declared SHACL shapes at deploy time.
+4. A Product declaring a `capabilities` dependency will fail `resource apply` if no Product in the cluster currently declares `implements` for that capability at the required `minVersion`.
+5. A `capability` cannot be deleted while any Product declares a `capabilities` dependency on it — cascading deletion is blocked.
+6. Dependency direction is enforced: a Product that `implements` a capability cannot also declare a `capabilities` dependency on a capability it does not itself implement.
+
+**Capability lifecycle events:**
+
+- `CapabilityDeclared` — capability resource received and validated
+- `CapabilityReady` — at least one implementing Product is deployed and structurally conformant
+- `CapabilityImplementorAdded` — a new Product declares `implements` for an existing capability
+- `CapabilityImplementorRemoved` — an implementing Product is removed
+- `CapabilityUnfulfilled` — no implementing Product exists; all consumers receive this event
+- `CapabilityDeleted` — capability removed (only when no consumers exist)
+
+**Routing:**
+
+The platform resolves which Product currently implements the required capability and routes the `input` event to that Product's event bus. If multiple Products implement the same capability, the platform selects the implementor with the highest version that satisfies the consumer's `minVersion` constraint. One active implementor per capability in Phase 1.
 
 **Rationale:**
-- The event log is permanent and cannot be rolled back — production upgrade failures are potentially destructive, not just inconvenient
-- Staging reuses ADR-042 tenant isolation — no special infrastructure, just the existing boundary applied deliberately
-- Two-node staging validates Raft behaviour, rolling upgrade sequencing, and mTLS — the scenarios most likely to reveal upgrade regressions
-- Test results from both clusters flow into production telemetry — upgrade history is queryable alongside operational history
+- Separating interface (capability) from implementation (Product) is the structural enforcement of the stable dependency principle — consumers never take a direct dependency on a mutable deployment unit
+- Capabilities are expressed in the platform's native type system (RDF ontology + SHACL) — no separate contract registry is needed
+- The `CapabilityUnfulfilled` event gives consumers observable signal when their dependency is broken
+- Requiring at least one implementor before a consumer can deploy prevents consumers from deploying against phantom contracts
+
+**Rejected alternatives:**
+- **Direct product-to-product dependencies** — creates tight coupling between deployment lifecycles.
+- **Capability as a sub-resource of the implementing Product** — embeds the same ownership problem one level down.
+- **Shared library / SDK** — moves the contract into code, loses platform-level validation and discoverability.
+- **Service mesh with named service contracts** — adds sidecar network layer, violates single-binary goal.
 
 **Consequences:**
-- `picloud-test` gains an `upgrade` subcommand implementing rolling upgrade with Raft rejoin verification
-- Scenarios requiring three-node quorum are tagged and conditionally skipped via `skip_tags` in `cluster.toml`
-- `upgrade_compatibility.rs` must run after every staging upgrade, not just on initial deployment
-- Two dedicated staging nodes are required as a permanent lab fixture (may share hardware with production nodes per ADR-056)
+- `capability` is a new cluster-scoped resource type
+- The `product` resource gains `implements` and `capabilities` fields
+- `resource apply` gains a capability resolution validation step
+- `picloud capability list` surfaces all capabilities, implementors, consumers, and fulfilment status
 
 **Test coverage:**
 
 Scenario tests:
-- `upgrade_compatibility.rs` — upgrade staging from v(N) to v(N+1). Assert the v(N+1) projector produces an identical RDF graph triple count to the pre-upgrade snapshot. Assert all resource IRIs remain dereferenceable after upgrade.
-- `rolling_upgrade_sequence.rs` — assert followers are upgraded before the leader. Assert no quorum gap during the upgrade window — at least one leader role holder at all times, verified via SPARQL every second.
-- `upgrade_gate_enforcement.rs` — deliberately fail a staging scenario. Assert the upgrade pipeline halts and does not invoke the production upgrade subcommand.
+- `capability_declaration.rs` — declare a `capability` resource via `picloud resource apply`. Assert a `CapabilityDeclared` event is emitted. Assert the capability appears in the cluster RDF graph as a `pc:Capability` node with correct `pc:version`, `pc:inputEvent`, and `pc:outputEvent` triples.
+- `capability_implements_shacl_validation.rs` — deploy a Product that declares `implements: ['gps-to-place@1.0.0']` but whose workload does not subscribe to `CoordinatesReceived`. Assert `resource apply` fails with a SHACL conformance error. Assert no `CapabilityImplementorAdded` event is emitted.
+- `capability_consumer_blocked_without_implementor.rs` — attempt to deploy `maps-app` with a `capabilities` dependency on `gps-to-place` when no Product implements it. Assert `resource apply` fails with a `CapabilityUnfulfilled` error. Assert `maps-app` is not deployed.
+- `capability_routing.rs` — deploy `photo-app` implementing `gps-to-place`. Deploy `maps-app` consuming it. Emit a `CoordinatesReceived` event from `maps-app`. Assert a `PlaceResolved` event is routed back through `photo-app` and arrives on `maps-app`'s event bus within 2 seconds.
+- `capability_version_selection.rs` — deploy two Products implementing `gps-to-place` at `v1.0.0` and `v1.1.0`. Deploy a consumer requiring `minVersion: '1.0.0'`. Emit `CoordinatesReceived`. Assert the `v1.1.0` implementor handles the event (highest satisfying version wins).
+- `capability_implementor_removed_unfulfilled.rs` — remove the only implementing Product. Assert `CapabilityUnfulfilled` event is emitted within 10 seconds. Assert the event is delivered to all consumer Products' event buses.
+- `capability_deletion_guard.rs` — attempt `picloud resource delete capability/gps-to-place` while `maps-app` declares a dependency on it. Assert the delete is rejected with a dependency error. Assert the capability remains in the cluster graph.
 
 Invariants:
-- At least one node holds `picloud:hasRole picloud:Leader` at all times during a rolling upgrade. Polled every 1 second.
-- Triple count in the graph must not decrease after upgrade. Any decrease indicates the new projector dropped historical events.
+- The cluster graph contains exactly one active implementor per capability version at any time. Verified by SPARQL every 5 seconds during Chaos runs: `SELECT (COUNT(?impl) AS ?n) WHERE { ?impl pc:implements ?cap ; pc:status pc:Active }` — a count of 0 with active consumers is a failure; a count > 1 for the same version is a failure.
+- Any Product with a declared `capabilities` dependency has a resolvable implementor at the required `minVersion`. Verified by SPARQL every 60 seconds: `SELECT ?consumer ?cap WHERE { ?consumer pc:requiresCapability ?cap . FILTER NOT EXISTS { ?impl pc:implements ?cap ; pc:status pc:Active } }` — any result row is a failure.
+- Dependency direction: no `implements` Product has a `capabilities` dependency on a Product it does not implement. Verified at every `resource apply` and as a nightly SPARQL invariant check.
+
+Chaos scenarios:
+- Kill the implementing Product's workload mid-routing. Assert `CapabilityUnfulfilled` event emitted. Assert in-flight `CoordinatesReceived` events are not silently dropped — they either complete or emit a `CapabilityRoutingFailed` event.
+- Deploy a second implementor at a higher version mid-flight. Assert routing switches to the new implementor without dropping in-flight events.
 
 Exit criteria:
-- `upgrade_compatibility`: triple count identical pre/post upgrade, 100% of upgrade cycles.
-- Rolling upgrade: zero quorum gaps > 5 seconds, verified across 10 upgrade cycles.
-- Gate enforcement: pipeline never reaches production when staging is red, 100% of runs.
+- `resource apply` validation (capability enforcement): < 500 ms.
+- Capability event routing overhead vs direct product-to-product event routing: < 5 ms added latency at p99, verified across 10,000 routed events.
+- `CapabilityUnfulfilled` emitted within 10 seconds of implementing Product removal: 100% of test runs.
+- Consumer `resource apply` blocked when capability is unfulfilled: 100% of attempts across 50 test runs.
+- SHACL conformance check catches incorrect `implements` declaration: 100% of malformed deployments rejected.
 
 ---
 
-## ADR-056: Shared Hardware Staging with Port Isolation
+## ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives
 
 **Status:** Accepted
 
-**Context:** Running two isolated PiCloud clusters (production and staging per ADR-055) on the same physical nodes reduces hardware cost. ADR-042 provides complete tenant isolation at the application layer (separate Raft cluster, event log, RDF graph, CA, IAM). However, two `picloud-server` processes on the same OS cannot both bind the same ports. The platform needs a configuration mode that allows port customisation and directory-backed storage for the non-primary instance.
+**Context:** PiCloud Products maintain internal RDF state in per-product named graphs, queryable via IAM-gated SPARQL endpoints. The original design permitted cross-product SPARQL access as the mechanism for sharing data between Products. This decision was informed by Data Mesh thinking but did not complete the model.
 
-**Decision:** The `picloud-server` binary accepts a `--config` flag pointing to a TOML configuration file. All network ports and the storage root are configurable. The staging instance runs on alternate ports with a directory-backed storage pool. Production retains default ports and raw NVMe ownership.
+The problem: cross-product access to a Product's internal graph exposes operational state — the live, mutable projection of the event log. Consumers take an implicit dependency on the producer's internal schema. When the producer refactors its graph for operational reasons, consumers break silently. There is no publication decision, no contract, no SLO, and no way to discover what data is available across the cluster.
 
-**Port assignments:**
+The root issue is a missing distinction between two planes:
 
-| Service | Production (default) | Staging |
-|---|---|---|
-| HTTPS / IRI layer | 443 | 8443 |
-| DNS | 53 | 5353 |
-| Raft | 2380 | 2381 |
-| Enrollment | 444 | 8444 |
+- **Operational graph** — a Product's internal RDF state. Private. Reflects live operational data. Schema evolves freely as the domain evolves.
+- **Analytical graph** — a curated, versioned, published projection of selected domain data. Stable contract. Declared freshness SLO. Explicitly shared.
 
-**Staging configuration:**
+This ADR also introduces **data domains** as a governance grouping that spans multiple Products. A data domain is not a deployment unit — it is an organisational and discoverability boundary that groups related data products across the cluster.
 
-```toml
-# /home/ubuntu/picloud/staging.toml
-data_root       = "/mnt/nvme/staging"     # directory, size-limited; not raw device
-http_port       = 8443
-dns_port        = 5353
-raft_port       = 2381
-enrollment_port = 8444
-domain          = "staging.picloud.local"
-storage_limit   = "200GB"                 # cap on directory-backed pool size
+**Decision:** Introduce two new resource types:
+
+1. `data-domain` — a cluster-scoped governance namespace that groups data products. Has a declared steward identity, sensitivity classification, and domain-level SHACL constraints applied to all member data products at `resource apply` time.
+2. `data-product` — a product-scoped resource that publishes a curated, versioned analytical projection of a subset of the Product's internal graph into a separate named graph, belonging to exactly one `data-domain`.
+
+Cross-product SPARQL access to internal Product graphs is removed. All cross-product data sharing must go through explicitly published `data-product` resources.
+
+**Resource definitions:**
+
+```bicep
+// Cluster-scoped
+data-domain 'geospatial' = {
+  description: 'All location and mapping data products across the cluster'
+  steward:     'identity/alice'
+  sensitivity: 'internal'
+}
+
+// Product-scoped — published by photo-app, belongs to the geospatial domain
+data-product 'photo-locations' = {
+  product:     'photo-app'
+  domain:      'geospatial'
+  version:     '1.0.0'
+  description: 'Geo-tagged photo locations aggregated by resolved place'
+  ontology:    './data-products/photo-locations.ttl'
+  shapes:      './data-products/photo-locations.shacl'
+  projection:  './data-products/photo-locations.rq'
+  freshness: {
+    maxAge:   '15m'
+    triggers: ['PlaceResolved', 'PhotoDeleted']
+  }
+  access: {
+    visibility: 'cluster'
+    roles:      ['data-consumer']
+  }
+}
+
+// Consumer depends on the data product contract, not on photo-app
+product 'maps-app' = {
+  version:      '1.0.0'
+  dataProducts: [
+    { source: 'photo-app/photo-locations', minVersion: '1.0.0' }
+  ]
+}
 ```
 
-**Systemd service isolation:**
+**Architecture: named graph separation**
 
-```ini
-# /etc/systemd/system/picloud-production.service
-[Service]
-ExecStart=/usr/local/bin/picloud server --config /home/ubuntu/picloud/production.toml
-CPUWeight=200
-MemoryMax=10G
-
-# /etc/systemd/system/picloud-staging.service
-[Service]
-ExecStart=/usr/local/bin/picloud server --config /home/ubuntu/picloud/staging.toml
-CPUWeight=50
-MemoryMax=4G
+```
+Internal operational graph:   https://picloud.local/products/photo-app/graph
+Published data product graph: https://picloud.local/products/photo-app/data-products/photo-locations/graph
 ```
 
-**Storage model on shared hardware:** The staging instance uses directory-backed storage (`data_root` pointing to a directory on the NVMe filesystem) rather than raw block device ownership. The platform's volume abstraction satisfies all test scenarios from a directory-backed pool. Raw block device allocation is not tested on staging — that scenario is covered on production post-upgrade.
+When a trigger event arrives, the platform runs the `projection` SPARQL CONSTRUCT against the internal graph and atomically replaces the data product named graph with the result. Consumers query the published graph only.
 
-**DNS forwarding:** Pi-hole gets one additional conditional forwarding rule per shared node:
+**Freshness model — push only**
+
+Projections rebuild exclusively on declared trigger events. No polling, no scheduled refresh, no on-query materialisation. Requiring explicit triggers forces producers to reason about which state changes make the analytical output stale — this gap surfaces at design time rather than being discovered by confused consumers in production. `freshness.maxAge` is an SLO declaration, not a scheduling mechanism. The platform monitors actual staleness and emits `DataProductSLOBreached` when exceeded.
+
+**Enforcement rules (applied at `resource apply` time):**
+
+1. A `data-product` must declare at least one `triggers` event.
+2. A `data-product` must declare `freshness.maxAge`.
+3. A `data-product` must belong to exactly one `data-domain`.
+4. A `data-product` must declare `ontology` or `shapes` (or both).
+5. A `data-product` with `visibility: cluster` requires the declaring Product to have at least one `data-consumer` role defined in its IAM scope.
+6. A consumer Product declaring `dataProducts` dependencies fails `resource apply` if the referenced data product does not exist at the required `minVersion`.
+7. A `data-domain` cannot be deleted while any `data-product` is assigned to it.
+8. A `data-product` cannot be deleted while any Product declares a `dataProducts` dependency on it.
+9. Cross-product SPARQL queries targeting another Product's internal named graph are rejected at the HTTP layer with `403 Forbidden`.
+
+**Composition with capabilities (ADR-055):**
+
+A capability's output event is a first-class trigger for a data product projection rebuild. The capability is the operational act; the data product is the analytical record of accumulated results.
+
+```bicep
+data-product 'photo-locations' = {
+  freshness: {
+    triggers: ['PlaceResolved']   // ADR-055 capability output drives analytical refresh
+  }
+}
 ```
-staging.picloud.local → 192.168.1.101:5353
-```
+
+**Data product lifecycle events:**
+
+- `DataDomainDeclared`, `DataDomainDeleted`
+- `DataProductDeclared`, `DataProductReady`, `DataProductRefreshed`
+- `DataProductSLOBreached`, `DataProductSLORestored`
+- `DataProductDeleted`
+
+**Breaking change:** Prior cross-product SPARQL access to internal graphs is removed. Existing consumers must migrate to declared `data-product` resources.
 
 **Rationale:**
-- ADR-042 tenant isolation handles all application-layer separation — port isolation is the only OS-level concern
-- Configurable ports are a minimal addition to the platform binary; they have no impact on the production code path
-- Directory-backed storage is a legitimate storage mode, not a compromise — staging test scenarios do not require raw block devices
-- CPUWeight and MemoryMax ensure staging load cannot impact production workloads under contention
+- Hard named graph separation enforces the operational/analytical boundary in the storage layer — no convention to accidentally violate
+- Push-only freshness forces producers to reason about their event model at design time
+- Removing direct cross-product SPARQL access eliminates the escape hatch that would make data products optional in practice
+- `data-domain` provides the discoverability surface Data Mesh's self-serve principle requires
+
+**Rejected alternatives:**
+- **Direct cross-product SPARQL access with conventions** — the status quo. Conventions are not enforced. Schema coupling grows silently.
+- **Event-sourced data products (consumers replay events)** — correct for some use cases but requires every consumer to maintain their own projection infrastructure.
+- **Separate analytical store (Parquet/DataFusion)** — conflicts with the RDF-native architecture. Parquet is the right primitive for telemetry (ADR-046), not domain knowledge.
 
 **Consequences:**
-- `picloud-server` must accept `--config <path>` and honour all port and storage configuration from that file
-- Default configuration (no flag) retains all current defaults — no breaking change to existing deployments
-- The platform ontology gains no new concepts — this is a runtime configuration concern only
-- Staging `data_root` directory must be created and owned by the `picloud` service user before first start
+- `DataProductProjector` runs SPARQL CONSTRUCT projections on trigger events and manages published named graphs
+- `DataProductSLOMonitor` tracks staleness against declared `maxAge` and emits breach/restore events
+- The HTTP layer enforces the cross-product SPARQL access restriction
+- `picloud data-product list` and `picloud data-domain list` CLI commands
 
 **Test coverage:**
 
 Scenario tests:
-- `shared_hardware_isolation.rs` — start both instances on a shared node. Assert production cluster SPARQL returns only production resources. Assert staging cluster SPARQL returns only staging resources. Assert zero cross-contamination.
-- `port_non_conflict.rs` — assert both `picloud-production` and `picloud-staging` systemd services are active simultaneously. Assert each responds on its designated port. Assert no `EADDRINUSE` in either service log.
+- `data_domain_declaration.rs` — declare a `data-domain` resource. Assert `DataDomainDeclared` event emitted. Assert the domain appears in the cluster graph with correct `pc:steward`, `pc:sensitivity`, and `pc:description` triples.
+- `data_product_field_validation.rs` — attempt to declare a `data-product` missing each mandatory field in turn (`triggers`, `maxAge`, `domain`, `shapes`/`ontology`). Assert each attempt is rejected at `resource apply` with a specific validation error. Assert no partial resource state is created in the cluster graph.
+- `data_product_projection_on_trigger.rs` — deploy `photo-app` with a `data-product 'photo-locations'` declaring `triggers: ['PlaceResolved']`. Emit a `PlaceResolved` event. Assert the SPARQL CONSTRUCT projection runs. Assert the data product named graph (`…/data-products/photo-locations/graph`) is populated with triples. Assert a `DataProductRefreshed` event is emitted with non-zero triple count, duration, and timestamp within `freshness.maxAge`.
+- `data_product_named_graph_separation.rs` — after a projection run, query both the internal operational graph (`…/products/photo-app/graph`) and the data product graph (`…/data-products/photo-locations/graph`). Assert they are distinct named graphs. Assert the data product graph contains only triples produced by the declared CONSTRUCT query — no triples from the internal graph appear unless the CONSTRUCT explicitly produces them.
+- `data_product_atomic_swap.rs` — trigger a projection rebuild while `maps-app` is issuing SPARQL queries against the data product graph at 20 queries/second. Assert zero query errors during the swap. Assert no query returns a mix of triples from the old and new projection (partial state).
+- `cross_product_internal_graph_blocked.rs` — authenticate as a `maps-app` workload identity. Attempt a SPARQL query directly against `https://picloud.local/products/photo-app/graph`. Assert `403 Forbidden`. Assert a `UnauthorisedGraphAccess` event is emitted in the platform log. Repeat with platform-admin identity — assert `200 OK` (admin exemption verified).
+- `data_product_consumer_blocked_without_product.rs` — attempt to deploy `maps-app` with a `dataProducts` dependency on `photo-app/photo-locations` when that data product does not exist. Assert `resource apply` fails with a `DataProductNotFound` error. Assert `maps-app` is not deployed.
+- `data_product_slo_breach_and_restore.rs` — deploy a data product with `maxAge: '2m'`. Stop emitting trigger events. Wait 2 minutes 30 seconds. Assert `DataProductSLOBreached` event emitted. Resume trigger events. Assert the next successful refresh emits `DataProductSLORestored`. Assert the SLO breach is visible in the cluster RDF graph between breach and restore events.
+- `data_product_deletion_guard.rs` — attempt to delete `data-product 'photo-locations'` while `maps-app` declares a `dataProducts` dependency on it. Assert the delete is rejected. Assert the data product and its named graph remain intact.
+- `data_domain_deletion_guard.rs` — attempt to delete `data-domain 'geospatial'` while `photo-app/photo-locations` is assigned to it. Assert the delete is rejected with a member count error.
+- `capability_triggers_data_product.rs` — integration test combining ADR-055 and ADR-056. Deploy `gps-to-place` capability and `photo-locations` data product with `triggers: ['PlaceResolved']`. Emit `CoordinatesReceived` via `maps-app`. Assert the capability routes to `photo-app`, `PlaceResolved` is emitted, and the `photo-locations` data product projection is rebuilt — all within 30 seconds end-to-end.
 
 Invariants:
-- Production cluster triple count must not change during a staging upgrade or test run. Verified by comparing production SPARQL `COUNT(*)` before and after a full staging test suite run.
+- The data product named graph contains only triples produced by the current CONSTRUCT query. Verified on demand by re-running the CONSTRUCT externally and comparing the result set against the stored graph: any triple in the stored graph absent from the CONSTRUCT result is a failure.
+- Cross-product access to internal named graphs returns `403` for all non-owner, non-admin identities. Verified by an HTTP probe against every product's internal graph IRI from every other product's workload identity on every CI run.
+- Every data product with at least one trigger event received is refreshed within its declared `maxAge`. Verified by a SPARQL query against the cluster graph every 30 seconds during integration runs: `SELECT ?dp WHERE { ?dp a pc:DataProduct ; pc:lastRefreshed ?t ; pc:maxAge ?m . FILTER((NOW() - ?t) > ?m) }` — any result is a failure.
+- The operational graph and data product graph remain distinct named graphs at all times. Verified by asserting the two IRI paths resolve to different `GRAPH` contexts in Oxigraph and never share a named graph identifier.
+
+Chaos scenarios:
+- Kill the producer workload mid-projection. Assert the data product graph retains its last valid state (the in-progress projection is discarded, not partially committed). Assert `DataProductRefreshed` is not emitted for the aborted run.
+- Flood trigger events (1000 `PlaceResolved` events in 1 second). Assert the projection runner serialises correctly — only one projection run at a time, no interleaved writes to the data product graph. Assert final graph state reflects the last completed projection.
 
 Exit criteria:
-- Zero cross-contamination between clusters on shared hardware: 100% of isolation checks.
-- Both services simultaneously active: verified on every staging test run.
-- Production triple count unchanged across staging test suite execution: 100% of runs.
-
----
-
-## ADR-057: OTel Test Data Versioning via Resource Attributes
-
-**Status:** Accepted
-
-**Context:** The `picloud-test` binary emits test results as OTLP spans to the cluster's own telemetry pipeline (ADR-045, ADR-046). Over time, the Parquet store accumulates test runs from multiple platform versions. Without explicit version labelling, it is impossible to query "did this scenario regress between v0.3 and v0.4?" — the most operationally useful question a test history can answer. The platform already exposes its version via DNS TXT records (ADR-052); the test runner should use this as its authoritative version source rather than requiring manual configuration.
-
-**Decision:** The `picloud-test` binary queries the cluster's DNS TXT record for `{cluster.domain}` at startup to extract `platform-version`. This value is set as a resource attribute (`picloud.platform_version`) on the OTel tracer used for the entire test run. Every span emitted during the run — across all scenarios, probes, and chaos cycles — inherits this attribute automatically. A unique `picloud.test.run_id` (UUID) is also set, grouping all spans from a single invocation.
-
-**Resource attributes set at tracer initialisation:**
-
-```rust
-Resource::new(vec![
-    KeyValue::new("service.name",             "picloud-test"),
-    KeyValue::new("service.version",          env!("CARGO_PKG_VERSION")),
-    KeyValue::new("picloud.platform_version", platform_version), // from DNS TXT
-    KeyValue::new("picloud.test.run_id",      Uuid::new_v4().to_string()),
-    KeyValue::new("picloud.test.suite",       suite_name),
-    KeyValue::new("picloud.test.cluster",     cluster_domain),
-])
-```
-
-**Version source — DNS TXT record:** The DNS TXT record for the cluster root already carries `platform-version` per ADR-052. The test runner resolves this at startup via `hickory-resolver`. If the DNS query fails or the field is absent, the version falls back to the `platform_version` field in `cluster.toml`. If that is also absent or set to `"auto"`, the version is recorded as `"unknown"`.
-
-**`cluster.toml` override:**
-
-```toml
-[cluster]
-platform_version = "auto"    # "auto" = query DNS TXT (default)
-                              # or pin: platform_version = "0.4.1-rc1"
-```
-
-Pinning is useful during development when the binary under test has not yet set its version string, or when testing a pre-release candidate.
-
-**Queries enabled by this design:**
-
-```sql
--- Regression detection: p99 latency per scenario per version
-SELECT attributes->>'picloud.platform_version' AS version,
-       operation_name,
-       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99_ms,
-       SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS failures
-FROM   traces
-WHERE  service_name = 'picloud-test'
-GROUP  BY version, operation_name
-ORDER  BY operation_name, version;
-
--- Staging passed but production failed — environment-specific failures
-SELECT t1.operation_name, t1.attributes->>'picloud.platform_version' AS version
-FROM   traces t1
-WHERE  t1.service_name = 'picloud-test'
-  AND  t1.attributes->>'picloud.test.cluster' = 'picloud.local'
-  AND  t1.status = 'error'
-  AND  EXISTS (
-       SELECT 1 FROM traces t2
-       WHERE  t2.operation_name = t1.operation_name
-         AND  t2.attributes->>'picloud.platform_version' = t1.attributes->>'picloud.platform_version'
-         AND  t2.attributes->>'picloud.test.cluster' = 'staging.picloud.local'
-         AND  t2.status = 'ok');
-```
-
-**Rationale:**
-- DNS TXT is the authoritative version source — the platform already maintains it, no new API needed
-- Resource attributes propagate to all child spans automatically — one call at startup, zero per-test overhead
-- `run_id` enables "show me all spans from run X" without filtering by time range
-- Storing test results in the platform's own Parquet store means test history has the same retention, query, and alert capabilities as any other operational telemetry
-
-**Consequences:**
-- `picloud-test/src/harness/results.rs` must query DNS TXT before building the OTel tracer
-- `cluster.toml` gains `platform_version` with a default of `"auto"`
-- Test results accumulate in the production cluster's Parquet store — retention policy applies (default 7 days for traces). For longer test history, increase the `traces` retention period in the platform configuration.
-
-**Test coverage:**
-
-Scenario tests:
-- `version_attribute_present.rs` — run the compliance suite. Query Parquet for all spans from that run_id. Assert every span carries a non-empty `picloud.platform_version` attribute.
-- `version_matches_cluster.rs` — assert the `picloud.platform_version` attribute in emitted spans matches the version string from the cluster's DNS TXT record.
-
-Exit criteria:
-- `picloud.platform_version` present and non-empty in 100% of emitted spans.
-- Version matches DNS TXT: 100% of test runs.
-
----
-
-## ADR-058: picloud-test as First-Class Workspace Crate
-
-**Status:** Accepted
-
-**Context:** PiCloud's test scenarios, chaos tests, and protocol probes constitute a significant body of code that must be maintained alongside the platform itself. As a `picloud-test` crate in the Cargo workspace, the tests get the same dependency management, build caching, and CI integration as any production slice. The key architectural constraint is that the test crate must be able to test the platform without depending on its internals — all assertions must go through external interfaces.
-
-**Decision:** `picloud-test` is a workspace member with `publish = false` that depends only on `picloud-domain` (for shared type definitions such as `ResourceIri`) and external test-only crates. It never imports any production slice (`picloud-cluster`, `picloud-iam`, `picloud-storage`, etc.). All cluster knowledge flows through the platform's own external interfaces: SPARQL, HTTP, DNS, SSH via the `picloud` CLI binary.
-
-**Dependency rule (mirrors ADR-034):**
-
-```
-picloud-domain   ← depends on nothing internal
-picloud-test     → picloud-domain only (test-only external deps allowed)
-```
-
-**`picloud-test/Cargo.toml`:**
-
-```toml
-[package]
-name    = "picloud-test"
-version = "0.1.0"
-publish = false
-
-[[bin]]
-name = "picloud-test"
-path = "src/main.rs"
-
-[dependencies]
-picloud-domain   = { path = "../picloud-domain" }
-reqwest          = { version = "0.12", features = ["rustls-tls", "json"] }
-hickory-resolver = "0.24"
-ssh2             = "0.9"
-tokio            = { version = "1", features = ["full"] }
-serde            = { version = "1", features = ["derive"] }
-toml             = "0.8"
-opentelemetry    = "0.23"
-opentelemetry-otlp = "0.16"
-uuid             = { version = "1", features = ["v4"] }
-```
-
-**Why not `#[cfg(test)]` or `tests/` integration tests:** Platform integration tests require a live cluster, SSH access, DNS probes, and real hardware. Rust's built-in test framework is unsuitable — it does not support async cluster setup, does not emit OTLP results, cannot inject SSH-based faults mid-test, and provides no concept of suite-level fail-fast. `picloud-test` is a binary that implements its own test runner with these capabilities.
-
-**Why the external-interface constraint matters:** If `picloud-test` could import `picloud-storage` directly, a test author could assert internal storage state rather than observable SPARQL state. That test would be fragile (it breaks when internals change) and would not validate that the platform actually exposes the correct state to external consumers. The constraint forces every assertion to go through the same path that real operators and workloads use.
-
-**Rationale:**
-- Workspace membership means `cargo build --workspace` builds the test binary alongside the platform, catching compilation errors immediately
-- `publish = false` ensures the test binary is never accidentally published to crates.io
-- External-interface-only rule ensures tests validate observable behaviour, not implementation details
-- Consistent with the vertical slice dependency model (ADR-034) — the same discipline applied to test code
-
-**Consequences:**
-- `picloud-test` is added to the workspace `Cargo.toml` `members` array
-- CI builds `picloud-test` on every PR — if it fails to compile, the PR is blocked
-- The `picloud-test` binary is not included in the production `picloud-server` binary — it is a separate build artifact
-- Any shared types needed by tests that do not already exist in `picloud-domain` must be added there
-
-**Test coverage:**
-
-Scenario tests:
-- `test_crate_builds_independently.rs` — run `cargo build -p picloud-test` with all other slices absent from the workspace resolution. Assert compilation succeeds.
-- `no_internal_imports.rs` — run `cargo deny` configuration that blocks any `picloud-*` dependency in `picloud-test/Cargo.toml` other than `picloud-domain`. Assert zero violations.
-
-Exit criteria:
-- `picloud-test` compiles independently: verified on every PR.
-- Zero internal slice imports: verified by `cargo deny` on every PR.
+- Projection rebuild latency for a 1,000-triple CONSTRUCT result: < 5 seconds from trigger event receipt to `DataProductRefreshed` event, measured across 100 runs.
+- Atomic swap: zero partial-state query results across 100 concurrent query-plus-swap test runs.
+- Cross-product internal graph access blocked: 100% of unauthorised attempts return `403`, verified across 1,000 probe requests with varied workload identities.
+- `DataProductSLOBreached` emitted within 60 seconds of `maxAge` expiry: 95% of test runs (5% tolerance for event bus scheduling jitter).
+- Mandatory field validation: 100% of `data-product` declarations missing any required field rejected at `resource apply` before any cluster state is mutated.
+- Data product named graph purity: zero extraneous triples present across 100 post-projection inspection runs.
+- `data-domain` and `data-product` deletion guards: 100% of guarded deletes rejected when active dependents exist.
