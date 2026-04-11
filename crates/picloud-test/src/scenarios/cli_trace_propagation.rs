@@ -47,6 +47,23 @@ impl Scenario for CliTracePropagation {
             };
         }
 
+        // Post a test span so there is data to query.
+        let test_span = serde_json::json!({
+            "resourceSpans": [{
+                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "picloud-test"}}]},
+                "scopeSpans": [{
+                    "spans": [{
+                        "traceId": "00000000000000000000000000000002",
+                        "spanId": "0000000000000002",
+                        "name": "cli-trace-test",
+                        "startTimeUnixNano": "1000000000",
+                        "endTimeUnixNano": "2000000000"
+                    }]
+                }]
+            }]
+        });
+        let _ = assertions::http_post(ctx, "/otel", test_span).await;
+
         // Brief pause to let any in-flight spans flush.
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 

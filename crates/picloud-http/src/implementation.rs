@@ -378,10 +378,14 @@ impl PiCloudHttpServer {
             .route("/.well-known/ca", get(handle_ca_export))
             // SDK publish (ADR-033)
             .route("/api/sdk/publish", post(handle_stub_accepted))
+            // Certificate management (ADR-053)
+            .route("/api/certs", get(handle_certs_list))
+            .route("/api/pki/crl", get(handle_pki_crl))
             // --- OTel / Telemetry routes (ADR-045, ADR-046) ---
             .route("/otel", post(handle_otel_ingest))
             .route("/telemetry/spans", get(handle_telemetry_spans))
             .route("/telemetry/metrics", get(handle_telemetry_metrics))
+            .route("/api/telemetry/spans", get(handle_telemetry_spans))
             // --- OCI Distribution API v2 routes (ADR-054) ---
             .route("/v2/", get(handle_v2_check))
             .route("/v2/*path", get(handle_v2_dispatch).head(handle_v2_dispatch).put(handle_v2_put).post(handle_v2_post).delete(handle_v2_delete))
@@ -2483,6 +2487,35 @@ async fn handle_ca_export(
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "CA not available"}))).into_response()
     }
+}
+
+/// GET /api/certs — list certificates (stub returning info from CA if available).
+async fn handle_certs_list(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    if let Some(ref ca) = state.ca {
+        let pem = ca.ca_cert_pem();
+        (StatusCode::OK, Json(serde_json::json!({
+            "certificates": [{
+                "subject": "picloud CA",
+                "issuer": "picloud CA",
+                "pem": pem.to_string(),
+                "type": "ca"
+            }]
+        }))).into_response()
+    } else {
+        (StatusCode::OK, Json(serde_json::json!({
+            "certificates": []
+        }))).into_response()
+    }
+}
+
+/// GET /api/pki/crl — return empty CRL (Certificate Revocation List).
+async fn handle_pki_crl() -> Response {
+    (StatusCode::OK, Json(serde_json::json!({
+        "crl": [],
+        "updated": chrono::Utc::now().to_rfc3339()
+    }))).into_response()
 }
 
 async fn handle_v2_check(

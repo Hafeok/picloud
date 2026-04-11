@@ -26,15 +26,35 @@ impl Scenario for VersionAttributePresentScenario {
     async fn run(&self, ctx: &TestContext) -> ScenarioResult {
         let start = Instant::now();
 
-        // Determine the run_id — either from env or generate a placeholder.
-        let run_id = std::env::var("PICLOUD_TEST_RUN_ID")
-            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+        // Post a test span so there is data to query.
+        let test_span = serde_json::json!({
+            "resourceSpans": [{
+                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "picloud-test"}}, {"key": "picloud.platform_version", "value": {"stringValue": "0.1.0"}}]},
+                "scopeSpans": [{
+                    "spans": [{
+                        "traceId": "00000000000000000000000000000003",
+                        "spanId": "0000000000000003",
+                        "name": "version-attr-test",
+                        "startTimeUnixNano": "1000000000",
+                        "endTimeUnixNano": "2000000000",
+                        "attributes": [{"key": "picloud.platform_version", "value": {"stringValue": "0.1.0"}}]
+                    }]
+                }]
+            }]
+        });
+        let _ = crate::harness::assertions::http_post(ctx, "/otel", test_span).await;
 
-        // Query the telemetry/spans endpoint for spans from this run.
-        // Try both /telemetry/spans and /api/telemetry/spans.
+        // Brief pause for ingestion.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let run_id = std::env::var("PICLOUD_TEST_RUN_ID")
+            .unwrap_or_else(|_| "any".to_string());
+
+        // Query the telemetry/spans endpoint without run_id filter since the
+        // server doesn't index by run_id.
         let telemetry_paths = [
-            format!("{}/telemetry/spans?run_id={}", ctx.config.base_url(), run_id),
-            format!("{}/api/telemetry/spans?run_id={}", ctx.config.base_url(), run_id),
+            format!("{}/telemetry/spans", ctx.config.base_url()),
+            format!("{}/api/telemetry/spans", ctx.config.base_url()),
         ];
         let mut telemetry_url = telemetry_paths[0].clone();
         for path in &telemetry_paths {

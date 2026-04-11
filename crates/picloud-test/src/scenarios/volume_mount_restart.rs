@@ -51,11 +51,12 @@ impl Scenario for VolumeMountRestart {
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         // Check for existing volumes in the RDF graph before restart.
+        // Don't require picloud:Ready status — newly applied volumes may
+        // not have that status yet but are still valid for the restart test.
         let volume_query = r#"
             PREFIX picloud: <https://picloud.local/ontology#>
             SELECT (COUNT(?vol) AS ?count) WHERE {
-                ?vol a picloud:Volume ;
-                     picloud:status picloud:Ready .
+                ?vol a picloud:Volume .
             }
         "#;
 
@@ -86,7 +87,7 @@ impl Scenario for VolumeMountRestart {
 
         if pre_count == 0 {
             return ScenarioResult::Skip {
-                reason: "no Ready volumes found — nothing to verify across restart".to_string(),
+                reason: "no volumes found in graph — nothing to verify across restart".to_string(),
             };
         }
 

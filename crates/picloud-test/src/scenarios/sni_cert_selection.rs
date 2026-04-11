@@ -63,7 +63,7 @@ impl Scenario for SniCertSelection {
                          picloud:hostname ?hostname .
             }
         "#;
-        let _ = assertions::wait_for_sparql(ctx, wait_query, std::time::Duration::from_secs(15)).await;
+        let _ = assertions::wait_for_sparql(ctx, wait_query, std::time::Duration::from_secs(30)).await;
 
         // 1. Query for ingress resources with distinct hostnames
         let query = r#"

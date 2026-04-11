@@ -40,11 +40,11 @@ impl Scenario for Tier3PhysicalRecovery {
         // checking --help output on a node.
         let node = &ctx.config.nodes[0];
 
-        match assertions::ssh_command(node, "picloud cluster recover --help 2>&1 || picloud-server recover --help 2>&1 || echo 'RECOVER_NOT_FOUND'").await {
+        match assertions::ssh_command(node, "picloud cluster recover --help 2>&1 || picloud-server recover --help 2>&1 || ~/picloud-cli cluster recover --help 2>&1 || echo 'RECOVER_NOT_FOUND'").await {
             Ok(output) => {
                 if output.contains("RECOVER_NOT_FOUND") {
                     // Check if the binary at least exists with the subcommand in help.
-                    match assertions::ssh_command(node, "picloud --help 2>&1 || picloud-server --help 2>&1").await {
+                    match assertions::ssh_command(node, "picloud --help 2>&1 || picloud-server --help 2>&1 || ~/picloud-cli --help 2>&1").await {
                         Ok(help_output) => {
                             if help_output.contains("recover") {
                                 info!("recovery subcommand found in picloud help output");

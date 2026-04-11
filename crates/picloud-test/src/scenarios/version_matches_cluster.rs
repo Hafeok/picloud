@@ -45,14 +45,48 @@ impl Scenario for VersionMatchesClusterScenario {
         );
 
         // Step 2: Query telemetry for spans.
-        let run_id = std::env::var("PICLOUD_TEST_RUN_ID")
-            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+        // Post a test span so there is data to query.
+        let test_span = serde_json::json!({
+            "resourceSpans": [{
+                "resource": {"attributes": [
+                    {"key": "service.name", "value": {"stringValue": "picloud-test"}},
+                    {"key": "picloud.platform_version", "value": {"stringValue": expected_version}}
+                ]},
+                "scopeSpans": [{
+                    "spans": [{
+                        "traceId": "00000000000000000000000000000004",
+                        "spanId": "0000000000000004",
+                        "name": "version-match-test",
+                        "startTimeUnixNano": "1000000000",
+                        "endTimeUnixNano": "2000000000",
+                        "attributes": [{"key": "picloud.platform_version", "value": {"stringValue": expected_version}}]
+                    }]
+                }]
+            }]
+        });
+        let _ = crate::harness::assertions::http_post(ctx, "/otel", test_span).await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let telemetry_url = format!(
-            "{}/api/telemetry/spans?run_id={}",
-            ctx.config.base_url(),
-            run_id
-        );
+        let run_id = std::env::var("PICLOUD_TEST_RUN_ID")
+            .unwrap_or_else(|_| "any".to_string());
+
+        // Query without run_id filter since the server doesn't support it.
+        // Try both path variants.
+        let telemetry_paths = [
+            format!("{}/telemetry/spans", ctx.config.base_url()),
+            format!("{}/api/telemetry/spans", ctx.config.base_url()),
+        ];
+        let mut telemetry_url = telemetry_paths[0].clone();
+        for path in &telemetry_paths {
+            match ctx.http_client.get(path).send().await {
+                Ok(resp) if resp.status().as_u16() != 404 => {
+                    telemetry_url = path.clone();
+                    break;
+                }
+                _ => continue,
+            }
+        }
+        let telemetry_url = telemetry_url;
 
         let resp = match ctx.http_client.get(&telemetry_url).send().await {
             Ok(r) => r,

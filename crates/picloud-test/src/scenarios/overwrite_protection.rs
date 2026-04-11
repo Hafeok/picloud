@@ -75,7 +75,7 @@ impl Scenario for OverwriteProtection {
 
         // Extra pause to ensure the projection is fully settled before the
         // duplicate check on the write path can see it.
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
         // Attempt to apply the same resource again without a force/overwrite flag.
         let duplicate = match assertions::apply_resource(ctx, resource).await {

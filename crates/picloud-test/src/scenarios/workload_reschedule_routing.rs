@@ -66,7 +66,7 @@ impl Scenario for WorkloadRescheduleRouting {
                 ?ingress a picloud:Ingress .
             }
         "#;
-        let _ = assertions::wait_for_sparql(ctx, wait_query, std::time::Duration::from_secs(15)).await;
+        let _ = assertions::wait_for_sparql(ctx, wait_query, std::time::Duration::from_secs(30)).await;
 
         // Query the RDF graph for any ingress resources with their target addresses.
         let query = r#"
@@ -109,7 +109,7 @@ impl Scenario for WorkloadRescheduleRouting {
 
         if bindings.is_empty() {
             return ScenarioResult::Skip {
-                reason: "no ingress resources deployed — cannot test reschedule routing"
+                reason: "no ingress resources deployed after waiting 30s — projection may not have completed"
                     .to_string(),
             };
         }

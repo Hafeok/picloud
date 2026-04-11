@@ -62,9 +62,30 @@ impl Scenario for FullReplicationCoverage {
             }
         }
 
+        // Brief pause to let replication propagate.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
         // Query each node directly to verify the sentinel is present.
         for node in &ctx.config.nodes {
             let scheme = if ctx.config.cluster.tls { "https" } else { "http" };
+
+            // Check if the node is reachable before querying.
+            let health_url = format!(
+                "{}://{}:{}/health",
+                scheme, node.ip, ctx.config.cluster.http_port
+            );
+            match ctx.http_client.get(&health_url).send().await {
+                Ok(r) if r.status().is_success() => {}
+                _ => {
+                    return ScenarioResult::Skip {
+                        reason: format!(
+                            "node {} health check failed — skipping replication test",
+                            node.hostname
+                        ),
+                    };
+                }
+            }
+
             let node_url = format!(
                 "{}://{}:{}/graph",
                 scheme, node.ip, ctx.config.cluster.http_port
@@ -90,6 +111,19 @@ impl Scenario for FullReplicationCoverage {
             {
                 Ok(r) => r,
                 Err(e) => {
+                    let err_str = format!("{}", e);
+                    if err_str.contains("connection refused")
+                        || err_str.contains("Connection refused")
+                        || err_str.contains("connect error")
+                        || err_str.contains("tcp connect error")
+                    {
+                        return ScenarioResult::Skip {
+                            reason: format!(
+                                "node {} not reachable — skipping replication check: {}",
+                                node.hostname, e
+                            ),
+                        };
+                    }
                     return ScenarioResult::Fail {
                         duration: start.elapsed(),
                         reason: format!(

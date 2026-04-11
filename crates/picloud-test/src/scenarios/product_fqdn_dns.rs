@@ -73,30 +73,39 @@ impl Scenario for ProductFqdnDns {
         }
 
         // Fallback: system DNS (reads /etc/hosts).
+        let mut system_addrs: Vec<std::net::IpAddr> = Vec::new();
         match tokio::net::lookup_host(format!("{}:0", product_fqdn)).await {
             Ok(addrs_iter) => {
-                let addrs: Vec<std::net::IpAddr> = addrs_iter.map(|a| a.ip()).collect();
-                if addrs.is_empty() {
-                    return ScenarioResult::Skip {
-                        reason: format!(
-                            "Product FQDN {} not found in DNS (product may not be deployed)",
-                            product_fqdn
-                        ),
-                    };
-                }
-                if let Some(fail) = validate_addrs(&addrs) {
-                    return fail;
-                }
-                ScenarioResult::Pass {
-                    duration: start.elapsed(),
+                system_addrs = addrs_iter.map(|a| a.ip()).collect();
+            }
+            Err(_) => {
+                // tokio lookup may not read /etc/hosts on all platforms.
+                // Try blocking std::net as final fallback.
+                let fqdn_clone = product_fqdn.clone();
+                if let Ok(addrs) = tokio::task::spawn_blocking(move || {
+                    use std::net::ToSocketAddrs;
+                    format!("{}:0", fqdn_clone).to_socket_addrs()
+                }).await {
+                    if let Ok(addrs) = addrs {
+                        system_addrs = addrs.map(|a| a.ip()).collect();
+                    }
                 }
             }
-            Err(e) => ScenarioResult::Skip {
+        }
+
+        if system_addrs.is_empty() {
+            return ScenarioResult::Skip {
                 reason: format!(
-                    "Product FQDN {} not found in DNS (cluster DNS unreachable, system DNS failed): {}",
-                    product_fqdn, e
+                    "Product FQDN {} not found in DNS (product may not be deployed)",
+                    product_fqdn
                 ),
-            },
+            };
+        }
+        if let Some(fail) = validate_addrs(&system_addrs) {
+            return fail;
+        }
+        ScenarioResult::Pass {
+            duration: start.elapsed(),
         }
     }
 }
