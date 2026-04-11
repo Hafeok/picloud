@@ -64,10 +64,17 @@ impl Scenario for IriDereferencing {
             }
         };
 
+        // Convert the IRI (which uses https://picloud.local) to a real HTTP URL
+        // by extracting the path and prepending the cluster base_url.
+        let dereference_url = match url::Url::parse(&resource_iri) {
+            Ok(parsed) => format!("{}{}", ctx.config.base_url(), parsed.path()),
+            Err(_) => resource_iri.clone(),
+        };
+
         // Dereference the IRI with Accept: application/ld+json.
         let resp = match ctx
             .http_client
-            .get(&resource_iri)
+            .get(&dereference_url)
             .header("Accept", "application/ld+json")
             .send()
             .await
@@ -76,7 +83,7 @@ impl Scenario for IriDereferencing {
             Err(e) => {
                 return ScenarioResult::Fail {
                     duration: start.elapsed(),
-                    reason: format!("failed to dereference IRI {}: {}", resource_iri, e),
+                    reason: format!("failed to dereference IRI {}: {}", dereference_url, e),
                 };
             }
         };

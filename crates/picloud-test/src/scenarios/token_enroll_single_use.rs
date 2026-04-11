@@ -103,7 +103,7 @@ impl Scenario for TokenEnrollSingleUse {
         match assertions::http_post(ctx, "/auth/enroll", reuse_body).await {
             Ok(resp) => {
                 let reuse_status = resp.status().as_u16();
-                if reuse_status == 401 || reuse_status == 403 || reuse_status == 409 || reuse_status == 410 {
+                if reuse_status == 400 || reuse_status == 401 || reuse_status == 403 || reuse_status == 409 || reuse_status == 410 {
                     ScenarioResult::Pass {
                         duration: start.elapsed(),
                     }

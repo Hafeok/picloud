@@ -64,9 +64,10 @@ impl Scenario for FullReplicationCoverage {
 
         // Query each node directly to verify the sentinel is present.
         for node in &ctx.config.nodes {
+            let scheme = if ctx.config.cluster.tls { "https" } else { "http" };
             let node_url = format!(
-                "https://{}:{}/graph",
-                node.ip, ctx.config.cluster.http_port
+                "{}://{}:{}/graph",
+                scheme, node.ip, ctx.config.cluster.http_port
             );
 
             let query = format!(

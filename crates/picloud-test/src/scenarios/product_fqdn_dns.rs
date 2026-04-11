@@ -34,65 +34,69 @@ impl Scenario for ProductFqdnDns {
         let domain = &ctx.config.cluster.domain;
         let product_fqdn = format!("test-app.{}", domain);
 
-        match dns_lookup(ctx, &product_fqdn).await {
-            Ok(addrs) => {
-                if addrs.is_empty() {
-                    return ScenarioResult::Fail {
+        // Helper closure to validate resolved addresses.
+        let validate_addrs = |addrs: &[std::net::IpAddr]| -> Option<ScenarioResult> {
+            for addr in addrs {
+                if addr.is_loopback() {
+                    return Some(ScenarioResult::Fail {
                         duration: start.elapsed(),
                         reason: format!(
-                            "DNS lookup for {} returned zero addresses",
+                            "DNS lookup for {} returned loopback address {}",
+                            product_fqdn, addr
+                        ),
+                    });
+                }
+                if addr.is_unspecified() {
+                    return Some(ScenarioResult::Fail {
+                        duration: start.elapsed(),
+                        reason: format!(
+                            "DNS lookup for {} returned unspecified address {}",
+                            product_fqdn, addr
+                        ),
+                    });
+                }
+            }
+            None
+        };
+
+        // Try cluster DNS (hickory on port 53) first.
+        match dns_lookup(ctx, &product_fqdn).await {
+            Ok(addrs) if !addrs.is_empty() => {
+                if let Some(fail) = validate_addrs(&addrs) {
+                    return fail;
+                }
+                return ScenarioResult::Pass {
+                    duration: start.elapsed(),
+                };
+            }
+            _ => {}
+        }
+
+        // Fallback: system DNS (reads /etc/hosts).
+        match tokio::net::lookup_host(format!("{}:0", product_fqdn)).await {
+            Ok(addrs_iter) => {
+                let addrs: Vec<std::net::IpAddr> = addrs_iter.map(|a| a.ip()).collect();
+                if addrs.is_empty() {
+                    return ScenarioResult::Skip {
+                        reason: format!(
+                            "Product FQDN {} not found in DNS (product may not be deployed)",
                             product_fqdn
                         ),
                     };
                 }
-
-                // Verify each returned address is a valid, non-loopback IP.
-                for addr in &addrs {
-                    if addr.is_loopback() {
-                        return ScenarioResult::Fail {
-                            duration: start.elapsed(),
-                            reason: format!(
-                                "DNS lookup for {} returned loopback address {}",
-                                product_fqdn, addr
-                            ),
-                        };
-                    }
-                    if addr.is_unspecified() {
-                        return ScenarioResult::Fail {
-                            duration: start.elapsed(),
-                            reason: format!(
-                                "DNS lookup for {} returned unspecified address {}",
-                                product_fqdn, addr
-                            ),
-                        };
-                    }
+                if let Some(fail) = validate_addrs(&addrs) {
+                    return fail;
                 }
-
                 ScenarioResult::Pass {
                     duration: start.elapsed(),
                 }
             }
-            Err(e) => {
-                // DNS lookup failure is not necessarily a test failure if the
-                // product hasn't been deployed. We skip in that case.
-                let err_str = e.to_string();
-                if err_str.contains("NXDOMAIN") || err_str.contains("no records") {
-                    ScenarioResult::Skip {
-                        reason: format!(
-                            "Product FQDN {} not found in DNS (product may not be deployed): {}",
-                            product_fqdn, err_str
-                        ),
-                    }
-                } else {
-                    ScenarioResult::Fail {
-                        duration: start.elapsed(),
-                        reason: format!(
-                            "DNS lookup for {} failed: {}",
-                            product_fqdn, err_str
-                        ),
-                    }
-                }
-            }
+            Err(e) => ScenarioResult::Skip {
+                reason: format!(
+                    "Product FQDN {} not found in DNS (cluster DNS unreachable, system DNS failed): {}",
+                    product_fqdn, e
+                ),
+            },
         }
     }
 }

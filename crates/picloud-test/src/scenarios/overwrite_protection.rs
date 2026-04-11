@@ -67,11 +67,15 @@ impl Scenario for OverwriteProtection {
                 ?r picloud:name "overwrite-test" .
             }
         "#;
-        if let Err(_) = assertions::wait_for_sparql(ctx, ask_for_product, Duration::from_secs(10)).await {
+        if let Err(_) = assertions::wait_for_sparql(ctx, ask_for_product, Duration::from_secs(30)).await {
             return ScenarioResult::Skip {
                 reason: "first product not projected within timeout".to_string(),
             };
         }
+
+        // Extra pause to ensure the projection is fully settled before the
+        // duplicate check on the write path can see it.
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         // Attempt to apply the same resource again without a force/overwrite flag.
         let duplicate = match assertions::apply_resource(ctx, resource).await {

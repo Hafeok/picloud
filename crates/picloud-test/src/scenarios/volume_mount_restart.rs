@@ -35,6 +35,21 @@ impl Scenario for VolumeMountRestart {
             };
         }
 
+        // Ensure there is a product and volume to test with.
+        if let Err(e) = assertions::apply_product_and_wait(ctx, "volume-test", "1.0.0").await {
+            info!("product apply note: {}", e);
+        }
+        let volume_resource = serde_json::json!({
+            "type": "volume",
+            "name": "vol-restart-test",
+            "product": "volume-test",
+            "size": "1Gi"
+        });
+        let _ = assertions::apply_resource(ctx, volume_resource).await;
+
+        // Give projection time to catch up.
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
         // Check for existing volumes in the RDF graph before restart.
         let volume_query = r#"
             PREFIX picloud: <https://picloud.local/ontology#>
@@ -81,7 +96,11 @@ impl Scenario for VolumeMountRestart {
         let node = &ctx.config.nodes[0];
         info!(node = %node.hostname, "restarting picloud-server");
 
-        match assertions::ssh_command(node, "sudo systemctl restart picloud-server").await {
+        // Try systemd restart first; fall back to pkill + nohup for non-systemd setups.
+        let restart_cmd = "sudo systemctl restart picloud-server 2>/dev/null || \
+            (sudo pkill -TERM picloud-server; sleep 2; \
+             nohup $(which picloud-server 2>/dev/null || echo $HOME/picloud-server) > /tmp/picloud-server.log 2>&1 &)";
+        match assertions::ssh_command(node, restart_cmd).await {
             Ok(_) => info!("restart command sent"),
             Err(e) => {
                 return ScenarioResult::Skip {

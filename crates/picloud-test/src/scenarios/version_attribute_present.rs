@@ -31,11 +31,23 @@ impl Scenario for VersionAttributePresentScenario {
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
 
         // Query the telemetry/spans endpoint for spans from this run.
-        let telemetry_url = format!(
-            "{}/telemetry/spans?run_id={}",
-            ctx.config.base_url(),
-            run_id
-        );
+        // Try both /telemetry/spans and /api/telemetry/spans.
+        let telemetry_paths = [
+            format!("{}/telemetry/spans?run_id={}", ctx.config.base_url(), run_id),
+            format!("{}/api/telemetry/spans?run_id={}", ctx.config.base_url(), run_id),
+        ];
+        let mut telemetry_url = telemetry_paths[0].clone();
+        for path in &telemetry_paths {
+            match ctx.http_client.get(path).send().await {
+                Ok(resp) if resp.status().as_u16() != 404 => {
+                    telemetry_url = path.clone();
+                    break;
+                }
+                _ => continue,
+            }
+        }
+        // Re-fetch with the resolved URL
+        let telemetry_url = telemetry_url;
 
         let resp = match ctx.http_client.get(&telemetry_url).send().await {
             Ok(r) => r,

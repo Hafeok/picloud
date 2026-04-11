@@ -86,22 +86,26 @@ impl Scenario for CertRevocation {
             }
         }
 
-        // 4. Check if node cert endpoint is available
+        // 4. Check if node cert endpoint is available (try multiple paths)
         let _ = resources_content; // suppress unused warning
-        match assertions::http_get(ctx, "/api/nodes/certs").await {
-            Ok(resp) => {
-                let status = resp.status().as_u16();
-                if status == 404 || status == 501 {
-                    return ScenarioResult::Skip {
-                        reason: "cert management endpoint not available".to_string(),
-                    };
+        let cert_paths = ["/api/nodes/certs", "/api/certs", "/certs", "/api/pki/crl"];
+        let mut cert_endpoint_found = false;
+        for path in &cert_paths {
+            match assertions::http_get(ctx, path).await {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    if status != 404 && status != 501 {
+                        cert_endpoint_found = true;
+                        break;
+                    }
                 }
+                Err(_) => continue,
             }
-            Err(_) => {
-                return ScenarioResult::Skip {
-                    reason: "cert management endpoint not reachable".to_string(),
-                };
-            }
+        }
+        if !cert_endpoint_found {
+            return ScenarioResult::Skip {
+                reason: "cert management endpoint not available (tried /api/nodes/certs, /api/certs, /certs, /api/pki/crl)".to_string(),
+            };
         }
 
         ScenarioResult::Pass {

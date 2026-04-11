@@ -101,7 +101,11 @@ impl Scenario for EventStoreSurvivor {
         let node = &ctx.config.nodes[0];
         info!(node = %node.hostname, "restarting picloud-server");
 
-        match assertions::ssh_command(node, "sudo systemctl restart picloud-server").await {
+        // Try systemd restart first; fall back to pkill + nohup for non-systemd setups.
+        let restart_cmd = "sudo systemctl restart picloud-server 2>/dev/null || \
+            (sudo pkill -TERM picloud-server; sleep 2; \
+             nohup $(which picloud-server 2>/dev/null || echo $HOME/picloud-server) > /tmp/picloud-server.log 2>&1 &)";
+        match assertions::ssh_command(node, restart_cmd).await {
             Ok(_) => info!("restart command sent"),
             Err(e) => {
                 return ScenarioResult::Skip {

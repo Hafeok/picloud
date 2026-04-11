@@ -82,8 +82,9 @@ impl Scenario for SharedHardwareIsolationScenario {
         let prod_url = ctx.config.base_url();
 
         // Staging cluster: derive from the first node IP on port 8443.
+        let scheme = if ctx.config.cluster.tls { "https" } else { "http" };
         let staging_url = match ctx.config.first_node_ip() {
-            Some(ip) => format!("https://{}:8443", ip),
+            Some(ip) => format!("{}://{}:8443", scheme, ip),
             None => {
                 return ScenarioResult::Fail {
                     duration: start.elapsed(),

@@ -84,13 +84,12 @@ async fn find_leader(ctx: &TestContext) -> Result<String, Box<dyn std::error::Er
         LIMIT 1
     "#;
 
-    let url = format!("{}/sparql", ctx.config.base_url());
+    let url = format!("{}/graph", ctx.config.base_url());
     let resp = ctx
         .http_client
-        .post(&url)
-        .header("Content-Type", "application/sparql-query")
+        .get(&url)
+        .query(&[("query", query)])
         .header("Accept", "application/sparql-results+json")
-        .body(query.to_string())
         .send()
         .await?;
 
@@ -100,7 +99,14 @@ async fn find_leader(ctx: &TestContext) -> Result<String, Box<dyn std::error::Er
         return Err(format!("SPARQL leader query failed ({}): {}", status, body).into());
     }
 
-    let json: Value = serde_json::from_str(&body)?;
+    // Normalize: server may return {"results":[...]} instead of {"results":{"bindings":[...]}}
+    let mut json: Value = serde_json::from_str(&body)?;
+    if let Some(results) = json.get("results").cloned() {
+        if results.is_array() {
+            json["results"] = serde_json::json!({"bindings": results});
+        }
+    }
+
     let hostname = json
         .pointer("/results/bindings/0/hostname/value")
         .and_then(|v| v.as_str())
@@ -171,19 +177,66 @@ async fn ssh_command(
 }
 
 /// Restart picloud-server on a node: stop, replace binary, start.
+///
+/// Supports both systemd-managed and nohup-managed processes. Tries systemctl
+/// first; if the service unit doesn't exist, falls back to pkill + nohup.
 async fn restart_node(node: &NodeConfig) -> Result<(), Box<dyn std::error::Error>> {
-    info!(node = node.hostname.as_str(), "stopping picloud-server");
-    ssh_command(node, "sudo systemctl stop picloud-server").await?;
-
-    info!(node = node.hostname.as_str(), "replacing binary");
-    ssh_command(
+    // Detect whether systemd manages picloud-server on this node.
+    let has_systemd = match ssh_command(
         node,
-        "sudo mv /tmp/picloud-server.new /usr/local/bin/picloud-server && sudo chmod +x /usr/local/bin/picloud-server",
+        "systemctl list-unit-files picloud-server.service 2>/dev/null | grep -q picloud-server && echo yes || echo no",
     )
-    .await?;
+    .await
+    {
+        Ok(out) => out.trim() == "yes",
+        Err(_) => false,
+    };
 
-    info!(node = node.hostname.as_str(), "starting picloud-server");
-    ssh_command(node, "sudo systemctl start picloud-server").await?;
+    if has_systemd {
+        info!(node = node.hostname.as_str(), "stopping picloud-server (systemd)");
+        ssh_command(node, "sudo systemctl stop picloud-server").await?;
+
+        info!(node = node.hostname.as_str(), "replacing binary");
+        ssh_command(
+            node,
+            "sudo mv /tmp/picloud-server.new /usr/local/bin/picloud-server && sudo chmod +x /usr/local/bin/picloud-server",
+        )
+        .await?;
+
+        info!(node = node.hostname.as_str(), "starting picloud-server (systemd)");
+        ssh_command(node, "sudo systemctl start picloud-server").await?;
+    } else {
+        info!(node = node.hostname.as_str(), "stopping picloud-server (pkill)");
+        // pkill may exit non-zero if process isn't running; that's fine.
+        let _ = ssh_command(node, "sudo pkill -TERM picloud-server || true").await;
+        // Give it a moment to shut down gracefully.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _ = ssh_command(node, "sudo pkill -9 picloud-server || true").await;
+
+        info!(node = node.hostname.as_str(), "replacing binary");
+        // Try /usr/local/bin first; fall back to ~/picloud-server
+        ssh_command(
+            node,
+            "if [ -f /usr/local/bin/picloud-server ]; then \
+                sudo mv /tmp/picloud-server.new /usr/local/bin/picloud-server && sudo chmod +x /usr/local/bin/picloud-server; \
+             else \
+                mv /tmp/picloud-server.new ~/picloud-server && chmod +x ~/picloud-server; \
+             fi",
+        )
+        .await?;
+
+        info!(node = node.hostname.as_str(), "starting picloud-server (nohup)");
+        // Determine the binary location
+        let binary_path = match ssh_command(node, "which picloud-server 2>/dev/null || echo $HOME/picloud-server").await {
+            Ok(p) => p.trim().to_string(),
+            Err(_) => "~/picloud-server".to_string(),
+        };
+        ssh_command(
+            node,
+            &format!("nohup {} > /tmp/picloud-server.log 2>&1 &", binary_path),
+        )
+        .await?;
+    }
 
     Ok(())
 }
@@ -211,7 +264,7 @@ async fn wait_for_raft_rejoin(
         node_hostname
     );
 
-    let url = format!("{}/sparql", ctx.config.base_url());
+    let url = format!("{}/graph", ctx.config.base_url());
 
     loop {
         if start.elapsed() > timeout {
@@ -225,16 +278,21 @@ async fn wait_for_raft_rejoin(
 
         match ctx
             .http_client
-            .post(&url)
-            .header("Content-Type", "application/sparql-query")
+            .get(&url)
+            .query(&[("query", &query)])
             .header("Accept", "application/sparql-results+json")
-            .body(query.clone())
             .send()
             .await
         {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(body) = resp.text().await {
-                    if let Ok(json) = serde_json::from_str::<Value>(&body) {
+                    if let Ok(mut json) = serde_json::from_str::<Value>(&body) {
+                        // Normalize server format
+                        if let Some(results) = json.get("results").cloned() {
+                            if results.is_array() {
+                                json["results"] = serde_json::json!({"bindings": results});
+                            }
+                        }
                         if json
                             .pointer("/results/bindings/0/role/value")
                             .and_then(|v| v.as_str())
@@ -270,8 +328,10 @@ async fn wait_for_raft_rejoin(
 async fn verify_node_health(
     node: &NodeConfig,
     http_port: u16,
+    tls: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let url = format!("https://{}:{}/health", node.ip, http_port);
+    let scheme = if tls { "https" } else { "http" };
+    let url = format!("{}://{}:{}/health", scheme, node.ip, http_port);
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -319,6 +379,7 @@ pub async fn rolling_upgrade(config: UpgradeConfig) -> Result<UpgradeReport, Box
 
     let ctx = TestContext::new(config.cluster_config.clone(), std::path::PathBuf::from("."));
     let http_port = config.cluster_config.cluster.http_port;
+    let tls = config.cluster_config.cluster.tls;
 
     // Step 1: Determine the leader so we can upgrade it last
     info!("determining Raft leader");
@@ -417,7 +478,7 @@ pub async fn rolling_upgrade(config: UpgradeConfig) -> Result<UpgradeReport, Box
         node_result.rejoin_duration = rejoin_start.elapsed();
 
         // Step 2f: Verify health
-        if let Err(e) = verify_node_health(node, http_port).await {
+        if let Err(e) = verify_node_health(node, http_port, tls).await {
             error!(node = node.hostname.as_str(), error = %e, "health check failed");
             node_result.error = Some(format!("Health check failed: {}", e));
             results.push(node_result);

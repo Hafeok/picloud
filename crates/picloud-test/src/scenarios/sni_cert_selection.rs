@@ -55,8 +55,15 @@ impl Scenario for SniCertSelection {
         });
         let _ = assertions::apply_resources(ctx, vec![ingress1, ingress2]).await;
 
-        // Brief pause for RDF projection
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // Wait for at least one ingress to be projected.
+        let wait_query = r#"
+            PREFIX picloud: <https://picloud.local/ontology#>
+            ASK {
+                ?ingress a picloud:Ingress ;
+                         picloud:hostname ?hostname .
+            }
+        "#;
+        let _ = assertions::wait_for_sparql(ctx, wait_query, std::time::Duration::from_secs(15)).await;
 
         // 1. Query for ingress resources with distinct hostnames
         let query = r#"

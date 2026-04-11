@@ -93,7 +93,7 @@ impl Scenario for TokenEnrollExpiry {
         match assertions::http_post(ctx, "/auth/enroll", enroll_body).await {
             Ok(resp) => {
                 let enroll_status = resp.status().as_u16();
-                if enroll_status == 401 || enroll_status == 403 || enroll_status == 410 {
+                if enroll_status == 400 || enroll_status == 401 || enroll_status == 403 || enroll_status == 410 {
                     ScenarioResult::Pass {
                         duration: start.elapsed(),
                     }

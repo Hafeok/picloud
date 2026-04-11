@@ -32,13 +32,23 @@ impl Scenario for CliTracePropagation {
             };
         }
 
-        // Check if telemetry spans endpoint is available.
-        let spans_path = "/telemetry/spans";
-        if !assertions::feature_available(ctx, spans_path).await {
+        // Check if telemetry spans endpoint is available. Try multiple paths.
+        let spans_paths = ["/telemetry/spans", "/api/telemetry/spans"];
+        let mut spans_path = "";
+        for path in &spans_paths {
+            if assertions::feature_available(ctx, path).await {
+                spans_path = path;
+                break;
+            }
+        }
+        if spans_path.is_empty() {
             return ScenarioResult::Skip {
                 reason: "telemetry spans endpoint not implemented yet".to_string(),
             };
         }
+
+        // Brief pause to let any in-flight spans flush.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         let resp = match assertions::http_get(ctx, spans_path).await {
             Ok(r) => r,

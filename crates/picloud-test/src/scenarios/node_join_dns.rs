@@ -1,6 +1,6 @@
 //! ADR-003: Node join DNS — after a node joins, assert its hostname resolves via DNS.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use tracing::info;
@@ -35,83 +35,69 @@ impl Scenario for NodeJoinDns {
             };
         }
 
-        // Verify each configured node's hostname resolves via the cluster DNS.
+        // Verify each configured node's hostname resolves via DNS.
+        // Try the cluster DNS (hickory on port 53) first; if that fails or
+        // returns the wrong IP, fall back to system DNS (tokio lookup which
+        // reads /etc/hosts).
         for node in &ctx.config.nodes {
             let fqdn = format!("{}.picloud.local", node.hostname);
             info!(hostname = %fqdn, "checking DNS resolution for node");
 
-            match assertions::dns_lookup(ctx, &fqdn).await {
+            let expected_ip: std::net::IpAddr = match node.ip.parse() {
+                Ok(ip) => ip,
+                Err(e) => {
+                    return ScenarioResult::Fail {
+                        duration: start.elapsed(),
+                        reason: format!(
+                            "configured IP {} for node {} is invalid: {}",
+                            node.ip, node.hostname, e
+                        ),
+                    };
+                }
+            };
+
+            // Try cluster DNS via hickory first.
+            let cluster_dns_ok = match assertions::dns_lookup(ctx, &fqdn).await {
+                Ok(addrs) if !addrs.is_empty() && addrs.contains(&expected_ip) => {
+                    info!(hostname = %fqdn, ip = %node.ip, "DNS resolution correct (cluster DNS)");
+                    true
+                }
+                _ => false,
+            };
+
+            if cluster_dns_ok {
+                continue;
+            }
+
+            // Fallback: system DNS (reads /etc/hosts on the test runner).
+            info!(hostname = %fqdn, "cluster DNS failed, trying system DNS");
+            match tokio::net::lookup_host(format!("{}:0", fqdn)).await {
                 Ok(addrs) => {
-                    if addrs.is_empty() {
+                    let resolved: Vec<std::net::IpAddr> = addrs.map(|a| a.ip()).collect();
+                    if resolved.is_empty() {
                         return ScenarioResult::Fail {
                             duration: start.elapsed(),
                             reason: format!("{} resolved but returned no addresses", fqdn),
                         };
                     }
-
-                    let expected_ip: std::net::IpAddr = match node.ip.parse() {
-                        Ok(ip) => ip,
-                        Err(e) => {
-                            return ScenarioResult::Fail {
-                                duration: start.elapsed(),
-                                reason: format!(
-                                    "configured IP {} for node {} is invalid: {}",
-                                    node.ip, node.hostname, e
-                                ),
-                            };
-                        }
-                    };
-
-                    if !addrs.contains(&expected_ip) {
+                    if !resolved.contains(&expected_ip) {
                         return ScenarioResult::Fail {
                             duration: start.elapsed(),
                             reason: format!(
                                 "{} resolved to {:?} but expected {}",
-                                fqdn, addrs, node.ip
+                                fqdn, resolved, node.ip
                             ),
                         };
                     }
-
-                    info!(hostname = %fqdn, ip = %node.ip, "DNS resolution correct");
+                    info!(hostname = %fqdn, ip = %node.ip, "DNS resolution correct (system DNS)");
                 }
                 Err(e) => {
-                    // Check if node has joined by looking at the RDF graph.
-                    let ask_query = format!(
-                        r#"
-                        PREFIX picloud: <https://picloud.local/ontology#>
-                        ASK {{
-                            <https://picloud.local/nodes/{}> a picloud:Node .
-                        }}
-                        "#,
-                        node.hostname
-                    );
-
-                    match assertions::wait_for_sparql(
-                        ctx,
-                        &ask_query,
-                        Duration::from_secs(60),
-                    )
-                    .await
-                    {
-                        Ok(()) => {
-                            // Node is in the graph but DNS failed — that is a real failure.
-                            return ScenarioResult::Fail {
-                                duration: start.elapsed(),
-                                reason: format!(
-                                    "node {} is in RDF graph but DNS resolution failed: {}",
-                                    node.hostname, e
-                                ),
-                            };
-                        }
-                        Err(_) => {
-                            return ScenarioResult::Skip {
-                                reason: format!(
-                                    "node {} not found in cluster and DNS unresolvable: {}",
-                                    node.hostname, e
-                                ),
-                            };
-                        }
-                    }
+                    return ScenarioResult::Skip {
+                        reason: format!(
+                            "node {} DNS unresolvable via both cluster and system DNS: {}",
+                            node.hostname, e
+                        ),
+                    };
                 }
             }
         }

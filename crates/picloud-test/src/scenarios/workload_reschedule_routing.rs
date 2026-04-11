@@ -59,8 +59,14 @@ impl Scenario for WorkloadRescheduleRouting {
         });
         let _ = assertions::apply_resource(ctx, ingress_resource).await;
 
-        // Brief pause for RDF projection
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // Wait for ingress to be projected before querying.
+        let wait_query = r#"
+            PREFIX picloud: <https://picloud.local/ontology#>
+            ASK {
+                ?ingress a picloud:Ingress .
+            }
+        "#;
+        let _ = assertions::wait_for_sparql(ctx, wait_query, std::time::Duration::from_secs(15)).await;
 
         // Query the RDF graph for any ingress resources with their target addresses.
         let query = r#"

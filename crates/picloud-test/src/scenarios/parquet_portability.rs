@@ -36,6 +36,28 @@ impl Scenario for ParquetPortability {
             };
         }
 
+        // 1b. Write a test span so there is data to export.
+        let test_span = serde_json::json!({
+            "resourceSpans": [{
+                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "picloud-test"}}]},
+                "scopeSpans": [{
+                    "spans": [{
+                        "traceId": "00000000000000000000000000000001",
+                        "spanId": "0000000000000001",
+                        "name": "parquet-export-test",
+                        "startTimeUnixNano": "1000000000",
+                        "endTimeUnixNano": "2000000000"
+                    }]
+                }]
+            }]
+        });
+        // Try to ingest a span; ignore errors if the endpoint doesn't exist.
+        let _ = assertions::http_post(ctx, "/otel", test_span.clone()).await;
+        let _ = assertions::http_post(ctx, "/api/otel/v1/traces", test_span).await;
+
+        // Brief pause for ingestion.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
         // 2. Request Parquet export
         match assertions::http_get(ctx, "/api/telemetry/export?format=parquet&signal=traces&limit=100").await {
             Ok(resp) => {
