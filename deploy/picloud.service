@@ -1,15 +1,16 @@
 [Unit]
-Description=PiCloud Server
-Documentation=https://github.com/picloud/picloud
-After=network-online.target
+Description=PiCloud — Private Cloud for Raspberry Pi Clusters
+Documentation=https://github.com/Hafeok/picloud
+After=network-online.target avahi-daemon.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=admin
+Group=admin
 
-ExecStart=/home/ubuntu/picloud/picloud-server
+ExecStart=/usr/local/bin/picloud-server
+ExecStartPost=/bin/sh -c 'sleep 3 && curl -sf http://localhost:7443/health || exit 1'
 
 # Restart policy — always restart on failure, back off on repeated failures
 Restart=on-failure
@@ -25,20 +26,22 @@ SyslogIdentifier=picloud
 # Environment
 Environment=RUST_LOG=picloud=info,warn
 Environment=PICLOUD_DOMAIN=picloud.local
-Environment=PICLOUD_DATA_DIR=/home/ubuntu/picloud/data
-Environment=PICLOUD_HTTP_PORT=7000
-Environment=PICLOUD_RAFT_PORT=7001
-Environment=PICLOUD_EVENTS_PORT=7002
+Environment=PICLOUD_DATA_ROOT=/var/lib/picloud
+Environment=PICLOUD_HTTP_PORT=7443
+Environment=PICLOUD_BIND_ADDR=0.0.0.0
 
-# Resource limits — leave headroom for Nomad workloads
+# Resource limits
 LimitNOFILE=65536
 LimitNPROC=4096
+
+# Capabilities — needed for DNS on port 53
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/ubuntu/picloud/data
+ReadWritePaths=/var/lib/picloud
 PrivateTmp=true
 
 [Install]

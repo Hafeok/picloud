@@ -104,6 +104,7 @@ libc         = "0.2"
 
 # Storage
 bytes        = "1"
+sled         = "0.34"
 
 # Internal crates
 picloud-domain   = { path = "crates/picloud-domain" }

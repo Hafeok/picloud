@@ -207,6 +207,497 @@ impl RaftLogStorage<PiCloudTypeConfig> for MemLogStore {
 }
 
 // ---------------------------------------------------------------------------
+// Log storage (sled-backed, persistent)
+// ---------------------------------------------------------------------------
+
+/// Persistent Raft log storage backed by sled.
+///
+/// Uses two sled trees:
+/// - `raft_log` — maps big-endian u64 index to JSON-serialized `Entry`
+/// - `raft_meta` — stores vote, committed, last_purged_log_id under string keys
+#[derive(Debug, Clone)]
+pub struct SledLogStore {
+    db: sled::Db,
+    log_tree: sled::Tree,
+    meta_tree: sled::Tree,
+}
+
+impl SledLogStore {
+    pub fn new(db: sled::Db) -> Result<Self, sled::Error> {
+        let log_tree = db.open_tree("raft_log")?;
+        let meta_tree = db.open_tree("raft_meta")?;
+        Ok(Self {
+            db,
+            log_tree,
+            meta_tree,
+        })
+    }
+
+    fn index_key(index: u64) -> [u8; 8] {
+        index.to_be_bytes()
+    }
+
+    fn sled_to_storage_error(e: sled::Error) -> StorageError<u64> {
+        StorageError::from_io_error(
+            openraft::ErrorSubject::Store,
+            openraft::ErrorVerb::Read,
+            std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+        )
+    }
+
+    fn json_to_storage_error(e: serde_json::Error) -> StorageError<u64> {
+        StorageError::from_io_error(
+            openraft::ErrorSubject::Store,
+            openraft::ErrorVerb::Read,
+            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+        )
+    }
+}
+
+impl RaftLogReader<PiCloudTypeConfig> for SledLogStore {
+    async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + Send>(
+        &mut self,
+        range: RB,
+    ) -> Result<Vec<Entry<PiCloudTypeConfig>>, StorageError<u64>> {
+        // Iterate all entries in the log tree (sorted by big-endian key)
+        // and filter by the requested range. Since keys are big-endian u64,
+        // sled's BTree ordering matches numeric ordering.
+        let mut entries = Vec::new();
+        for item in self.log_tree.iter() {
+            let (key_bytes, val) = item.map_err(Self::sled_to_storage_error)?;
+            if key_bytes.len() == 8 {
+                let idx = u64::from_be_bytes(key_bytes.as_ref().try_into().unwrap());
+                if range.contains(&idx) {
+                    let entry: Entry<PiCloudTypeConfig> =
+                        serde_json::from_slice(&val).map_err(Self::json_to_storage_error)?;
+                    entries.push(entry);
+                }
+            }
+        }
+        Ok(entries)
+    }
+}
+
+impl RaftLogStorage<PiCloudTypeConfig> for SledLogStore {
+    type LogReader = Self;
+
+    async fn get_log_state(&mut self) -> Result<LogState<PiCloudTypeConfig>, StorageError<u64>> {
+        let last_purged: Option<LogId<u64>> = self
+            .meta_tree
+            .get(b"last_purged_log_id")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v))
+            .transpose()
+            .map_err(Self::json_to_storage_error)?;
+
+        let last_log_id = self
+            .log_tree
+            .last()
+            .map_err(Self::sled_to_storage_error)?
+            .map(|(_k, v)| {
+                let entry: Entry<PiCloudTypeConfig> = serde_json::from_slice(&v)
+                    .map_err(Self::json_to_storage_error)
+                    .unwrap();
+                entry.log_id
+            });
+
+        Ok(LogState {
+            last_purged_log_id: last_purged.clone(),
+            last_log_id: last_log_id.or_else(|| last_purged.clone()),
+        })
+    }
+
+    async fn get_log_reader(&mut self) -> Self::LogReader {
+        self.clone()
+    }
+
+    async fn save_vote(&mut self, vote: &Vote<u64>) -> Result<(), StorageError<u64>> {
+        let val = serde_json::to_vec(vote).map_err(Self::json_to_storage_error)?;
+        self.meta_tree
+            .insert(b"vote", val)
+            .map_err(Self::sled_to_storage_error)?;
+        self.db.flush_async().await.map_err(|e| {
+            Self::sled_to_storage_error(e)
+        })?;
+        Ok(())
+    }
+
+    async fn read_vote(&mut self) -> Result<Option<Vote<u64>>, StorageError<u64>> {
+        self.meta_tree
+            .get(b"vote")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()
+    }
+
+    async fn save_committed(
+        &mut self,
+        committed: Option<LogId<u64>>,
+    ) -> Result<(), StorageError<u64>> {
+        match committed {
+            Some(ref c) => {
+                let val = serde_json::to_vec(c).map_err(Self::json_to_storage_error)?;
+                self.meta_tree
+                    .insert(b"committed", val)
+                    .map_err(Self::sled_to_storage_error)?;
+            }
+            None => {
+                self.meta_tree
+                    .remove(b"committed")
+                    .map_err(Self::sled_to_storage_error)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn read_committed(&mut self) -> Result<Option<LogId<u64>>, StorageError<u64>> {
+        self.meta_tree
+            .get(b"committed")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()
+    }
+
+    async fn append<I>(
+        &mut self,
+        entries: I,
+        callback: LogFlushed<PiCloudTypeConfig>,
+    ) -> Result<(), StorageError<u64>>
+    where
+        I: IntoIterator<Item = Entry<PiCloudTypeConfig>> + Send,
+        I::IntoIter: Send,
+    {
+        for entry in entries {
+            let key = Self::index_key(entry.log_id.index);
+            let val = serde_json::to_vec(&entry).map_err(Self::json_to_storage_error)?;
+            self.log_tree
+                .insert(key, val)
+                .map_err(Self::sled_to_storage_error)?;
+        }
+        let db = self.db.clone();
+        tokio::task::spawn(async move {
+            let result = db.flush_async().await.map(|_| ()).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+            });
+            callback.log_io_completed(result);
+        });
+        Ok(())
+    }
+
+    async fn truncate(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
+        let start = Self::index_key(log_id.index);
+        let keys: Vec<sled::IVec> = self
+            .log_tree
+            .range(start..)
+            .filter_map(|r| r.ok().map(|(k, _)| k))
+            .collect();
+        for k in keys {
+            self.log_tree
+                .remove(&k)
+                .map_err(Self::sled_to_storage_error)?;
+        }
+        Ok(())
+    }
+
+    async fn purge(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
+        let end = Self::index_key(log_id.index);
+        let keys: Vec<sled::IVec> = self
+            .log_tree
+            .range(..=end)
+            .filter_map(|r| r.ok().map(|(k, _)| k))
+            .collect();
+        for k in keys {
+            self.log_tree
+                .remove(&k)
+                .map_err(Self::sled_to_storage_error)?;
+        }
+        let val = serde_json::to_vec(&log_id).map_err(Self::json_to_storage_error)?;
+        self.meta_tree
+            .insert(b"last_purged_log_id", val)
+            .map_err(Self::sled_to_storage_error)?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// State machine (sled-backed, persistent)
+// ---------------------------------------------------------------------------
+
+/// Persistent Raft state machine backed by sled.
+///
+/// Stores applied state in the sled database. Uses the same `apply_callback`
+/// pattern as `MemStateMachine` so the composition root can wire it to the
+/// platform event log.
+pub struct SledStateMachine {
+    db: sled::Db,
+    meta_tree: sled::Tree,
+    apply_callback: Option<ApplyCallback>,
+}
+
+impl std::fmt::Debug for SledStateMachine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SledStateMachine")
+            .field("has_callback", &self.apply_callback.is_some())
+            .finish()
+    }
+}
+
+impl SledStateMachine {
+    pub fn new(db: sled::Db, apply_callback: Option<ApplyCallback>) -> Result<Self, sled::Error> {
+        let meta_tree = db.open_tree("sm_meta")?;
+        Ok(Self {
+            db,
+            meta_tree,
+            apply_callback,
+        })
+    }
+
+    fn sled_to_storage_error(e: sled::Error) -> StorageError<u64> {
+        StorageError::from_io_error(
+            openraft::ErrorSubject::Store,
+            openraft::ErrorVerb::Read,
+            std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+        )
+    }
+
+    fn json_to_storage_error(e: serde_json::Error) -> StorageError<u64> {
+        StorageError::from_io_error(
+            openraft::ErrorSubject::Store,
+            openraft::ErrorVerb::Read,
+            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+        )
+    }
+
+    fn get_applied_count(&self) -> Result<u64, StorageError<u64>> {
+        self.meta_tree
+            .get(b"sm_count")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()
+            .map(|o| o.unwrap_or(0))
+    }
+
+    fn set_applied_count(&self, count: u64) -> Result<(), StorageError<u64>> {
+        let val = serde_json::to_vec(&count).map_err(Self::json_to_storage_error)?;
+        self.meta_tree
+            .insert(b"sm_count", val)
+            .map_err(Self::sled_to_storage_error)?;
+        Ok(())
+    }
+}
+
+impl RaftStateMachine<PiCloudTypeConfig> for SledStateMachine {
+    type SnapshotBuilder = Self;
+
+    async fn applied_state(
+        &mut self,
+    ) -> Result<
+        (
+            Option<LogId<u64>>,
+            StoredMembership<u64, BasicNode>,
+        ),
+        StorageError<u64>,
+    > {
+        let last_applied: Option<LogId<u64>> = self
+            .meta_tree
+            .get(b"sm_last_applied")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()?;
+
+        let membership: StoredMembership<u64, BasicNode> = self
+            .meta_tree
+            .get(b"sm_membership")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok((last_applied, membership))
+    }
+
+    async fn apply<I>(
+        &mut self,
+        entries: I,
+    ) -> Result<Vec<ClientResponse>, StorageError<u64>>
+    where
+        I: IntoIterator<Item = Entry<PiCloudTypeConfig>> + Send,
+        I::IntoIter: Send,
+    {
+        let mut applied_count = self.get_applied_count()?;
+        let mut responses = Vec::new();
+
+        for entry in entries {
+            // Save last_applied_log
+            let val =
+                serde_json::to_vec(&entry.log_id).map_err(Self::json_to_storage_error)?;
+            self.meta_tree
+                .insert(b"sm_last_applied", val)
+                .map_err(Self::sled_to_storage_error)?;
+
+            match entry.payload {
+                openraft::EntryPayload::Blank => {
+                    responses.push(ClientResponse {
+                        index: applied_count,
+                    });
+                }
+                openraft::EntryPayload::Normal(req) => {
+                    applied_count += 1;
+                    debug!(index = applied_count, "Sled state machine applying entry");
+
+                    if let Some(ref cb) = self.apply_callback {
+                        cb(&req.event_json);
+                    }
+
+                    responses.push(ClientResponse {
+                        index: applied_count,
+                    });
+                }
+                openraft::EntryPayload::Membership(mem) => {
+                    let stored =
+                        StoredMembership::new(Some(entry.log_id.clone()), mem);
+                    let val =
+                        serde_json::to_vec(&stored).map_err(Self::json_to_storage_error)?;
+                    self.meta_tree
+                        .insert(b"sm_membership", val)
+                        .map_err(Self::sled_to_storage_error)?;
+                    responses.push(ClientResponse {
+                        index: applied_count,
+                    });
+                }
+            }
+        }
+
+        self.set_applied_count(applied_count)?;
+        Ok(responses)
+    }
+
+    async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
+        SledStateMachine {
+            db: self.db.clone(),
+            meta_tree: self.meta_tree.clone(),
+            apply_callback: self.apply_callback.clone(),
+        }
+    }
+
+    async fn begin_receiving_snapshot(
+        &mut self,
+    ) -> Result<Box<Cursor<Vec<u8>>>, StorageError<u64>> {
+        Ok(Box::new(Cursor::new(Vec::new())))
+    }
+
+    async fn install_snapshot(
+        &mut self,
+        meta: &SnapshotMeta<u64, BasicNode>,
+        snapshot: Box<Cursor<Vec<u8>>>,
+    ) -> Result<(), StorageError<u64>> {
+        // Save last_applied_log
+        if let Some(ref log_id) = meta.last_log_id {
+            let val = serde_json::to_vec(log_id).map_err(Self::json_to_storage_error)?;
+            self.meta_tree
+                .insert(b"sm_last_applied", val)
+                .map_err(Self::sled_to_storage_error)?;
+        }
+
+        // Save membership
+        let val =
+            serde_json::to_vec(&meta.last_membership).map_err(Self::json_to_storage_error)?;
+        self.meta_tree
+            .insert(b"sm_membership", val)
+            .map_err(Self::sled_to_storage_error)?;
+
+        // Save snapshot data and meta
+        let data = snapshot.into_inner();
+        self.meta_tree
+            .insert(b"sm_snapshot_data", data)
+            .map_err(Self::sled_to_storage_error)?;
+        let meta_val = serde_json::to_vec(meta).map_err(Self::json_to_storage_error)?;
+        self.meta_tree
+            .insert(b"sm_snapshot_meta", meta_val)
+            .map_err(Self::sled_to_storage_error)?;
+
+        Ok(())
+    }
+
+    async fn get_current_snapshot(
+        &mut self,
+    ) -> Result<Option<Snapshot<PiCloudTypeConfig>>, StorageError<u64>> {
+        let meta: Option<SnapshotMeta<u64, BasicNode>> = self
+            .meta_tree
+            .get(b"sm_snapshot_meta")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()?;
+
+        match meta {
+            Some(meta) => {
+                let data = self
+                    .meta_tree
+                    .get(b"sm_snapshot_data")
+                    .map_err(Self::sled_to_storage_error)?
+                    .map(|v| v.to_vec())
+                    .unwrap_or_default();
+                Ok(Some(Snapshot {
+                    meta,
+                    snapshot: Box::new(Cursor::new(data)),
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+impl RaftSnapshotBuilder<PiCloudTypeConfig> for SledStateMachine {
+    async fn build_snapshot(
+        &mut self,
+    ) -> Result<Snapshot<PiCloudTypeConfig>, StorageError<u64>> {
+        let data = self
+            .meta_tree
+            .get(b"sm_snapshot_data")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| v.to_vec())
+            .unwrap_or_default();
+
+        let last_applied: Option<LogId<u64>> = self
+            .meta_tree
+            .get(b"sm_last_applied")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()?;
+
+        let membership: StoredMembership<u64, BasicNode> = self
+            .meta_tree
+            .get(b"sm_membership")
+            .map_err(Self::sled_to_storage_error)?
+            .map(|v| serde_json::from_slice(&v).map_err(Self::json_to_storage_error))
+            .transpose()?
+            .unwrap_or_default();
+
+        let snapshot_id = last_applied
+            .as_ref()
+            .map(|id| format!("{}-{}", id.leader_id, id.index))
+            .unwrap_or_else(|| "empty".to_string());
+
+        let meta = SnapshotMeta {
+            last_log_id: last_applied,
+            last_membership: membership,
+            snapshot_id,
+        };
+
+        // Persist snapshot meta
+        let meta_val = serde_json::to_vec(&meta).map_err(Self::json_to_storage_error)?;
+        self.meta_tree
+            .insert(b"sm_snapshot_meta", meta_val)
+            .map_err(Self::sled_to_storage_error)?;
+
+        Ok(Snapshot {
+            meta,
+            snapshot: Box::new(Cursor::new(data)),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // State machine
 // ---------------------------------------------------------------------------
 
@@ -567,6 +1058,44 @@ pub async fn create_raft_node(
 
     if let Some(members) = members {
         info!(node_id, "Initializing Raft cluster with members");
+        raft.initialize(members).await?;
+    }
+
+    Ok(raft)
+}
+
+/// Create and initialise a persistent Raft node backed by sled.
+///
+/// `db_path` is the directory where sled stores its data files.
+/// The log store and state machine are both persisted, so state survives restarts.
+///
+/// If `members` is `Some`, the node will be initialised as the founding member
+/// of a new cluster. For subsequent nodes that join, pass `None`.
+pub async fn create_persistent_raft_node(
+    node_id: u64,
+    _addr: &str,
+    apply_callback: Option<ApplyCallback>,
+    members: Option<BTreeMap<u64, BasicNode>>,
+    db_path: &std::path::Path,
+) -> Result<PiCloudRaft, Box<dyn std::error::Error>> {
+    let config = Config {
+        cluster_name: "picloud".to_string(),
+        heartbeat_interval: 500,
+        election_timeout_min: 1500,
+        election_timeout_max: 3000,
+        ..Default::default()
+    };
+    let config = Arc::new(config);
+
+    let db = sled::open(db_path)?;
+    let log_store = SledLogStore::new(db.clone())?;
+    let state_machine = SledStateMachine::new(db, apply_callback)?;
+    let network = HttpNetworkFactory::new();
+
+    let raft = PiCloudRaft::new(node_id, config, network, log_store, state_machine).await?;
+
+    if let Some(members) = members {
+        info!(node_id, "Initializing persistent Raft cluster with members");
         raft.initialize(members).await?;
     }
 

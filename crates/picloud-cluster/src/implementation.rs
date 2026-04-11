@@ -327,6 +327,7 @@ mod tests {
             address: "192.168.1.20:7443".to_string(),
             ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)),
             port: 7443,
+            last_seen: std::time::Instant::now(),
         });
 
         let cluster = MdnsClusterTestHarness {

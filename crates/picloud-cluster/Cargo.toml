@@ -20,6 +20,7 @@ reqwest  = { workspace = true }
 axum     = { workspace = true }
 mdns-sd  = { workspace = true }
 uuid     = { workspace = true }
+sled     = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

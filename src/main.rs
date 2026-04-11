@@ -124,6 +124,8 @@ struct ServerConfig {
     storage_capacity_gb: u64,
     rdf_path: PathBuf,
     registry_path: PathBuf,
+    ca_path: PathBuf,
+    data_root: String,
 }
 
 impl ServerConfig {
@@ -201,6 +203,10 @@ impl ServerConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(format!("{data_root}/registry")));
 
+        let ca_path = std::env::var("PICLOUD_CA_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(format!("{data_root}/ca")));
+
         Self {
             node_id,
             node_name,
@@ -215,6 +221,8 @@ impl ServerConfig {
             storage_capacity_gb,
             rdf_path,
             registry_path,
+            ca_path,
+            data_root,
         }
     }
 }
@@ -309,33 +317,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let raft = picloud_cluster::create_raft_node(
-        raft_node_id,
-        &raft_addr,
-        Some(apply_cb),
-        initial_members,
-    )
-    .await
-    .expect("failed to create Raft node");
+    let raft = if std::env::var("PICLOUD_RAFT_MEMORY_ONLY").is_ok() {
+        info!("PICLOUD_RAFT_MEMORY_ONLY set — using in-memory Raft storage");
+        picloud_cluster::create_raft_node(
+            raft_node_id,
+            &raft_addr,
+            Some(apply_cb),
+            initial_members,
+        )
+        .await
+        .expect("failed to create Raft node")
+    } else {
+        let raft_db_path = std::path::PathBuf::from(format!("{}/raft/", config.data_root));
+        info!(?raft_db_path, "Using persistent sled-backed Raft storage");
+        match picloud_cluster::create_persistent_raft_node(
+            raft_node_id,
+            &raft_addr,
+            Some(apply_cb.clone()),
+            initial_members.clone(),
+            &raft_db_path,
+        )
+        .await
+        {
+            Ok(raft) => raft,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to open sled Raft storage — falling back to in-memory"
+                );
+                picloud_cluster::create_raft_node(
+                    raft_node_id,
+                    &raft_addr,
+                    Some(apply_cb),
+                    initial_members,
+                )
+                .await
+                .expect("failed to create Raft node")
+            }
+        }
+    };
     let raft = Arc::new(raft);
     cluster.set_raft(Arc::clone(&raft));
     let raft_router = picloud_cluster::raft_rpc_router(Arc::clone(&raft));
     info!(raft_node_id, "Raft consensus node started");
 
-    // 2b-ii. Watch for new peers discovered via mDNS and add them to Raft membership.
+    // 2b-ii. Shared set of Raft members — used by both the membership watcher
+    //         and the stale-peer sweep task.
+    let known_raft_members: Arc<tokio::sync::RwLock<std::collections::HashSet<u64>>> = {
+        let mut initial = std::collections::HashSet::new();
+        initial.insert(raft_node_id);
+        Arc::new(tokio::sync::RwLock::new(initial))
+    };
+
+    // Watch for new peers discovered via mDNS and add them to Raft membership.
     {
         let raft_for_membership = Arc::clone(&raft);
         let peers_for_membership = cluster.peers().clone();
+        let known_members = Arc::clone(&known_raft_members);
         tokio::spawn(async move {
             // Check for new peers every 5 seconds
-            let mut known_raft_members = std::collections::HashSet::new();
-            known_raft_members.insert(raft_node_id);
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 let current_peers = peers_for_membership.all();
                 for peer in &current_peers {
                     let peer_raft_id = picloud_cluster::node_id_from_uuid(&peer.node_id);
-                    if known_raft_members.contains(&peer_raft_id) {
+                    if known_members.read().await.contains(&peer_raft_id) {
                         continue;
                     }
                     let peer_node = openraft::BasicNode::new(&peer.address);
@@ -351,10 +397,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     {
                         Ok(_) => {
                             info!(peer_raft_id, "Peer added as Raft learner");
-                            known_raft_members.insert(peer_raft_id);
+                            known_members.write().await.insert(peer_raft_id);
                             // Promote to voter
                             let members: std::collections::BTreeSet<u64> =
-                                known_raft_members.iter().copied().collect();
+                                known_members.read().await.iter().copied().collect();
                             if let Err(e) = raft_for_membership
                                 .change_membership(members, false)
                                 .await
@@ -374,6 +420,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 error = %e,
                                 "Failed to add peer as Raft learner — will retry"
                             );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // 2b-iii. Stale-peer sweep: every 10s, remove peers not seen via mDNS for 30s.
+    {
+        let peers_for_sweep = cluster.peers().clone();
+        let raft_for_sweep = Arc::clone(&raft);
+        let known_members_for_sweep = Arc::clone(&known_raft_members);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                let stale = peers_for_sweep.sweep_stale(std::time::Duration::from_secs(30));
+                if stale.is_empty() {
+                    continue;
+                }
+                // Only attempt Raft membership changes if we are the leader.
+                let metrics = raft_for_sweep.metrics().borrow().clone();
+                let is_leader = metrics.current_leader == Some(raft_node_id);
+                for peer in &stale {
+                    let peer_raft_id = picloud_cluster::node_id_from_uuid(&peer.node_id);
+                    info!(
+                        peer_raft_id,
+                        peer_name = %peer.node_name,
+                        peer_addr = %peer.address,
+                        "Swept stale peer"
+                    );
+                    // Remove from shared known members set
+                    known_members_for_sweep.write().await.remove(&peer_raft_id);
+
+                    if is_leader {
+                        // Build the new voter set without this peer
+                        let members: std::collections::BTreeSet<u64> = known_members_for_sweep
+                            .read()
+                            .await
+                            .iter()
+                            .copied()
+                            .collect();
+                        if let Err(e) = raft_for_sweep.change_membership(members, false).await {
+                            warn!(
+                                peer_raft_id,
+                                error = %e,
+                                "Failed to remove stale peer from Raft membership"
+                            );
+                        } else {
+                            info!(peer_raft_id, "Stale peer removed from Raft membership");
                         }
                     }
                 }
@@ -594,7 +689,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8. Start network/DNS/TLS
     let dns = InMemoryDnsRegistry::new();
     let dns: Arc<dyn DnsRegistry> = Arc::new(dns);
-    let ca = PlatformCa::new()?;
+    let ca = match PlatformCa::load_from_dir(&config.ca_path)? {
+        Some(loaded) => {
+            info!(path = %config.ca_path.display(), "Loaded existing CA from disk");
+            loaded
+        }
+        None => {
+            info!("No existing CA found — generating new CA");
+            let new_ca = PlatformCa::new()?;
+            new_ca.save_to_dir(&config.ca_path)?;
+            new_ca
+        }
+    };
 
     // Optionally create TLS config for HTTPS serving (controlled by PICLOUD_TLS env var)
     let tls_config = match std::env::var("PICLOUD_TLS")

@@ -248,6 +248,7 @@ impl MdnsDiscovery {
                     address: format!("{}:{}", addr, http_port),
                     ip: *addr,
                     port: http_port,
+                    last_seen: std::time::Instant::now(),
                 };
 
                 info!(
@@ -258,6 +259,8 @@ impl MdnsDiscovery {
                 );
 
                 peers.add(peer);
+                // Refresh the last_seen timestamp so re-resolution resets the stale timer.
+                peers.touch(&node_id);
             }
             ServiceEvent::ServiceRemoved(_, fullname) => {
                 info!(fullname = %fullname, "Peer removed from mDNS");

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::RwLock;
+use std::time::Instant;
 
 use tokio::sync::broadcast;
 use tracing::{debug, info};
@@ -20,6 +21,8 @@ pub struct PeerInfo {
     pub address: String,
     pub ip: IpAddr,
     pub port: u16,
+    /// When this peer was last seen via mDNS (used for stale peer cleanup).
+    pub last_seen: Instant,
 }
 
 /// Thread-safe peer list maintained by mDNS discovery.
@@ -45,16 +48,54 @@ impl PeerList {
     }
 
     /// Add or update a peer. Returns true if this is a new peer.
-    pub fn add(&self, peer: PeerInfo) -> bool {
+    ///
+    /// Sets `last_seen` to `Instant::now()` for newly added peers.
+    pub fn add(&self, mut peer: PeerInfo) -> bool {
         let mut peers = self.peers.write().expect("peer list lock poisoned");
         let is_new = !peers.contains_key(&peer.node_id);
         if is_new {
+            peer.last_seen = Instant::now();
             info!(node_id = %peer.node_id, node_name = %peer.node_name, "New peer added");
         } else {
             debug!(node_id = %peer.node_id, "Peer updated");
         }
         peers.insert(peer.node_id, peer);
         is_new
+    }
+
+    /// Refresh the `last_seen` timestamp for an existing peer.
+    pub fn touch(&self, node_id: &Uuid) {
+        let mut peers = self.peers.write().expect("peer list lock poisoned");
+        if let Some(peer) = peers.get_mut(node_id) {
+            peer.last_seen = Instant::now();
+            debug!(node_id = %node_id, "Peer last_seen refreshed");
+        }
+    }
+
+    /// Remove and return all peers whose `last_seen` is older than `max_age`.
+    pub fn sweep_stale(&self, max_age: std::time::Duration) -> Vec<PeerInfo> {
+        let mut peers = self.peers.write().expect("peer list lock poisoned");
+        let now = Instant::now();
+        let stale_ids: Vec<Uuid> = peers
+            .iter()
+            .filter(|(_, p)| now.duration_since(p.last_seen) > max_age)
+            .map(|(id, _)| *id)
+            .collect();
+
+        let mut removed = Vec::with_capacity(stale_ids.len());
+        for id in stale_ids {
+            if let Some(p) = peers.remove(&id) {
+                info!(
+                    node_id = %p.node_id,
+                    node_name = %p.node_name,
+                    "Stale peer swept (last seen {:?} ago)",
+                    now.duration_since(p.last_seen)
+                );
+                let _ = self.removed_tx.send(p.clone());
+                removed.push(p);
+            }
+        }
+        removed
     }
 
     /// Remove a peer by node ID.
@@ -143,6 +184,7 @@ mod tests {
             address: format!("192.168.1.10:7443"),
             ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
             port: 7443,
+            last_seen: Instant::now(),
         }
     }
 

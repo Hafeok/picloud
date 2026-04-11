@@ -15,9 +15,9 @@ set -euo pipefail
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-NODES=(pi-01 pi-02 pi-03 pi-04 pi-05)
-REMOTE_USER="ubuntu"
-REMOTE_DIR="/home/ubuntu/picloud"
+NODES=(192.168.88.22 192.168.88.21 192.168.88.20)
+REMOTE_USER="admin"
+REMOTE_DIR="/usr/local/bin"
 BINARY="picloud-server"
 TARGET="aarch64-unknown-linux-gnu"
 PROFILE="release"
@@ -99,15 +99,13 @@ for node in "${TARGET_NODES[@]}"; do
     continue
   }
 
-  # Copy systemd service file if it doesn't exist yet
-  if ! ssh "$REMOTE_USER@$node" "test -f /etc/systemd/system/$SERVICE_NAME.service" 2>/dev/null; then
-    info "Installing systemd service on $node..."
-    scp "deploy/picloud.service" "$REMOTE_USER@$node:/tmp/picloud.service"
-    ssh "$REMOTE_USER@$node" \
-      "sudo mv /tmp/picloud.service /etc/systemd/system/$SERVICE_NAME.service && \
-       sudo systemctl daemon-reload && \
-       sudo systemctl enable $SERVICE_NAME"
-  fi
+  # Always update systemd service file
+  info "Updating systemd service on $node..."
+  scp "deploy/picloud.service" "$REMOTE_USER@$node:/tmp/picloud.service"
+  ssh "$REMOTE_USER@$node" \
+    "sudo mv /tmp/picloud.service /etc/systemd/system/$SERVICE_NAME.service && \
+     sudo systemctl daemon-reload && \
+     sudo systemctl enable $SERVICE_NAME" 2>/dev/null || true
 
   # Restart service
   ssh "$REMOTE_USER@$node" "sudo systemctl restart $SERVICE_NAME" && \

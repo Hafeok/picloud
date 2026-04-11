@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::BufReader;
+use std::path::Path;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -159,6 +160,130 @@ impl PlatformCa {
             ca_params,
             ca_key,
         })
+    }
+
+    /// Reconstruct a `PlatformCa` from a previously saved key and certificate PEM.
+    ///
+    /// The `CertificateParams` are rebuilt with the same DN and CA flags so
+    /// that `signed_by` calls produce certificates with the correct issuer.
+    pub fn from_parts(ca_key_pem: &str, ca_cert_pem: String) -> Result<Self> {
+        let ca_key = KeyPair::from_pem(ca_key_pem).map_err(|e| {
+            PiCloudError::TlsCertificateError {
+                reason: format!("failed to parse CA key from PEM: {e}"),
+            }
+        })?;
+
+        // Reconstruct CertificateParams with the same DN and CA flags.
+        // The exact not_before / not_after don't matter here because we
+        // only use ca_params to call self_signed() as an intermediate for
+        // signed_by(), which copies the issuer DN from the resulting cert.
+        let mut ca_params =
+            CertificateParams::new(Vec::<String>::new()).map_err(|e| {
+                PiCloudError::TlsCertificateError {
+                    reason: format!("failed to create CA params: {e}"),
+                }
+            })?;
+
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "PiCloud Platform CA");
+        ca_params
+            .distinguished_name
+            .push(DnType::OrganizationName, "PiCloud");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+
+        // Use a 10-year window from the current time for the params.
+        let not_before = Utc::now();
+        let not_after = not_before + Duration::days(3650);
+        ca_params.not_before = rcgen::date_time_ymd(
+            not_before.format("%Y").to_string().parse::<i32>().unwrap(),
+            not_before.format("%m").to_string().parse::<u8>().unwrap(),
+            not_before.format("%d").to_string().parse::<u8>().unwrap(),
+        );
+        ca_params.not_after = rcgen::date_time_ymd(
+            not_after.format("%Y").to_string().parse::<i32>().unwrap(),
+            not_after.format("%m").to_string().parse::<u8>().unwrap(),
+            not_after.format("%d").to_string().parse::<u8>().unwrap(),
+        );
+
+        info!("Platform CA loaded from disk");
+
+        Ok(Self {
+            ca_cert_pem,
+            ca_params,
+            ca_key,
+        })
+    }
+
+    /// Save the CA certificate and private key to a directory.
+    ///
+    /// Creates the directory if it doesn't exist.
+    /// - `ca-cert.pem` — the CA certificate (world-readable, 0644)
+    /// - `ca-key.pem` — the CA private key (owner-only, 0600)
+    pub fn save_to_dir(&self, dir: &Path) -> Result<()> {
+        std::fs::create_dir_all(dir).map_err(|e| PiCloudError::TlsCertificateError {
+            reason: format!("failed to create CA directory {}: {e}", dir.display()),
+        })?;
+
+        let cert_path = dir.join("ca-cert.pem");
+        let key_path = dir.join("ca-key.pem");
+
+        std::fs::write(&cert_path, &self.ca_cert_pem).map_err(|e| {
+            PiCloudError::TlsCertificateError {
+                reason: format!("failed to write CA cert to {}: {e}", cert_path.display()),
+            }
+        })?;
+
+        let key_pem = self.ca_key.serialize_pem();
+        std::fs::write(&key_path, key_pem.as_bytes()).map_err(|e| {
+            PiCloudError::TlsCertificateError {
+                reason: format!("failed to write CA key to {}: {e}", key_path.display()),
+            }
+        })?;
+
+        // Restrict private key permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!(
+                        "failed to set permissions on {}: {e}",
+                        key_path.display()
+                    ),
+                })?;
+        }
+
+        info!(dir = %dir.display(), "CA certificate and key saved to disk");
+
+        Ok(())
+    }
+
+    /// Load a previously saved CA from a directory.
+    ///
+    /// Returns `Ok(None)` if the directory or expected files don't exist.
+    pub fn load_from_dir(dir: &Path) -> Result<Option<Self>> {
+        let cert_path = dir.join("ca-cert.pem");
+        let key_path = dir.join("ca-key.pem");
+
+        if !cert_path.exists() || !key_path.exists() {
+            return Ok(None);
+        }
+
+        let ca_cert_pem = std::fs::read_to_string(&cert_path).map_err(|e| {
+            PiCloudError::TlsCertificateError {
+                reason: format!("failed to read CA cert from {}: {e}", cert_path.display()),
+            }
+        })?;
+
+        let ca_key_pem = std::fs::read_to_string(&key_path).map_err(|e| {
+            PiCloudError::TlsCertificateError {
+                reason: format!("failed to read CA key from {}: {e}", key_path.display()),
+            }
+        })?;
+
+        Self::from_parts(&ca_key_pem, ca_cert_pem).map(Some)
     }
 
     /// Export the CA certificate as PEM.
@@ -501,5 +626,53 @@ mod tests {
             .private_key_pem
             .contains("-----BEGIN PRIVATE KEY-----"));
         assert!(svc_cert.expires_at > Utc::now());
+    }
+
+    #[test]
+    fn ca_save_and_load_round_trip() {
+        let dir = std::env::temp_dir().join(format!("picloud-ca-test-{}", uuid::Uuid::new_v4()));
+        let ca = PlatformCa::new().unwrap();
+        let original_pem = ca.ca_certificate_pem();
+
+        // Save to disk
+        ca.save_to_dir(&dir).unwrap();
+
+        // Verify files exist
+        assert!(dir.join("ca-cert.pem").exists());
+        assert!(dir.join("ca-key.pem").exists());
+
+        // Verify key file permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let key_perms = std::fs::metadata(dir.join("ca-key.pem"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(key_perms & 0o777, 0o600, "CA key should be owner-only");
+        }
+
+        // Load from disk
+        let loaded = PlatformCa::load_from_dir(&dir).unwrap();
+        assert!(loaded.is_some(), "load_from_dir should return Some");
+        let loaded_ca = loaded.unwrap();
+
+        // The loaded CA cert PEM should match the original
+        assert_eq!(loaded_ca.ca_certificate_pem(), original_pem);
+
+        // The loaded CA should be able to issue certificates
+        let node_cert = loaded_ca.issue_node_certificate("pi-test-01").unwrap();
+        assert!(node_cert.certificate_pem.contains("-----BEGIN CERTIFICATE-----"));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ca_load_from_missing_dir_returns_none() {
+        let dir = std::env::temp_dir().join("picloud-ca-nonexistent-dir");
+        let _ = std::fs::remove_dir_all(&dir); // ensure it doesn't exist
+        let result = PlatformCa::load_from_dir(&dir).unwrap();
+        assert!(result.is_none());
     }
 }

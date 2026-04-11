@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# setup-node.sh — one-time setup on a fresh Pi node
+# setup-node.sh — one-time setup on a fresh Pi 5 node
 #
 # Run this once per node before first deploy:
-#   ssh ubuntu@<pi-ip> 'bash -s' < deploy/setup-node.sh
+#   ssh admin@<pi-ip> 'bash -s' < deploy/setup-node.sh
 #
 # What it does:
 #   - Creates the picloud data directory
 #   - Installs avahi-daemon for mDNS (so picloud.local resolves)
 #   - Configures firewall rules for picloud ports
-#   - Leaves Nomad completely untouched
+#   - Creates the systemd service user
 
 set -euo pipefail
 
-PICLOUD_DIR="/home/ubuntu/picloud"
-PICLOUD_DATA="$PICLOUD_DIR/data"
+PICLOUD_DATA="/var/lib/picloud"
 
-echo "[→] Creating picloud directories..."
-mkdir -p "$PICLOUD_DIR" "$PICLOUD_DATA"
+echo "[→] Creating picloud data directories..."
+sudo mkdir -p "$PICLOUD_DATA" "$PICLOUD_DATA/events" "$PICLOUD_DATA/rdf" \
+  "$PICLOUD_DATA/storage" "$PICLOUD_DATA/raft" "$PICLOUD_DATA/ca"
+sudo chown -R admin:admin "$PICLOUD_DATA"
 chmod 750 "$PICLOUD_DATA"
 
 echo "[→] Installing avahi-daemon (mDNS)..."
@@ -34,11 +35,11 @@ sudo systemctl enable avahi-daemon
 sudo systemctl start avahi-daemon
 
 echo "[→] Configuring firewall rules for picloud..."
-# Allow picloud ports — do not touch Nomad ports (4646-4648)
-sudo ufw allow 7000/tcp comment "picloud HTTP"   || true
-sudo ufw allow 7001/tcp comment "picloud Raft"   || true
-sudo ufw allow 7002/tcp comment "picloud Events" || true
-sudo ufw allow 5353/udp comment "mDNS"           || true
+sudo ufw allow 7443/tcp comment "picloud HTTP/HTTPS"  || true
+sudo ufw allow 53/tcp   comment "picloud DNS"         || true
+sudo ufw allow 53/udp   comment "picloud DNS"         || true
+sudo ufw allow 2380/tcp comment "picloud Raft"        || true
+sudo ufw allow 5353/udp comment "mDNS"                || true
 
 echo ""
 echo "[✓] Node setup complete"
