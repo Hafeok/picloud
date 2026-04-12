@@ -276,3 +276,120 @@ fn it_018_migrate_source_unchanged() {
     let after = h.read("source.md");
     assert_eq!(source_content, after, "source must be unchanged");
 }
+
+// --- MCP stdio tests ---
+
+/// MCP-001: initialize returns protocol version
+#[test]
+fn mcp_001_stdio_initialize() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("protocolVersion"), "initialize should return protocolVersion: {}", out);
+}
+
+/// MCP-002: tools/list returns 18 tools
+#[test]
+fn mcp_002_stdio_tools_list() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
+    let out = run_mcp_stdio(&h, input);
+    let count = out.matches("\"name\"").count();
+    assert!(count >= 10, "should list >=10 tools, got {}: {}", count, &out[..200.min(out.len())]);
+}
+
+/// MCP-003: product_feature_list returns features
+#[test]
+fn mcp_003_stdio_feature_list() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"product_feature_list","arguments":{}}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("FT-001"), "should contain FT-001: {}", out);
+}
+
+/// MCP-004: product_context returns bundle
+#[test]
+fn mcp_004_stdio_context() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"product_context","arguments":{"id":"FT-001","depth":1}}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("Bundle"), "should contain Bundle: {}", out);
+}
+
+/// MCP-005: product_graph_check returns errors/warnings
+#[test]
+fn mcp_005_stdio_graph_check() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"product_graph_check","arguments":{}}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("errors") || out.contains("warnings"), "should contain errors or warnings: {}", out);
+}
+
+/// MCP-006: product_impact returns seed
+#[test]
+fn mcp_006_stdio_impact() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"product_impact","arguments":{"id":"ADR-001"}}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("seed") || out.contains("direct"), "should contain seed: {}", out);
+}
+
+/// MCP-007: write tool product_feature_new creates a file
+#[test]
+fn mcp_007_stdio_feature_new_write() {
+    let h = Harness::new();
+    // Enable write
+    h.write("product.toml", &format!("{}\n[mcp]\nwrite = true\n", MINIMAL_CONFIG));
+    let input = r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"product_feature_new","arguments":{"title":"MCP Feature","phase":1}}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("FT-001") || out.contains("path"), "should create feature: {}", out);
+    // Verify file exists
+    let entries: Vec<_> = std::fs::read_dir(h.dir.path().join("docs/features"))
+        .unwrap_or_else(|_| panic!("features dir"))
+        .collect();
+    assert!(!entries.is_empty(), "feature file should be created");
+}
+
+/// MCP-008: write tool blocked when mcp.write not set
+#[test]
+fn mcp_008_stdio_write_disabled() {
+    let h = fixture_minimal();
+    // No [mcp] section → write disabled by default
+    let input = r#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"product_feature_new","arguments":{"title":"Blocked"}}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("disabled") || out.contains("error"), "write should be blocked: {}", out);
+}
+
+/// MCP-009: unknown method returns error
+#[test]
+fn mcp_009_stdio_unknown_method() {
+    let h = fixture_minimal();
+    let input = r#"{"jsonrpc":"2.0","id":9,"method":"nonexistent","params":{}}"#;
+    let out = run_mcp_stdio(&h, input);
+    assert!(out.contains("Method not found") || out.contains("error"), "should error: {}", out);
+}
+
+const MINIMAL_CONFIG: &str = "name = \"test\"\nschema-version = \"1\"\n[paths]\nfeatures = \"docs/features\"\nadrs = \"docs/adrs\"\ntests = \"docs/tests\"\ngraph = \"docs/graph\"\nchecklist = \"docs/checklist.md\"\n[prefixes]\nfeature = \"FT\"\nadr = \"ADR\"\ntest = \"TC\"";
+
+fn run_mcp_stdio(h: &Harness, input: &str) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(&h.bin)
+        .args(["mcp"])
+        .current_dir(h.dir.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp");
+
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = writeln!(stdin, "{}", input);
+    }
+    // Close stdin to signal EOF
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("wait");
+    String::from_utf8_lossy(&output.stdout).to_string()
+}

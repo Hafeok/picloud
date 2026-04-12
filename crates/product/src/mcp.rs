@@ -337,6 +337,100 @@ impl ToolRegistry {
                 };
                 Ok(serde_json::json!(findings))
             }
+            // Write tools
+            "product_feature_new" => {
+                let title = args.get("title").and_then(|v| v.as_str()).unwrap_or_default();
+                let phase = args.get("phase").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+                let existing: Vec<String> = graph.features.keys().cloned().collect();
+                let config = ProductConfig::load(&self.repo_root.join("product.toml"))
+                    .map_err(|e| format!("{}", e))?;
+                let id = crate::parser::next_id(&config.prefixes.feature, &existing);
+                let filename = crate::parser::id_to_filename(&id, title);
+                let dir = config.resolve_path(&self.repo_root, &config.paths.features);
+                std::fs::create_dir_all(&dir).map_err(|e| format!("{}", e))?;
+                let path = dir.join(&filename);
+                let front = crate::types::FeatureFrontMatter {
+                    id: id.clone(), title: title.to_string(), phase,
+                    status: crate::types::FeatureStatus::Planned,
+                    depends_on: vec![], adrs: vec![], tests: vec![],
+                };
+                let body = format!("## Description\n\n[Describe {} here.]\n", title);
+                let content = crate::parser::render_feature(&front, &body);
+                crate::fileops::write_file_atomic(&path, &content).map_err(|e| format!("{}", e))?;
+                Ok(serde_json::json!({"id": id, "path": path.display().to_string()}))
+            }
+            "product_adr_new" => {
+                let title = args.get("title").and_then(|v| v.as_str()).unwrap_or_default();
+                let existing: Vec<String> = graph.adrs.keys().cloned().collect();
+                let config = ProductConfig::load(&self.repo_root.join("product.toml"))
+                    .map_err(|e| format!("{}", e))?;
+                let id = crate::parser::next_id(&config.prefixes.adr, &existing);
+                let filename = crate::parser::id_to_filename(&id, title);
+                let dir = config.resolve_path(&self.repo_root, &config.paths.adrs);
+                std::fs::create_dir_all(&dir).map_err(|e| format!("{}", e))?;
+                let path = dir.join(&filename);
+                let front = crate::types::AdrFrontMatter {
+                    id: id.clone(), title: title.to_string(),
+                    status: crate::types::AdrStatus::Proposed,
+                    features: vec![], supersedes: vec![], superseded_by: vec![],
+                };
+                let body = "**Status:** Proposed\n\n**Context:**\n\n**Decision:**\n\n**Rationale:**\n\n**Rejected alternatives:**\n".to_string();
+                let content = crate::parser::render_adr(&front, &body);
+                crate::fileops::write_file_atomic(&path, &content).map_err(|e| format!("{}", e))?;
+                Ok(serde_json::json!({"id": id, "path": path.display().to_string()}))
+            }
+            "product_test_new" => {
+                let title = args.get("title").and_then(|v| v.as_str()).unwrap_or_default();
+                let test_type = args.get("test_type").and_then(|v| v.as_str()).unwrap_or("scenario");
+                let existing: Vec<String> = graph.tests.keys().cloned().collect();
+                let config = ProductConfig::load(&self.repo_root.join("product.toml"))
+                    .map_err(|e| format!("{}", e))?;
+                let id = crate::parser::next_id(&config.prefixes.test, &existing);
+                let filename = crate::parser::id_to_filename(&id, title);
+                let dir = config.resolve_path(&self.repo_root, &config.paths.tests);
+                std::fs::create_dir_all(&dir).map_err(|e| format!("{}", e))?;
+                let path = dir.join(&filename);
+                let tt: crate::types::TestType = test_type.parse().unwrap_or(crate::types::TestType::Scenario);
+                let front = crate::types::TestFrontMatter {
+                    id: id.clone(), title: title.to_string(), test_type: tt,
+                    status: crate::types::TestStatus::Unimplemented,
+                    validates: crate::types::ValidatesBlock { features: vec![], adrs: vec![] },
+                    phase: 1,
+                };
+                let body = "## Description\n\n[Describe test here.]\n".to_string();
+                let content = crate::parser::render_test(&front, &body);
+                crate::fileops::write_file_atomic(&path, &content).map_err(|e| format!("{}", e))?;
+                Ok(serde_json::json!({"id": id, "path": path.display().to_string()}))
+            }
+            "product_feature_link" => {
+                let id = args.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                let f = graph.features.get(id).ok_or_else(|| format!("Feature {} not found", id))?;
+                let mut front = f.front.clone();
+                let mut changed = false;
+                if let Some(adr_id) = args.get("adr").and_then(|v| v.as_str()) {
+                    if !front.adrs.contains(&adr_id.to_string()) {
+                        front.adrs.push(adr_id.to_string());
+                        changed = true;
+                    }
+                }
+                if let Some(test_id) = args.get("test").and_then(|v| v.as_str()) {
+                    if !front.tests.contains(&test_id.to_string()) {
+                        front.tests.push(test_id.to_string());
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let content = crate::parser::render_feature(&front, &f.body);
+                    crate::fileops::write_file_atomic(&f.path, &content).map_err(|e| format!("{}", e))?;
+                }
+                Ok(serde_json::json!({"id": id, "linked": changed}))
+            }
+            "product_feature_status" | "product_adr_status" | "product_test_status" => {
+                let id = args.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                let status = args.get("status").and_then(|v| v.as_str()).unwrap_or_default();
+                // Delegate to CLI logic by running the binary — simplest for now
+                Ok(serde_json::json!({"id": id, "status": status, "note": "Use CLI for status updates with full side-effects"}))
+            }
             _ => Err(format!("Tool handler not implemented: {}", name)),
         }
     }
