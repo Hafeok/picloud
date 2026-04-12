@@ -1,0 +1,10 @@
+target/
+.git/
+.github/
+docs/
+*.tar.gz
+*.pem
+*.key
+*.crt
+.env
+.env.*

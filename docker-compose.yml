@@ -1,0 +1,78 @@
+x-picloud-common: &picloud-common
+  build: .
+  restart: unless-stopped
+  environment: &picloud-env
+    PICLOUD_DOMAIN: picloud.local
+    PICLOUD_HTTP_PORT: "7443"
+    PICLOUD_DNS_PORT: "5353"
+    PICLOUD_BIND_ADDR: 0.0.0.0
+    PICLOUD_DATA_ROOT: /var/lib/picloud
+    PICLOUD_RAFT_MEMORY_ONLY: "true"
+    RUST_LOG: picloud=info,warn
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:7443/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 30s
+
+services:
+  node1:
+    <<: *picloud-common
+    container_name: picloud-node1
+    hostname: pi-node-01
+    environment:
+      <<: *picloud-env
+      PICLOUD_NODE_ID: "00000000-0000-0000-0000-000000000001"
+      PICLOUD_NODE_NAME: pi-node-01
+    ports:
+      - "7443:7443"
+    volumes:
+      - picloud-node1-data:/var/lib/picloud
+    networks:
+      picloud-net:
+        ipv4_address: 172.28.0.11
+
+  node2:
+    <<: *picloud-common
+    container_name: picloud-node2
+    hostname: pi-node-02
+    environment:
+      <<: *picloud-env
+      PICLOUD_NODE_ID: "00000000-0000-0000-0000-000000000002"
+      PICLOUD_NODE_NAME: pi-node-02
+    ports:
+      - "7444:7443"
+    volumes:
+      - picloud-node2-data:/var/lib/picloud
+    networks:
+      picloud-net:
+        ipv4_address: 172.28.0.12
+
+  node3:
+    <<: *picloud-common
+    container_name: picloud-node3
+    hostname: pi-node-03
+    environment:
+      <<: *picloud-env
+      PICLOUD_NODE_ID: "00000000-0000-0000-0000-000000000003"
+      PICLOUD_NODE_NAME: pi-node-03
+    ports:
+      - "7445:7443"
+    volumes:
+      - picloud-node3-data:/var/lib/picloud
+    networks:
+      picloud-net:
+        ipv4_address: 172.28.0.13
+
+volumes:
+  picloud-node1-data:
+  picloud-node2-data:
+  picloud-node3-data:
+
+networks:
+  picloud-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
