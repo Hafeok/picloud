@@ -20,6 +20,10 @@ pub struct ProductConfig {
     pub phases: HashMap<String, String>,
     #[serde(default)]
     pub prefixes: PrefixConfig,
+    #[serde(default)]
+    pub mcp: Option<McpConfig>,
+    #[serde(default)]
+    pub metrics: Option<MetricsConfig>,
 }
 
 fn default_version() -> String {
@@ -92,6 +96,19 @@ impl Default for PrefixConfig {
             test: default_test_prefix(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    #[serde(default)]
+    pub thresholds: HashMap<String, crate::metrics::ThresholdConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Allow MCP write tools (default false)
+    #[serde(default)]
+    pub write: bool,
 }
 
 fn default_feature_prefix() -> String {

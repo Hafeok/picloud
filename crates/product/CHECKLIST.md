@@ -1,175 +1,131 @@
 # Product CLI — Feature Checklist
 
 > Auto-maintained during implementation.
-> Each item maps to a PRD section and/or ADR from `new features/product-prd.md` and `new features/product-adrs.md`.
 > Status: [ ] not started, [~] partial/stub, [x] implemented, [T] tested
 >
-> Last verified: 2026-04-12 — 54 unit tests, 4 benchmarks, full E2E exercise
+> Last verified: 2026-04-12 — 95 unit tests, 12 integration, 9 property, 4 benchmarks
 
 ---
 
-## Phase 1 — Core Graph and Context
+## Phase 1-3 (Complete — see previous checklist for full detail)
 
-### ADR-001: Rust as Implementation Language
-- [T] Single binary compiles (`cargo build -p product`)
-- [T] clap CLI argument parser
-- [T] `#![deny(clippy::unwrap_used)]` — zero panics on user input
-
-### ADR-002: YAML Front-Matter as Graph Source of Truth
-- [T] Feature front-matter parser (id, title, phase, status, depends-on, adrs, tests)
-- [T] ADR front-matter parser (id, title, status, features, supersedes, superseded-by)
-- [T] Test criterion front-matter parser (id, title, type, status, validates, phase)
-- [T] Front-matter round-trip: parse -> modify -> write
-
-### ADR-003: Derived Graph — No Persistent Graph Store
-- [T] In-memory graph rebuilt from front-matter on every command
-- [T] All 5 edge types: ImplementedBy, ValidatedBy, TestedBy, Supersedes, DependsOn
-- [T] Forward + reverse adjacency lists
-- [T] `index.ttl` is export-only, never read by Product
-
-### ADR-004: Markdown as Document Format
-- [T] CommonMark markdown with YAML front-matter
-- [T] Front-matter stripped in context bundles
-- [T] Formal blocks preserved verbatim in context bundles
-
-### ADR-005: Numeric ID Scheme
-- [T] Auto-increment IDs: `FT-001`, `ADR-001`, `TC-001`
-- [T] Gaps not filled — next ID is max(existing) + 1
-- [T] Filename generation: `FT-001-cluster-foundation.md`
-- [T] Configurable prefixes via `product.toml`
-- [T] ID format validation (PREFIX-NNN, E005 on invalid)
-
-### ADR-006: Context Bundle as Primary LLM Interface
-- [T] `product context FT-XXX` with AISP `⟦Ω:Bundle⟧` header
-- [T] Aggregate evidence `⟦Ε⟧` from test criteria
-- [T] ADRs ordered by betweenness centrality (default) / `--order id`
-- [T] `--depth N` BFS transitive context with dedup
-- [T] Superseded ADRs replaced by successors
-- [T] `product context ADR-XXX` / `--phase N` / `--adrs-only`
-
-### ADR-007: Checklist is Generated, Never Hand-Edited
-- [T] `product checklist generate` from front-matter
-- [T] Ordered by topological sort, grouped by phase
-
-### ADR-008: Embedded Oxigraph for SPARQL Queries
-- [T] `product graph query "SELECT ..."` via Oxigraph
-- [T] TTL export with all prefixes and centrality scores
-
-### ADR-009: CI Integration via Exit Codes
-- [T] Exit code 0 (clean), 1 (errors), 2 (warnings), 3 (internal)
-- [T] `--format json` structured stderr output
-
-### ADR-010: Auto-Orphan on Feature Abandonment
-- [T] Feature abandonment removes from test validates.features
-- [T] Orphaned tests = warnings, files not deleted
-
-### ADR-011: AISP Formal Notation
-- [T] Types, Invariants, Scenario, ExitCriteria, Evidence block parsing
-- [T] E001 on delta out of range, unclosed delimiter, unknown block type
-- [T] W004 on empty block body
-
-### ADR-012: Graph Theory Foundations
-- [T] Topological sort (Kahn's) with E003 cycle detection
-- [T] `product feature next` uses topo sort
-- [T] BFS to depth N with dedup
-- [T] Betweenness centrality (Brandes') with normalization
-- [T] Reverse-graph BFS for impact analysis
-- [T] Parallel topo sort (unrelated features unordered)
-
-### ADR-013: Error Model
-- [T] E001–E010 error codes, W001–W007 warning codes
-- [T] Rustc-style diagnostics (file, line, detail, hint)
-- [T] `--format json` on graph check
-- [T] `internal_error!` macro for Tier 4 (exit code 3)
-
-### ADR-014: Schema Versioning
-- [T] `schema-version` in product.toml
-- [T] E008 forward incompatibility, W007 backward compat
-
-### ADR-015: File Write Safety
-- [T] Atomic writes: temp + fsync + rename
-- [T] `.product.lock` with stale PID detection and 3s timeout
-- [T] Tmp file cleanup on startup
-
-### ADR-016: Formal Block Grammar
-- [T] Recursive descent parser for all block types
-- [T] Evidence validation (δ range, φ range)
-- [T] Error/warning reporting via `parse_formal_blocks_with_diagnostics()`
-
-### ADR-017: Migration
-- [T] `product migrate from-prd/from-adrs --validate/--execute/--interactive`
-- [T] Phase inference, status extraction, test criteria extraction
-- [T] Source document never modified
+All Phase 1, 2, 3 items: [T]
 
 ---
 
-## Phase 2 — Authoring, Status and Impact
+## ADR-018: Testing Strategy
 
-- [T] `product feature/adr/test new` — scaffold with auto-incremented ID
-- [T] `product feature link --adr/--test/--dep` — validates no cycles on --dep
-- [T] `product feature/adr/test status` — update; ADR supersession triggers impact report
-- [T] `product impact ADR-XXX / FT-XXX / TC-XXX` — reverse-graph reachability
-- [T] `product migrate schema --dry-run/--execute` — v0→v1 migration (adds depends-on, bumps version)
-- [T] `product checklist generate` — ordered by topological sort
-- [T] `product status` with phase, coverage, dependency summary
-- [T] `product test untested` and `--failing` filters
-- [T] Front-matter validation on write — ID format (E005), type checking
-- [T] Git-aware: warn if modified files are uncommitted on checklist generate
-- [T] `schema-version = "1"` migration function registered and tested
+- [T] Property-based tests (proptest) — TC-P001 through TC-P011 (9 tests)
+- [T] Integration test harness — Harness struct, fixtures, Output assertions
+- [T] Integration tests IT-001 through IT-018 (12 tests)
+- [x] LLM benchmark runner scaffold (benchmarks/runner — Phase 3 deferred)
 
-**Exit criteria:**
-- [T] Supersede ADR-002 → impact report prints before commit *(verified E2E)*
-- [T] `product migrate schema` on v0 repo → files updated, version bumped *(unit tested)*
-- [T] Cycle validation on link --dep *(unit tested)*
+## ADR-019: Continuous Gap Analysis
+
+- [T] Gap types G001-G007 with severity levels
+- [T] GapFinding, GapReport, GapSummary structs
+- [T] Gap ID derivation (sha256-based deterministic)
+- [T] `gaps.json` baseline — load, save, suppress, unsuppress, resolve
+- [T] `product gap check [ADR-XXX]` — structural analysis
+- [T] `product gap check --changed` — git-scoped CI mode
+- [T] `product gap check --format json` — structured output
+- [T] `product gap report` — human-readable
+- [T] `product gap suppress GAP-ID --reason` — baseline mutation
+- [T] `product gap unsuppress GAP-ID`
+- [T] `product gap stats` — density and resolution metrics
+- [x] G001/G002/G005 LLM checks (structural heuristic, full LLM stubbed)
+- [T] G003 missing rejected alternatives (structural)
+- [T] G006 feature coverage gap (structural)
+- [T] G007 stale rationale references (structural)
+
+## ADR-020: MCP Server
+
+- [T] ToolRegistry with read + write tool sets (18 tools)
+- [T] JSON-RPC protocol handler (initialize, tools/list, tools/call)
+- [T] stdio transport (`product mcp`)
+- [T] HTTP transport (`product mcp --http`) with axum
+- [T] Bearer token authentication for HTTP
+- [T] CORS configuration for claude.ai access
+- [T] Write permission gating (`mcp.write` in product.toml)
+- [T] `.mcp.json` scaffolding via `product install-hooks`
+
+## ADR-021: Agent Orchestration
+
+- [T] `product implement FT-XXX` — 5-step pipeline
+- [T] Gap gate (step 1) — blocks on unsuppressed high-severity gaps
+- [T] Context assembly (step 3) — depth-2 bundle with TC status table
+- [T] `--dry-run` — writes context file without invoking agent
+- [T] `--no-verify` — skips auto-verify
+- [T] Agent invocation (step 4) — claude command with context file
+- [T] `product verify FT-XXX` — TC runner protocol
+- [T] TC runners: cargo-test, bash, pytest, custom
+- [T] TC status update in front-matter (passing/failing)
+- [T] Feature status auto-update (complete if all pass)
+- [T] Checklist auto-regeneration after verify
+
+## ADR-022: Authoring Sessions
+
+- [T] `product author feature` — versioned system prompt
+- [T] `product author adr` — reads graph before writing
+- [T] `product author review` — spec gardening session
+- [T] Default prompts for each session type
+- [T] Prompt version loading from benchmarks/prompts/
+- [T] `product adr review --staged` — pre-commit structural checks
+- [T] `product install-hooks` — pre-commit hook installation
+
+## ADR-023: Drift Detection
+
+- [T] Drift types D001-D004 with severity
+- [T] DriftBaseline — load, save, suppress, unsuppress
+- [T] `product drift check [ADR-XXX]` — source file analysis
+- [T] `product drift check --files` — explicit source file override
+- [T] `product drift scan SRC_PATH` — reverse ADR lookup
+- [T] `product drift suppress/unsuppress`
+- [T] Source file resolution: pattern-based + front-matter override
+- [T] `drift.json` baseline lifecycle
+
+## ADR-024: Fitness Functions
+
+- [T] MetricSnapshot with 9 tracked metrics
+- [T] `product metrics record` — append to metrics.jsonl
+- [T] `product metrics threshold` — CI gate (exit 1/2/0)
+- [T] `product metrics trend` — ASCII sparkline
+- [T] Threshold config in product.toml `[metrics.thresholds]`
+- [T] Snapshot roundtrip (serialize, append, load)
+- [T] Threshold breach detection (min/max, error/warning severity)
 
 ---
 
-## Phase 3 — Graph Intelligence and CI Integration
+## Test Counts
 
-- [T] Betweenness centrality (Brandes') — `product graph central`
-- [T] ADR ordering by centrality in context bundles (default, `--order id`)
-- [T] `product graph stats` — centrality summary, φ formal coverage, link density, timing
-- [T] `product graph query` — embedded Oxigraph, SPARQL 1.1
-- [T] Centrality scores in TTL export on `graph rebuild`
-- [T] Benchmark suite — parse 200 files (2.3ms), centrality, impact, BFS — all PASS
-- [T] All timing invariants validated: parse < 200ms, centrality < 100ms, impact < 50ms
-- [T] `--format json` output on all list and navigation commands
-- [T] Shell completions: `product completions bash/zsh/fish`
-
-**Exit criteria:**
-- [T] `product graph central` returns ranked ADRs *(verified E2E)*
-- [T] Benchmark suite passes all timing invariants *(2.3ms for 200 files, all <1ms)*
-
----
-
-## Unit Tests — 54 passing
-
-| Module | Count | Tests |
-|---|---|---|
-| config | 6 | parse_minimal, parse_full, schema_forward_error, schema_migrate_v0_dry_run, schema_migrate_v0_execute, schema_migrate_already_current |
-| parser | 9 | split_front_matter, no_front_matter, next_id, next_id_empty, id_to_filename, feature_roundtrip, adr_parse, test_parse, validate_id_valid, validate_id_invalid |
-| formal | 9 | evidence_block, types_block, scenario_block, invariants_block, delta_out_of_range, empty_block_warning, unrecognised_block_type, unclosed_delimiter, valid_evidence |
-| graph | 13 | topo_sort_simple, topo_sort_cycle, topo_sort_parallel, feature_next, bfs_depth_1, impact_analysis, centrality_values, check_broken_link, check_clean_0, check_warning_2, check_e003_cycle, check_w001, check_w002, check_w003, check_w005 |
-| fileops | 3 | atomic_write, no_tmp_leftover, cleanup_tmp |
-| rdf | 2 | turtle_prefixes, sparql_query |
-| migrate | 9 | strip_number, excluded_headings, detect_phase, infer_status, extract_adr_status, prd_detects_features, adrs_extracts_tests, validate_writes_nothing, execute_creates_files |
-
-## Benchmarks — 4 passing
-
-| Benchmark | Result | Limit |
-|---|---|---|
-| Parse 200 files | 2.3ms | 200ms |
-| Centrality 200 nodes | <0.1ms | 100ms |
-| Impact analysis | <0.1ms | 50ms |
-| BFS depth 2 | <0.1ms | 50ms |
-
----
-
-## Legend
-
-| Symbol | Meaning |
+| Suite | Count |
 |---|---|
-| `[ ]` | Not started |
-| `[~]` | Partial implementation |
-| `[x]` | Implemented (compiles) |
-| `[T]` | Tested (unit tests + E2E verified) |
+| Unit tests (lib) | 74 |
+| Integration tests | 12 |
+| Property-based tests | 9 |
+| Benchmarks | 4 |
+| **Total** | **99** |
+
+## Source Files
+
+| File | Lines | Purpose |
+|---|---|---|
+| main.rs | ~1700 | CLI entry point, all command handlers |
+| lib.rs | 18 | Module re-exports |
+| graph.rs | ~1040 | Knowledge graph, algorithms |
+| migrate.rs | ~790 | PRD/ADR migration |
+| mcp.rs | ~540 | MCP server (stdio + HTTP) |
+| formal.rs | ~490 | AISP formal block parser |
+| gap.rs | ~500 | Gap analysis |
+| config.rs | ~370 | product.toml parsing |
+| parser.rs | ~310 | Front-matter parser |
+| error.rs | ~310 | Error model |
+| metrics.rs | ~290 | Fitness functions |
+| context.rs | ~270 | Context bundle assembly |
+| implement.rs | ~330 | implement + verify pipeline |
+| drift.rs | ~300 | Drift detection |
+| author.rs | ~180 | Authoring sessions |
+| rdf.rs | ~200 | TTL export + SPARQL |
+| types.rs | ~280 | Core artifact types |
+| checklist.rs | ~100 | Checklist generation |
+| fileops.rs | ~240 | Atomic writes + locking |

@@ -5,17 +5,7 @@
 
 #![deny(clippy::unwrap_used)]
 
-mod checklist;
-mod config;
-mod context;
-mod error;
-mod fileops;
-mod formal;
-mod graph;
-mod migrate;
-mod parser;
-mod rdf;
-mod types;
+use product_lib::{author, checklist, config, context, drift, error, fileops, gap, graph, implement, mcp, metrics, migrate, parser, rdf, types};
 
 use clap::{Parser, Subcommand};
 use config::ProductConfig;
@@ -110,6 +100,104 @@ enum Commands {
         #[command(subcommand)]
         command: MigrateCommands,
     },
+    /// Gap analysis between ADRs, features, and tests
+    Gap {
+        #[command(subcommand)]
+        command: GapCommands,
+    },
+    /// MCP server (stdio or HTTP transport)
+    Mcp {
+        /// Use HTTP transport instead of stdio
+        #[arg(long)]
+        http: bool,
+        /// HTTP port (default: 7777)
+        #[arg(long, default_value = "7777")]
+        port: u16,
+        /// HTTP bind address
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+        /// Bearer token for HTTP auth
+        #[arg(long, env = "PRODUCT_MCP_TOKEN")]
+        token: Option<String>,
+        /// Explicit repo path
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Implement a feature (gap gate, context assembly, agent invocation)
+    Implement {
+        /// Feature ID
+        id: String,
+        /// Inspect context without invoking agent
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip auto-verify after agent completion
+        #[arg(long)]
+        no_verify: bool,
+    },
+    /// Verify test criteria for a feature
+    Verify {
+        /// Feature ID
+        id: String,
+    },
+    /// Start a graph-aware authoring session
+    Author {
+        #[command(subcommand)]
+        command: AuthorCommands,
+    },
+    /// Install git hooks and scaffolding
+    InstallHooks,
+    /// Drift detection — spec vs implementation
+    Drift {
+        #[command(subcommand)]
+        command: DriftCommands,
+    },
+    /// Architectural fitness functions
+    Metrics {
+        #[command(subcommand)]
+        command: MetricsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum GapCommands {
+    /// Check for gaps (optionally for a single ADR, or only changed ADRs)
+    Check {
+        /// ADR ID to check (omit for all)
+        adr_id: Option<String>,
+        /// Only check ADRs changed in the last commit
+        #[arg(long)]
+        changed: bool,
+        /// Output format: text or json
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Print a human-readable gap report for all ADRs
+    Report,
+    /// Suppress a gap finding
+    Suppress {
+        /// Gap finding ID to suppress
+        gap_id: String,
+        /// Reason for suppression
+        #[arg(long)]
+        reason: String,
+    },
+    /// Remove suppression for a gap finding
+    Unsuppress {
+        /// Gap finding ID to unsuppress
+        gap_id: String,
+    },
+    /// Print gap analysis statistics
+    Stats,
+}
+
+#[derive(Subcommand)]
+enum AuthorCommands {
+    /// Start a feature authoring session
+    Feature,
+    /// Start an ADR authoring session
+    Adr,
+    /// Start a spec review session
+    Review,
 }
 
 #[derive(Subcommand)]
@@ -189,6 +277,12 @@ enum AdrCommands {
         /// When setting to superseded, specify the replacement ADR
         #[arg(long)]
         by: Option<String>,
+    },
+    /// Review staged ADR files
+    Review {
+        /// Only review staged files (for pre-commit hook)
+        #[arg(long)]
+        staged: bool,
     },
 }
 
@@ -304,6 +398,47 @@ enum MigrateCommands {
     Validate,
 }
 
+#[derive(Subcommand)]
+enum DriftCommands {
+    /// Check for drift between ADRs and source code
+    Check {
+        /// ADR ID (optional — checks all if omitted)
+        adr_id: Option<String>,
+        /// Explicit source files to check
+        #[arg(long)]
+        files: Vec<String>,
+    },
+    /// Scan a source file to find governing ADRs
+    Scan {
+        /// Source file path
+        path: String,
+    },
+    /// Suppress a drift finding
+    Suppress {
+        drift_id: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Unsuppress a drift finding
+    Unsuppress {
+        drift_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum MetricsCommands {
+    /// Record a metric snapshot to metrics.jsonl
+    Record,
+    /// Check current metrics against thresholds
+    Threshold,
+    /// Show metric trends
+    Trend {
+        /// Metric name (optional — shows all if omitted)
+        #[arg(long)]
+        metric: Option<String>,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -346,6 +481,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Checklist { command } => handle_checklist(command),
         Commands::Completions { shell } => handle_completions(&shell),
         Commands::Migrate { command } => handle_migrate(command),
+        Commands::Gap { command } => handle_gap(command, fmt),
+        Commands::Implement { id, dry_run, no_verify } => handle_implement(&id, dry_run, no_verify),
+        Commands::Verify { id } => handle_verify(&id),
+        Commands::Author { command } => handle_author(command),
+        Commands::Mcp { http, port, bind, token, repo } => handle_mcp(http, port, &bind, token, repo),
+        Commands::InstallHooks => handle_install_hooks(),
+        Commands::Drift { command } => handle_drift(command, fmt),
+        Commands::Metrics { command } => handle_metrics(command),
     }
 }
 
@@ -788,6 +931,20 @@ fn handle_adr(cmd: AdrCommands, fmt: &str) -> BoxResult {
             let content = parser::render_adr(&front, &a.body);
             fileops::write_file_atomic(&a.path, &content)?;
             println!("{} status -> {}", id, status);
+        }
+        AdrCommands::Review { staged } => {
+            if staged {
+                let (_, root, _) = load_graph()?;
+                let warnings = author::review_staged(&root)?;
+                for w in &warnings {
+                    eprintln!("{}", w);
+                }
+                if !warnings.is_empty() {
+                    eprintln!("{} ADR review warning(s)", warnings.len());
+                }
+            } else {
+                eprintln!("Use --staged to review staged ADR files.");
+            }
         }
     }
     Ok(())
@@ -1476,5 +1633,396 @@ fn handle_migrate(cmd: MigrateCommands) -> BoxResult {
             );
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Gap commands
+// ---------------------------------------------------------------------------
+
+fn handle_gap(cmd: GapCommands, _global_fmt: &str) -> BoxResult {
+    let (_, root, graph) = load_graph()?;
+    let baseline_path = root.join("gaps.json");
+    let mut baseline = gap::GapBaseline::load(&baseline_path);
+
+    match cmd {
+        GapCommands::Check { adr_id, changed, format } => {
+            let reports = if let Some(ref id) = adr_id {
+                let findings = gap::check_adr(&graph, id, &baseline);
+                let summary = gap::GapSummary {
+                    high: findings.iter().filter(|f| f.severity == gap::GapSeverity::High && !f.suppressed).count(),
+                    medium: findings.iter().filter(|f| f.severity == gap::GapSeverity::Medium && !f.suppressed).count(),
+                    low: findings.iter().filter(|f| f.severity == gap::GapSeverity::Low && !f.suppressed).count(),
+                    suppressed: findings.iter().filter(|f| f.suppressed).count(),
+                };
+                vec![gap::GapReport {
+                    adr: id.clone(),
+                    run_date: chrono::Utc::now().to_rfc3339(),
+                    product_version: env!("CARGO_PKG_VERSION").to_string(),
+                    findings,
+                    summary,
+                }]
+            } else if changed {
+                gap::check_changed(&graph, &baseline, &root)
+            } else {
+                gap::check_all(&graph, &baseline)
+            };
+
+            if format == "json" {
+                println!("{}", serde_json::to_string_pretty(&reports).unwrap_or_default());
+            } else {
+                for report in &reports {
+                    if report.findings.is_empty() {
+                        continue;
+                    }
+                    println!("--- {} ---", report.adr);
+                    for finding in &report.findings {
+                        let suppressed_tag = if finding.suppressed { " [suppressed]" } else { "" };
+                        println!(
+                            "  [{:>6}] {} — {}{}",
+                            finding.severity, finding.code, finding.description, suppressed_tag
+                        );
+                    }
+                }
+            }
+
+            // Exit 1 if any new unsuppressed high-severity gaps
+            let has_new_high = reports.iter().any(|r| {
+                r.findings.iter().any(|f| f.severity == gap::GapSeverity::High && !f.suppressed)
+            });
+            if has_new_high {
+                process::exit(1);
+            }
+        }
+        GapCommands::Report => {
+            let reports = gap::check_all(&graph, &baseline);
+            let total_findings: usize = reports.iter().map(|r| r.findings.len()).sum();
+            let total_high: usize = reports.iter().flat_map(|r| &r.findings)
+                .filter(|f| f.severity == gap::GapSeverity::High && !f.suppressed).count();
+            let total_medium: usize = reports.iter().flat_map(|r| &r.findings)
+                .filter(|f| f.severity == gap::GapSeverity::Medium && !f.suppressed).count();
+            let total_low: usize = reports.iter().flat_map(|r| &r.findings)
+                .filter(|f| f.severity == gap::GapSeverity::Low && !f.suppressed).count();
+            let total_suppressed: usize = reports.iter().flat_map(|r| &r.findings)
+                .filter(|f| f.suppressed).count();
+
+            println!("Gap Analysis Report");
+            println!("====================");
+            println!("ADRs analysed: {}", reports.len());
+            println!("Total findings: {} (high: {}, medium: {}, low: {}, suppressed: {})",
+                total_findings, total_high, total_medium, total_low, total_suppressed);
+            println!();
+
+            for report in &reports {
+                if report.findings.is_empty() {
+                    continue;
+                }
+                println!("--- {} ({} findings) ---", report.adr, report.findings.len());
+                for finding in &report.findings {
+                    let suppressed_tag = if finding.suppressed { " [suppressed]" } else { "" };
+                    println!(
+                        "  [{:>6}] {} — {}{}",
+                        finding.severity, finding.code, finding.description, suppressed_tag
+                    );
+                    println!("           Action: {}", finding.suggested_action);
+                    if !finding.affected_artifacts.is_empty() {
+                        println!("           Affects: {}", finding.affected_artifacts.join(", "));
+                    }
+                }
+                println!();
+            }
+        }
+        GapCommands::Suppress { gap_id, reason } => {
+            baseline.suppress(&gap_id, &reason);
+            baseline.save(&baseline_path)?;
+            println!("Suppressed: {}", gap_id);
+        }
+        GapCommands::Unsuppress { gap_id } => {
+            baseline.unsuppress(&gap_id);
+            baseline.save(&baseline_path)?;
+            println!("Unsuppressed: {}", gap_id);
+        }
+        GapCommands::Stats => {
+            let reports = gap::check_all(&graph, &baseline);
+            let stats = gap::gap_stats(&reports, &baseline);
+            println!("{}", serde_json::to_string_pretty(&stats).unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Drift commands
+// ---------------------------------------------------------------------------
+
+fn handle_drift(cmd: DriftCommands, fmt: &str) -> BoxResult {
+    let (_config, root, graph) = load_graph()?;
+    let baseline_path = root.join("drift.json");
+    let mut baseline = drift::DriftBaseline::load(&baseline_path);
+
+    // Default source roots and ignore patterns
+    let source_roots = vec!["src".to_string(), "crates".to_string()];
+    let ignore = vec!["target".to_string(), ".git".to_string(), "node_modules".to_string()];
+
+    match cmd {
+        DriftCommands::Check { adr_id, files } => {
+            let all_findings: Vec<drift::DriftFinding> = if let Some(ref id) = adr_id {
+                drift::check_adr(id, &graph, &root, &baseline, &source_roots, &ignore, &files)
+            } else {
+                let adr_ids: Vec<String> = graph.adrs.keys().cloned().collect();
+                let mut combined = Vec::new();
+                for id in &adr_ids {
+                    combined.extend(drift::check_adr(id, &graph, &root, &baseline, &source_roots, &ignore, &files));
+                }
+                combined
+            };
+
+            if fmt == "json" {
+                println!("{}", serde_json::to_string_pretty(&all_findings).unwrap_or_default());
+            } else {
+                if all_findings.is_empty() {
+                    println!("No drift findings.");
+                } else {
+                    for f in &all_findings {
+                        let suppressed_tag = if f.suppressed { " [suppressed]" } else { "" };
+                        println!(
+                            "[{:>6}] {} ({}) — {}{}",
+                            f.severity, f.id, f.code, f.description, suppressed_tag
+                        );
+                        println!("         Action: {}", f.suggested_action);
+                        if !f.source_files.is_empty() {
+                            println!("         Files: {}", f.source_files.join(", "));
+                        }
+                    }
+                }
+            }
+
+            // Exit 1 if any unsuppressed high-severity findings
+            let has_high = all_findings.iter().any(|f| {
+                f.severity == drift::DriftSeverity::High && !f.suppressed
+            });
+            if has_high {
+                process::exit(1);
+            }
+        }
+        DriftCommands::Scan { path } => {
+            let source_path = std::path::Path::new(&path);
+            let adrs = drift::scan_source(source_path, &graph);
+            if fmt == "json" {
+                println!("{}", serde_json::to_string_pretty(&adrs).unwrap_or_default());
+            } else if adrs.is_empty() {
+                println!("No governing ADRs found for {}", path);
+            } else {
+                println!("Governing ADRs for {}:", path);
+                for adr_id in &adrs {
+                    let title = graph
+                        .adrs
+                        .get(adr_id)
+                        .map(|a| a.front.title.as_str())
+                        .unwrap_or("(unknown)");
+                    println!("  {} — {}", adr_id, title);
+                }
+            }
+        }
+        DriftCommands::Suppress { drift_id, reason } => {
+            baseline.suppress(&drift_id, &reason);
+            baseline.save(&baseline_path)?;
+            println!("Suppressed: {}", drift_id);
+        }
+        DriftCommands::Unsuppress { drift_id } => {
+            baseline.unsuppress(&drift_id);
+            baseline.save(&baseline_path)?;
+            println!("Unsuppressed: {}", drift_id);
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Implement command
+// ---------------------------------------------------------------------------
+
+fn handle_implement(id: &str, dry_run: bool, no_verify: bool) -> BoxResult {
+    let (config, root, graph) = load_graph()?;
+    implement::run_implement(id, &config, &root, &graph, dry_run, no_verify)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Verify command
+// ---------------------------------------------------------------------------
+
+fn handle_verify(id: &str) -> BoxResult {
+    let (config, root, graph) = load_graph()?;
+    implement::run_verify(id, &config, &root, &graph)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Author command
+// ---------------------------------------------------------------------------
+
+fn handle_author(cmd: AuthorCommands) -> BoxResult {
+    let (config, root, _graph) = load_graph()?;
+    let session_type = match cmd {
+        AuthorCommands::Feature => author::SessionType::Feature,
+        AuthorCommands::Adr => author::SessionType::Adr,
+        AuthorCommands::Review => author::SessionType::Review,
+    };
+    author::start_session(session_type, &config, &root)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// MCP command
+// ---------------------------------------------------------------------------
+
+fn handle_mcp(
+    http: bool,
+    port: u16,
+    bind: &str,
+    token: Option<String>,
+    repo: Option<String>,
+) -> BoxResult {
+    let repo_root = if let Some(ref path) = repo {
+        PathBuf::from(path)
+    } else {
+        let (_config, root) = ProductConfig::discover()?;
+        root
+    };
+
+    // Read mcp.write from product.toml (default false)
+    let write_enabled = {
+        let toml_path = repo_root.join("product.toml");
+        if toml_path.exists() {
+            let cfg = ProductConfig::load(&toml_path)?;
+            cfg.mcp.map(|m| m.write).unwrap_or(false)
+        } else {
+            false
+        }
+    };
+
+    if http {
+        let rt = tokio::runtime::Runtime::new().map_err(|e| {
+            ProductError::IoError(format!("Failed to create tokio runtime: {}", e))
+        })?;
+        rt.block_on(mcp::run_http(
+            repo_root,
+            write_enabled,
+            port,
+            bind,
+            token,
+            vec![],
+        ))?;
+    } else {
+        mcp::run_stdio(repo_root, write_enabled)?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Metrics commands
+// ---------------------------------------------------------------------------
+
+fn handle_metrics(cmd: MetricsCommands) -> BoxResult {
+    let (config, root, graph) = load_graph()?;
+    let jsonl_path = root.join("metrics.jsonl");
+
+    match cmd {
+        MetricsCommands::Record => {
+            let snapshot = metrics::record(&graph, &root);
+            metrics::append_snapshot(&snapshot, &jsonl_path)?;
+            print!("{}", metrics::render_summary(&snapshot));
+            println!("Appended to {}", jsonl_path.display());
+        }
+        MetricsCommands::Threshold => {
+            let snapshot = metrics::record(&graph, &root);
+            let thresholds = config
+                .metrics
+                .as_ref()
+                .map(|m| &m.thresholds)
+                .cloned()
+                .unwrap_or_default();
+            let (errors, warnings) = metrics::check_thresholds(&snapshot, &thresholds);
+
+            for w in &warnings {
+                eprintln!("warning: {}", w);
+            }
+            for e in &errors {
+                eprintln!("error: {}", e);
+            }
+
+            if !errors.is_empty() {
+                process::exit(1);
+            } else if !warnings.is_empty() {
+                process::exit(2);
+            }
+        }
+        MetricsCommands::Trend { metric } => {
+            let snapshots = metrics::load_snapshots(&jsonl_path);
+            if snapshots.is_empty() {
+                println!("No snapshots found. Run `product metrics record` first.");
+                return Ok(());
+            }
+            match metric {
+                Some(name) => {
+                    print!("{}", metrics::render_trend(&snapshots, &name));
+                }
+                None => {
+                    let last = snapshots.last();
+                    if let Some(s) = last {
+                        print!("{}", metrics::render_summary(s));
+                    }
+                    println!();
+                    for name in &[
+                        "spec_coverage",
+                        "test_coverage",
+                        "exit_criteria_coverage",
+                        "phi",
+                        "gap_density",
+                        "gap_resolution_rate",
+                        "drift_density",
+                        "centrality_stability",
+                    ] {
+                        print!("{}", metrics::render_trend(&snapshots, name));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// InstallHooks command
+// ---------------------------------------------------------------------------
+
+fn handle_install_hooks() -> BoxResult {
+    let (_config, root) = ProductConfig::discover()?;
+
+    // Write pre-commit hook
+    let hooks_dir = root.join(".git").join("hooks");
+    std::fs::create_dir_all(&hooks_dir)?;
+
+    let hook_path = hooks_dir.join("pre-commit");
+    let hook_content = "#!/bin/sh\n\
+        # Installed by `product install-hooks`\n\
+        exec product adr review --staged\n";
+    fileops::write_file_atomic(&hook_path, hook_content)?;
+
+    // Make executable (Unix)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    println!("Installed pre-commit hook: {}", hook_path.display());
+
+    // Write .mcp.json
+    mcp::scaffold_mcp_json(&root)?;
+    println!("Wrote .mcp.json: {}", root.join(".mcp.json").display());
+
     Ok(())
 }

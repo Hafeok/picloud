@@ -259,6 +259,7 @@ macro_rules! internal_error {
 }
 
 /// Check result of graph validation: errors, warnings, exit code
+#[derive(Default)]
 pub struct CheckResult {
     pub errors: Vec<Diagnostic>,
     pub warnings: Vec<Diagnostic>,
