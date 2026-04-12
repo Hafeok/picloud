@@ -4,23 +4,23 @@
 > Each feature maps to a PRD section and/or ADR.
 > Status: [ ] not started, [~] partial/stub, [x] implemented, [T] tested, [V] verified on cluster
 >
-> Last updated: 2026-04-11
+> Last updated: 2026-04-12
 
 ---
 
 ## Core Platform (ADR-001 — ADR-006)
 
-- [V] **Rust single binary** (ADR-001) — one binary runs on every node
+- [V] **Rust single binary** (ADR-001) — one binary runs on every node, binary size < 100MB enforced
 - [V] **Raft consensus** (ADR-002) — openraft with sled-backed persistent log store, leader election, append/vote/snapshot RPCs
 - [V] **mDNS discovery** (ADR-003) — domain-scoped `_pc-{hash}._tcp.local.`, peer add/remove, self-filter
-- [V] **Event sourcing** (ADR-004) — append-only event log, idempotent dedup, broadcast pub/sub
-- [V] **RDF graph projection** (ADR-005) — Oxigraph projector handles 16+ event types, SPARQL query
+- [V] **Event sourcing** (ADR-004) — append-only event log, idempotent dedup, broadcast pub/sub, concurrent ordering test
+- [V] **RDF graph projection** (ADR-005) — Oxigraph projector handles 16+ event types, SPARQL query, CONSTRUCT/DESCRIBE return triples, Turtle serialization
 - [V] **Oxigraph triplestore** (ADR-006) — in-memory + optional RocksDB, cursor-based replay
 
 ## Event & State Model (ADR-007, ADR-008, ADR-031, ADR-035)
 
 - [V] **Declarative resource syntax** (ADR-007) — .picloud HCL-like parser
-- [V] **Eventually consistent commands** (ADR-008) — POST /api/commands with SSE correlation
+- [V] **Eventually consistent commands** (ADR-008) — POST /api/commands with SSE correlation, Accept: text/turtle returns real Turtle via CONSTRUCT
 - [V] **Event schema versioning** (ADR-031) — schema IRIs in EventEnvelope
 - [V] **Event replay** (ADR-035) — PersistentEventLog with JSON-lines file, replay on startup
 - [T] **Log compaction** (ADR-035) — keeps recent 1000 of 10000 events
@@ -29,8 +29,8 @@
 
 - [V] **Identity provider** (ADR-009) — HMAC-SHA256 tokens, claims with aud/scopes/permissions
 - [V] **OIDC provider** (ADR-017) — .well-known/openid-configuration, JWKS, token endpoint
-- [T] **Passkey/FIDO2 auth** (ADR-025) — challenge generation + response acceptance scaffolded
-- [x] **Passkey verification** (ADR-025) — CBOR/COSE key decoding via ciborium, ES256 verification
+- [T] **Passkey/FIDO2 auth** (ADR-025) — challenge generation + response acceptance scaffolded, min 2 passkeys for admins enforced
+- [T] **Passkey verification** (ADR-025) — CBOR/COSE key decoding via ciborium, ES256 verification, remove_passkey blocked below minimum
 - [T] **Bootstrap token exchange** (ADR-026) — three-tier recovery, enrollment tokens
 - [T] **mTLS workload identity** (ADR-027) — cert signing via platform CA
 - [T] **Secret store** (ADR-009) — AES-256-GCM encryption via ring, HKDF key derivation
@@ -38,10 +38,10 @@
 ## Product Model (ADR-016, ADR-018, ADR-019, ADR-021, ADR-023)
 
 - [V] **Product as deployment unit** (ADR-016) — product IRI, hermetic isolation
-- [V] **Product event bus** (ADR-018) — per-product event store
+- [V] **Product event bus** (ADR-018) — per-product event store, subscription CRUD endpoints (POST/GET/DELETE), EventSubscription RDF projection
 - [T] **Per-product SPARQL** (ADR-019) — query_product() with named graphs
 - [T] **One active version** (ADR-021) — enforced in provisioner
-- [T] **Ontology per product version** (ADR-023) — /products/{p}/ontology endpoint
+- [T] **Ontology per product version** (ADR-023) — /products/{p}/ontology endpoint, versioned IRI /ontology/{version}, ontologyIri triple in RDF
 
 ## Storage (ADR-011, ADR-012, ADR-013, ADR-024)
 
@@ -52,8 +52,8 @@
 
 ## Workloads (ADR-010)
 
-- [T] **OCI containers** (ADR-010) — podman/docker detection, CLI-based scheduling
-- [T] **Raw binaries** (ADR-010) — tokio::process spawn, restart policies
+- [T] **OCI containers** (ADR-010) — youki/podman/docker detection, CLI-based scheduling, --memory/--cpus resource limits, --network per-product isolation
+- [T] **Raw binaries** (ADR-010) — tokio::process spawn, restart policies, setrlimit memory enforcement
 - [T] **Health/restart** (ADR-010) — Always/OnFailure/Never policies with background monitor
 
 ## Networking (ADR-014, ADR-020)
@@ -64,7 +64,7 @@
 
 ## Ingress & Proxy (ADR-028, ADR-030)
 
-- [T] **Ingress router** (ADR-028) — IngressRouter with longest-prefix-wins, external/internal tables
+- [T] **Ingress router** (ADR-028) — IngressRouter with longest-prefix-wins, external/internal tables, NetworkPolicy projection with product isolation
 - [T] **Proxy forwarding** (ADR-028) — reqwest with connect/read timeouts, 502/503 handling
 - [T] **Platform CA with BYO-CA** (ADR-030) — PlatformCa generates certs, persists to disk, BYO-CA import endpoint
 
@@ -145,6 +145,7 @@
 
 ## ADR-051: Product IAM — Roles, Scopes, Audience
 
+- [V] **Product upgrade API** (ADR-017) — POST /products/:name/upgrade, ProductUpgradeStarted/Completed/Aborted RDF projection
 - [V] **OIDC discovery** — .well-known/openid-configuration + JWKS
 - [V] **Token endpoint** — client_credentials grant, proper OAuth errors
 - [T] **Token exchange** (RFC 8693) — audience + scopes + actor claim
@@ -161,8 +162,10 @@
 - [T] **DNS resolver** — cache-first, SPARQL query fallback, authority check
 - [T] **DNS record types** — A, SRV, TXT, PTR with SPARQL templates
 - [T] **Event-driven invalidation** — 8 event types trigger cache invalidation
-- [V] **DNS server startup** — binds port 53, logs permission warning
-- [V] **DNS wire format** — hickory-proto Message parsing, query dispatch, response serialization
+- [V] **DNS server startup** — binds port 53 (UDP + TCP), logs permission warning
+- [V] **DNS wire format** — hickory-proto Message parsing, query dispatch, response serialization, TCP with 2-byte length prefix
+- [V] **DNS cache invalidation wired** — event log subscription dispatches to cache invalidation handler, staging events added
+- [V] **DNS cluster TXT record** — cluster-level TXT returns cluster_id and platform version
 - [ ] **Pi-hole integration** — config hint function exists, not tested
 
 ## ADR-053: Node Certificate Enrollment
@@ -286,7 +289,7 @@
 - [T] **Multi-node E2E tests** — failover, replication, persistence scenarios (auto-registered)
 - [T] **Config secret rejection** — sensitive keys rejected with 400, must use secrets store
 - [T] **Overwrite protection** — 409 Conflict on duplicate product apply (event log check)
-- [V] **182/182 E2E pass** — all scenarios pass on Pi 5 cluster (single-node verified)
+- [V] **186/186 E2E pass** — all scenarios pass on Pi 5 cluster (3-node verified), 566 unit tests
 
 ## PRD Gaps (not covered by any ADR)
 

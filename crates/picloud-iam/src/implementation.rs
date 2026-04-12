@@ -234,6 +234,46 @@ impl LocalIdentityProvider {
             .unwrap_or_default()
     }
 
+    /// Check if an identity has the minimum required passkeys (>= 2 for admin safety, ADR-025).
+    pub async fn has_minimum_passkeys(&self, identity_iri: &ResourceIri) -> bool {
+        self.get_passkeys(identity_iri).await.len() >= 2
+    }
+
+    /// Return the passkey count and a warning if below the admin minimum.
+    pub async fn passkey_status(&self, identity_iri: &ResourceIri) -> (usize, Option<String>) {
+        let count = self.get_passkeys(identity_iri).await.len();
+        let warning = if count < 2 {
+            Some("admin account requires at least 2 passkeys for recovery safety (ADR-025)".to_string())
+        } else {
+            None
+        };
+        (count, warning)
+    }
+
+    /// Remove a passkey by credential ID. Refuses to remove if it would leave
+    /// an admin account with fewer than 2 passkeys (ADR-025).
+    pub async fn remove_passkey(
+        &self,
+        identity_iri: &ResourceIri,
+        credential_id: &str,
+    ) -> Result<()> {
+        let key = identity_iri.as_str().to_string();
+        let mut store = self.passkeys.write().await;
+        let passkeys = store.get(&key).cloned().unwrap_or_default();
+
+        if passkeys.len() <= 2 {
+            return Err(picloud_domain::error::PiCloudError::Unauthorized {
+                identity: identity_iri.as_str().to_string(),
+                permission: "remove_passkey: admin accounts must retain at least 2 passkeys (ADR-025)".to_string(),
+            });
+        }
+
+        if let Some(entry) = store.get_mut(&key) {
+            entry.retain(|pk| pk.credential_id != credential_id);
+        }
+        Ok(())
+    }
+
     /// Token exchange (RFC 8693 / ADR-051) — exchange a user token for a
     /// new token with a specific audience (on-behalf-of flow).
     pub async fn token_exchange(
@@ -1970,5 +2010,120 @@ mod tests {
             result.unwrap_err(),
             PiCloudError::PasskeyChallengeFailed { .. }
         ));
+    }
+
+    // --- ADR-025: Passkey minimum enforcement tests ---
+
+    #[tokio::test]
+    async fn has_minimum_passkeys_with_zero() {
+        let provider = test_provider();
+        let iri = test_iri();
+        assert!(!provider.has_minimum_passkeys(&iri).await);
+    }
+
+    #[tokio::test]
+    async fn has_minimum_passkeys_with_one() {
+        let provider = test_provider();
+        let iri = test_iri();
+        provider.store_passkey(&iri, RegisteredPasskey {
+            credential_id: "cred-1".to_string(),
+            public_key: vec![1, 2, 3],
+            aaguid: None,
+            registered_at: Utc::now(),
+            last_used_at: None,
+            display_name: Some("Key 1".to_string()),
+        }).await;
+        assert!(!provider.has_minimum_passkeys(&iri).await);
+    }
+
+    #[tokio::test]
+    async fn has_minimum_passkeys_with_two() {
+        let provider = test_provider();
+        let iri = test_iri();
+        for i in 0..2 {
+            provider.store_passkey(&iri, RegisteredPasskey {
+                credential_id: format!("cred-{i}"),
+                public_key: vec![i as u8],
+                aaguid: None,
+                registered_at: Utc::now(),
+                last_used_at: None,
+                display_name: None,
+            }).await;
+        }
+        assert!(provider.has_minimum_passkeys(&iri).await);
+    }
+
+    #[tokio::test]
+    async fn passkey_status_returns_warning_when_below_minimum() {
+        let provider = test_provider();
+        let iri = test_iri();
+        provider.store_passkey(&iri, RegisteredPasskey {
+            credential_id: "cred-1".to_string(),
+            public_key: vec![1],
+            aaguid: None,
+            registered_at: Utc::now(),
+            last_used_at: None,
+            display_name: None,
+        }).await;
+        let (count, warning) = provider.passkey_status(&iri).await;
+        assert_eq!(count, 1);
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("at least 2 passkeys"));
+    }
+
+    #[tokio::test]
+    async fn passkey_status_no_warning_at_minimum() {
+        let provider = test_provider();
+        let iri = test_iri();
+        for i in 0..2 {
+            provider.store_passkey(&iri, RegisteredPasskey {
+                credential_id: format!("cred-{i}"),
+                public_key: vec![i as u8],
+                aaguid: None,
+                registered_at: Utc::now(),
+                last_used_at: None,
+                display_name: None,
+            }).await;
+        }
+        let (count, warning) = provider.passkey_status(&iri).await;
+        assert_eq!(count, 2);
+        assert!(warning.is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_passkey_blocked_at_minimum() {
+        let provider = test_provider();
+        let iri = test_iri();
+        for i in 0..2 {
+            provider.store_passkey(&iri, RegisteredPasskey {
+                credential_id: format!("cred-{i}"),
+                public_key: vec![i as u8],
+                aaguid: None,
+                registered_at: Utc::now(),
+                last_used_at: None,
+                display_name: None,
+            }).await;
+        }
+        let result = provider.remove_passkey(&iri, "cred-0").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn remove_passkey_allowed_above_minimum() {
+        let provider = test_provider();
+        let iri = test_iri();
+        for i in 0..3 {
+            provider.store_passkey(&iri, RegisteredPasskey {
+                credential_id: format!("cred-{i}"),
+                public_key: vec![i as u8],
+                aaguid: None,
+                registered_at: Utc::now(),
+                last_used_at: None,
+                display_name: None,
+            }).await;
+        }
+        let result = provider.remove_passkey(&iri, "cred-0").await;
+        assert!(result.is_ok());
+        assert_eq!(provider.get_passkeys(&iri).await.len(), 2);
     }
 }

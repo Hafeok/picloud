@@ -9,7 +9,8 @@ use std::time::Duration;
 use hickory_proto::op::{Header, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
-use tokio::net::UdpSocket;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, UdpSocket};
 use tracing::{debug, error, info, warn};
 
 use super::cache::{DnsRecord, SharedDnsCache};
@@ -67,6 +68,7 @@ pub async fn start(
 
     // Spawn UDP listener with hickory-proto wire format parsing
     let bind_addr = config.bind_addr.clone();
+    let resolver_for_udp = resolver.clone();
     tokio::spawn(async move {
         match UdpSocket::bind(&bind_addr).await {
             Ok(socket) => {
@@ -84,7 +86,7 @@ pub async fn start(
                                 }
                             };
 
-                            let response = handle_dns_query(&request, &resolver).await;
+                            let response = handle_dns_query(&request, &resolver_for_udp).await;
 
                             match response.to_bytes() {
                                 Ok(response_bytes) => {
@@ -112,6 +114,73 @@ pub async fn start(
             }
         }
     });
+
+    // Spawn TCP listener — DNS over TCP uses a 2-byte big-endian length prefix
+    // before each message. Required for responses exceeding 512 bytes (SRV, TXT).
+    let tcp_bind_addr = config.bind_addr.clone();
+    tokio::spawn(async move {
+        match TcpListener::bind(&tcp_bind_addr).await {
+            Ok(listener) => {
+                info!(addr = %tcp_bind_addr, "DNS TCP socket bound");
+                loop {
+                    match listener.accept().await {
+                        Ok((stream, src)) => {
+                            let resolver = resolver.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = handle_tcp_client(stream, &resolver).await {
+                                    debug!(src = %src, error = %e, "DNS TCP client error");
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            error!(error = %e, "DNS TCP accept error");
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    addr = %tcp_bind_addr,
+                    error = %e,
+                    "Failed to bind DNS TCP socket (requires CAP_NET_BIND_SERVICE for port 53)"
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Handle a single DNS-over-TCP client connection.
+///
+/// Each message is prefixed with a 2-byte big-endian length (RFC 1035 §4.2.2).
+/// We handle one query per connection then close (most DNS-TCP clients expect this).
+async fn handle_tcp_client(
+    mut stream: tokio::net::TcpStream,
+    resolver: &Arc<DnsResolver>,
+) -> std::io::Result<()> {
+    // Read 2-byte length prefix
+    let len = stream.read_u16().await? as usize;
+    if len == 0 || len > 65535 {
+        return Ok(());
+    }
+
+    // Read the DNS message
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+
+    let request = hickory_proto::op::Message::from_bytes(&buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    let response = handle_dns_query(&request, resolver).await;
+    let response_bytes = response
+        .to_bytes()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    // Write 2-byte length prefix + response
+    stream.write_u16(response_bytes.len() as u16).await?;
+    stream.write_all(&response_bytes).await?;
+    stream.flush().await?;
 
     Ok(())
 }

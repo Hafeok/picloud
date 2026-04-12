@@ -102,6 +102,14 @@ impl IriBuilder {
         ))
     }
 
+    /// Versioned ontology IRI (ADR-023).
+    pub fn product_ontology_versioned(&self, product_name: &str, version: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/ontology/{}",
+            self.domain.0, product_name, version
+        ))
+    }
+
     pub fn product_events(&self, product_name: &str) -> ResourceIri {
         ResourceIri(format!(
             "https://{}/products/{}/events",

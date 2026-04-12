@@ -74,6 +74,28 @@ impl Scenario for BinaryCompiles {
 }
 
 async fn check_dynamic_deps(binary_path: &std::path::Path, start: Instant) -> ScenarioResult {
+    // ADR-001: Verify binary size < 100 MB.
+    match std::fs::metadata(binary_path) {
+        Ok(meta) => {
+            let size_mb = meta.len() / (1024 * 1024);
+            if size_mb > 100 {
+                return ScenarioResult::Fail {
+                    duration: start.elapsed(),
+                    reason: format!(
+                        "Binary size {size_mb} MB exceeds 100 MB limit (ADR-001)"
+                    ),
+                };
+            }
+            tracing::info!(size_mb, path = %binary_path.display(), "Binary size OK");
+        }
+        Err(e) => {
+            return ScenarioResult::Fail {
+                duration: start.elapsed(),
+                reason: format!("Cannot stat binary: {e}"),
+            };
+        }
+    }
+
     // Run ldd on the binary to check dynamic dependencies.
     let ldd_output = match tokio::process::Command::new("ldd")
         .arg(binary_path)

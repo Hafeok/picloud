@@ -31,6 +31,8 @@ pub struct DnsResolver {
     domain: String,
     cache: SharedDnsCache,
     sparql_query: Option<SparqlQueryFn>,
+    cluster_id: Option<String>,
+    platform_version: Option<String>,
 }
 
 impl DnsResolver {
@@ -39,12 +41,21 @@ impl DnsResolver {
             domain,
             cache: Arc::new(RwLock::new(DnsCache::new())),
             sparql_query: None,
+            cluster_id: None,
+            platform_version: None,
         }
     }
 
     /// Set the SPARQL query function (injected from composition root).
     pub fn with_sparql_query(mut self, query_fn: SparqlQueryFn) -> Self {
         self.sparql_query = Some(query_fn);
+        self
+    }
+
+    /// Set the cluster identity for cluster-level TXT records.
+    pub fn with_cluster_info(mut self, cluster_id: String, version: String) -> Self {
+        self.cluster_id = Some(cluster_id);
+        self.platform_version = Some(version);
         self
     }
 
@@ -156,6 +167,16 @@ impl DnsResolver {
     }
 
     async fn query_txt(&self, name: &str) -> Result<Vec<DnsRecord>> {
+        // Cluster-level TXT: picloud.local → "cluster-id=... platform-version=..."
+        if name.eq_ignore_ascii_case(&self.domain) {
+            if let (Some(cid), Some(ver)) = (&self.cluster_id, &self.platform_version) {
+                return Ok(vec![DnsRecord::Txt {
+                    text: super::records::format_cluster_txt(cid, ver),
+                }]);
+            }
+            return Ok(Vec::new());
+        }
+
         let Some(ref query_fn) = self.sparql_query else {
             return Ok(Vec::new());
         };
@@ -224,5 +245,21 @@ mod tests {
         let resolver = DnsResolver::new("picloud.local".to_string());
         let result = resolver.resolve("test.picloud.local", "AAAA").await;
         assert!(matches!(result, ResolveResult::NotImplemented));
+    }
+
+    #[tokio::test]
+    async fn cluster_txt_returns_cluster_info() {
+        let resolver = DnsResolver::new("picloud.local".to_string())
+            .with_cluster_info("abc-123".to_string(), "0.1.0".to_string());
+        let result = resolver.resolve("picloud.local", "TXT").await;
+        let ResolveResult::Records { records, .. } = result else {
+            unreachable!("expected Records result");
+        };
+        assert_eq!(records.len(), 1);
+        let DnsRecord::Txt { ref text } = records[0] else {
+            unreachable!("expected TXT record");
+        };
+        assert!(text.contains("abc-123"));
+        assert!(text.contains("0.1.0"));
     }
 }

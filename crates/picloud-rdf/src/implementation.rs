@@ -290,6 +290,30 @@ impl OxigraphProjector {
     }
 
     /// Remove all triples about a subject in all graphs (default + named).
+    /// Remove all triples matching a subject + predicate (any object, any graph).
+    fn remove_triple(&self, subject: &str, predicate: &str) -> Result<()> {
+        let s = NamedNode::new(subject)
+            .map_err(|e| PiCloudError::Internal(format!("invalid subject IRI: {e}")))?;
+        let p = NamedNode::new(predicate)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(NamedNodeRef::from(&p)),
+                None,
+                None,
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     fn remove_triples_about_all_graphs(&self, subject: &str) -> Result<()> {
         let s = NamedNode::new(subject)
             .map_err(|e| PiCloudError::Internal(format!("invalid subject IRI: {e}")))?;
@@ -336,9 +360,55 @@ impl OxigraphProjector {
                     bindings: vec![binding],
                 })
             }
-            QueryResults::Graph(_) => Ok(QueryResult {
-                bindings: Vec::new(),
-            }),
+            QueryResults::Graph(graph) => {
+                let mut bindings = Vec::new();
+                for triple_result in graph {
+                    let triple = triple_result
+                        .map_err(|e| PiCloudError::Internal(format!("graph triple error: {e}")))?;
+                    bindings.push(serde_json::json!({
+                        "subject": term_to_json(&triple.subject.into()),
+                        "predicate": term_to_json(&triple.predicate.into()),
+                        "object": term_to_json(&triple.object),
+                    }));
+                }
+                Ok(QueryResult { bindings })
+            }
+        }
+    }
+
+    /// Execute a SPARQL CONSTRUCT/DESCRIBE and serialize the result as Turtle.
+    ///
+    /// Returns the Turtle string, or an error if the query is not a graph query.
+    fn execute_query_to_turtle(&self, sparql: &str) -> Result<String> {
+        let results = self
+            .store
+            .query(sparql)
+            .map_err(|e| PiCloudError::Internal(format!("SPARQL query failed: {e}")))?;
+        match results {
+            QueryResults::Graph(graph) => {
+                let mut serializer = oxigraph::io::RdfSerializer::from_format(
+                    oxigraph::io::RdfFormat::Turtle,
+                )
+                .for_writer(Vec::new());
+                for triple_result in graph {
+                    let triple = triple_result
+                        .map_err(|e| PiCloudError::Internal(format!("graph triple error: {e}")))?;
+                    serializer
+                        .serialize_triple(&triple)
+                        .map_err(|e| PiCloudError::Internal(format!("turtle serialize error: {e}")))?;
+                }
+                let output = serializer
+                    .finish()
+                    .map_err(|e| PiCloudError::Internal(format!("turtle finish error: {e}")))?;
+                String::from_utf8(output)
+                    .map_err(|e| PiCloudError::Internal(format!("turtle utf8 error: {e}")))
+            }
+            QueryResults::Solutions(_) | QueryResults::Boolean(_) => {
+                // For SELECT/ASK queries, fall back to JSON representation
+                let result = self.execute_query(sparql)?;
+                serde_json::to_string_pretty(&result.bindings)
+                    .map_err(|e| PiCloudError::Internal(format!("json serialize error: {e}")))
+            }
         }
     }
 
@@ -662,6 +732,54 @@ impl OxigraphProjector {
             }
         }
 
+        // Project NetworkPolicy-specific triples (ADR-028)
+        if resource_type == "NetworkPolicy" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("NetworkPolicy").into(),
+            )?;
+            if let Some(isolation_type) = event.payload["isolation_type"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}isolationType"),
+                    Literal::new_simple_literal(isolation_type).into(),
+                )?;
+            }
+        }
+
+        // Project EventSubscription-specific triples (ADR-018)
+        if resource_type == "EventSubscription" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("EventSubscription").into(),
+            )?;
+            if let Some(source) = event.payload["source_product"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}sourceProduct"),
+                    Literal::new_simple_literal(source).into(),
+                )?;
+            }
+            if let Some(event_type) = event.payload["event_type"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}eventType"),
+                    Literal::new_simple_literal(event_type).into(),
+                )?;
+            }
+            if let Some(handler) = event.payload["handler"].as_str() {
+                if !handler.is_empty() {
+                    self.insert_triple(
+                        resource_iri_str,
+                        &format!("{PICLOUD_NS}handler"),
+                        Literal::new_simple_literal(handler).into(),
+                    )?;
+                }
+            }
+        }
+
         debug!(resource_iri = resource_iri_str, "projected ResourceDeclared");
         Ok(())
     }
@@ -796,6 +914,36 @@ impl OxigraphProjector {
                 .into(),
         )?;
 
+        // ADR-023: Project versioned ontology IRI
+        let ontology_iri = self.iri_builder.product_ontology_versioned(product_name, version);
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}ontologyIri"),
+            NamedNode::new(ontology_iri.as_str())
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?
+                .into(),
+        )?;
+
+        // ADR-028: Default product network isolation policy
+        let policy_iri = format!("{}/network-policy", product_iri_str);
+        self.insert_triple(
+            &policy_iri,
+            RDF_TYPE,
+            picloud_term("NetworkPolicy").into(),
+        )?;
+        self.insert_triple(
+            &policy_iri,
+            &format!("{PICLOUD_NS}isolationType"),
+            Literal::new_simple_literal("product").into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}networkPolicy"),
+            NamedNode::new(&policy_iri)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?
+                .into(),
+        )?;
+
         debug!(product_iri = product_iri_str, "projected ProductDeployed");
         Ok(())
     }
@@ -891,6 +1039,112 @@ impl OxigraphProjector {
         }
 
         debug!(product_iri = product_iri_str, "projected ProductDeleted");
+        Ok(())
+    }
+
+    /// Project a ProductUpgradeStarted event (ADR-017).
+    fn project_product_upgrade_started(&self, event: &EventEnvelope) -> Result<()> {
+        let product_iri_str = event.payload["product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let from_version = event.payload["from_version"]
+            .as_str()
+            .unwrap_or("unknown");
+        let to_version = event.payload["to_version"]
+            .as_str()
+            .unwrap_or("unknown");
+
+        // Set upgrade state
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}upgradeState"),
+            Literal::new_simple_literal("Provisioning").into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}upgradeFromVersion"),
+            Literal::new_simple_literal(from_version).into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}upgradeToVersion"),
+            Literal::new_simple_literal(to_version).into(),
+        )?;
+        // Update status
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}status"))?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("upgrading").into(),
+        )?;
+
+        debug!(product_iri = product_iri_str, to_version, "projected ProductUpgradeStarted");
+        Ok(())
+    }
+
+    /// Project a ProductUpgradeCompleted event (ADR-017).
+    fn project_product_upgrade_completed(&self, event: &EventEnvelope) -> Result<()> {
+        let product_iri_str = event.payload["product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let version = event.payload["to_version"]
+            .as_str()
+            .or_else(|| event.payload["version"].as_str())
+            .unwrap_or("unknown");
+
+        // Update version
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}version"))?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}version"),
+            Literal::new_simple_literal(version).into(),
+        )?;
+        // Clear upgrade state
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}upgradeState"))?;
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}upgradeFromVersion"))?;
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}upgradeToVersion"))?;
+        // Set status back to deployed
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}status"))?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("deployed").into(),
+        )?;
+
+        debug!(product_iri = product_iri_str, version, "projected ProductUpgradeCompleted");
+        Ok(())
+    }
+
+    /// Project a ProductUpgradeAborted event (ADR-017).
+    fn project_product_upgrade_aborted(&self, event: &EventEnvelope) -> Result<()> {
+        let product_iri_str = event.payload["product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let reason = event.payload["reason"]
+            .as_str()
+            .unwrap_or("unknown");
+
+        // Set upgrade state to failed
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}upgradeState"))?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}upgradeState"),
+            Literal::new_simple_literal("Failed").into(),
+        )?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}upgradeFailureReason"),
+            Literal::new_simple_literal(reason).into(),
+        )?;
+        // Set status
+        self.remove_triple(product_iri_str, &format!("{PICLOUD_NS}status"))?;
+        self.insert_triple(
+            product_iri_str,
+            &format!("{PICLOUD_NS}status"),
+            Literal::new_simple_literal("upgrade_failed").into(),
+        )?;
+
+        debug!(product_iri = product_iri_str, reason, "projected ProductUpgradeAborted");
         Ok(())
     }
 
@@ -2462,6 +2716,9 @@ impl StateProjector for OxigraphProjector {
             "IdentityCreated" => self.project_identity_created(event),
             "ProductDeployed" => self.project_product_deployed(event),
             "ProductDeleted" => self.project_product_deleted(event),
+            "ProductUpgradeStarted" => self.project_product_upgrade_started(event),
+            "ProductUpgradeCompleted" => self.project_product_upgrade_completed(event),
+            "ProductUpgradeAborted" => self.project_product_upgrade_aborted(event),
             "MetricRecorded" => self.project_metric_recorded(event),
             "TagAdded" => self.project_tag_added(event),
             "TagRemoved" => self.project_tag_removed(event),
@@ -2556,6 +2813,10 @@ impl StateProjector for OxigraphProjector {
             "SELECT * WHERE {{ GRAPH <{product_graph}> {{ {sparql} }} }}"
         );
         self.execute_query(&wrapped)
+    }
+
+    async fn query_turtle(&self, sparql: &str) -> Result<String> {
+        self.execute_query_to_turtle(sparql)
     }
 }
 
@@ -3944,5 +4205,207 @@ mod tests {
         assert_eq!(result.bindings.len(), 1);
         assert_eq!(result.bindings[0]["blobs"]["value"].as_str().unwrap(), "42");
         assert_eq!(result.bindings[0]["bytes"]["value"].as_str().unwrap(), "1073741824");
+    }
+
+    // --- CONSTRUCT/DESCRIBE serialization tests (ADR-005) ---
+
+    fn make_event_generic(event_type: &str, payload: serde_json::Value) -> EventEnvelope {
+        let iri_builder = make_iri_builder();
+        let source = payload.get("node_iri")
+            .or_else(|| payload.get("product_iri"))
+            .or_else(|| payload.get("resource_iri"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| ResourceIri::new(s).ok())
+            .unwrap_or_else(|| iri_builder.cluster_root());
+        let product = payload.get("product").and_then(|v| v.as_str()).map(String::from)
+            .or_else(|| payload.get("product_name").and_then(|v| v.as_str()).map(String::from));
+        EventEnvelope::new(
+            iri_builder.event_schema(event_type, 1),
+            event_type,
+            source,
+            product,
+            Uuid::new_v4(),
+            payload,
+        )
+    }
+
+    #[tokio::test]
+    async fn construct_query_returns_triples() {
+        let projector = OxigraphProjector::new().unwrap();
+        let event = make_event_generic("NodeJoined", serde_json::json!({
+            "node_id": "test-node-id",
+            "node_name": "test-node",
+            "node_iri": "https://picloud.local/nodes/test-node",
+            "address": "192.168.1.1:7443",
+        }));
+        projector.project(&event).await.unwrap();
+
+        let result = projector.execute_query(
+            "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o . FILTER(CONTAINS(STR(?s), 'test-node')) } LIMIT 10"
+        ).unwrap();
+        assert!(!result.bindings.is_empty(), "CONSTRUCT should return triples");
+        let first = &result.bindings[0];
+        assert!(first.get("subject").is_some());
+        assert!(first.get("predicate").is_some());
+        assert!(first.get("object").is_some());
+    }
+
+    #[tokio::test]
+    async fn construct_to_turtle_returns_valid_turtle() {
+        let projector = OxigraphProjector::new().unwrap();
+        let event = make_event_generic("NodeJoined", serde_json::json!({
+            "node_id": "turtle-test-id",
+            "node_name": "turtle-node",
+            "node_iri": "https://picloud.local/nodes/turtle-node",
+            "address": "10.0.0.1:7443",
+        }));
+        projector.project(&event).await.unwrap();
+
+        let turtle = projector.execute_query_to_turtle(
+            "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o . FILTER(CONTAINS(STR(?s), 'turtle-node')) } LIMIT 10"
+        ).unwrap();
+        assert!(!turtle.trim().is_empty(), "Turtle output should not be empty");
+        assert!(turtle.contains("turtle-node"), "Turtle should contain node name");
+    }
+
+    #[tokio::test]
+    async fn remove_triple_removes_specific_predicate() {
+        let projector = OxigraphProjector::new().unwrap();
+        let event = make_event_generic("ProductDeployed", serde_json::json!({
+            "product_iri": "https://picloud.local/products/remove-test",
+            "product_name": "remove-test",
+            "version": "1.0.0",
+        }));
+        projector.project(&event).await.unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?v WHERE {{ <https://picloud.local/products/remove-test> <{PICLOUD_NS}version> ?v }}")
+        ).unwrap();
+        assert_eq!(result.bindings.len(), 1);
+
+        projector.remove_triple(
+            "https://picloud.local/products/remove-test",
+            &format!("{PICLOUD_NS}version"),
+        ).unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?v WHERE {{ <https://picloud.local/products/remove-test> <{PICLOUD_NS}version> ?v }}")
+        ).unwrap();
+        assert!(result.bindings.is_empty());
+
+        let result = projector.execute_query(
+            &format!("SELECT ?t WHERE {{ <https://picloud.local/products/remove-test> <{PICLOUD_NS}name> ?t }}")
+        ).unwrap();
+        assert!(!result.bindings.is_empty(), "Other triples should survive removal");
+    }
+
+    // --- Upgrade projection tests (ADR-017) ---
+
+    #[tokio::test]
+    async fn project_product_upgrade_started_sets_state() {
+        let projector = OxigraphProjector::new().unwrap();
+        let deploy = make_event_generic("ProductDeployed", serde_json::json!({
+            "product_iri": "https://picloud.local/products/upgrade-test",
+            "product_name": "upgrade-test",
+            "version": "1.0.0",
+        }));
+        projector.project(&deploy).await.unwrap();
+
+        let upgrade = make_event_generic("ProductUpgradeStarted", serde_json::json!({
+            "product_iri": "https://picloud.local/products/upgrade-test",
+            "from_version": "1.0.0",
+            "to_version": "2.0.0",
+        }));
+        projector.project(&upgrade).await.unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?state WHERE {{ <https://picloud.local/products/upgrade-test> <{PICLOUD_NS}upgradeState> ?state }}")
+        ).unwrap();
+        assert_eq!(result.bindings[0]["state"]["value"].as_str().unwrap(), "Provisioning");
+    }
+
+    #[tokio::test]
+    async fn project_product_upgrade_completed_updates_version() {
+        let projector = OxigraphProjector::new().unwrap();
+        let deploy = make_event_generic("ProductDeployed", serde_json::json!({
+            "product_iri": "https://picloud.local/products/upg-done",
+            "product_name": "upg-done",
+            "version": "1.0.0",
+        }));
+        projector.project(&deploy).await.unwrap();
+        let complete = make_event_generic("ProductUpgradeCompleted", serde_json::json!({
+            "product_iri": "https://picloud.local/products/upg-done",
+            "to_version": "2.0.0",
+        }));
+        projector.project(&complete).await.unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?v WHERE {{ <https://picloud.local/products/upg-done> <{PICLOUD_NS}version> ?v }}")
+        ).unwrap();
+        assert_eq!(result.bindings[0]["v"]["value"].as_str().unwrap(), "2.0.0");
+        let result = projector.execute_query(
+            &format!("SELECT ?s WHERE {{ <https://picloud.local/products/upg-done> <{PICLOUD_NS}upgradeState> ?s }}")
+        ).unwrap();
+        assert!(result.bindings.is_empty());
+    }
+
+    // --- NetworkPolicy projection test (ADR-028) ---
+
+    #[tokio::test]
+    async fn product_deployed_creates_network_policy() {
+        let projector = OxigraphProjector::new().unwrap();
+        let event = make_event_generic("ProductDeployed", serde_json::json!({
+            "product_iri": "https://picloud.local/products/net-test",
+            "product_name": "net-test",
+            "version": "1.0.0",
+        }));
+        projector.project(&event).await.unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?type WHERE {{ <https://picloud.local/products/net-test/network-policy> <{RDF_TYPE}> ?type }}")
+        ).unwrap();
+        assert!(!result.bindings.is_empty(), "NetworkPolicy should exist");
+    }
+
+    // --- EventSubscription projection test (ADR-018) ---
+
+    #[tokio::test]
+    async fn event_subscription_projects_specific_triples() {
+        let projector = OxigraphProjector::new().unwrap();
+        let event = make_event_generic("ResourceDeclared", serde_json::json!({
+            "resource_iri": "https://picloud.local/products/sub-test/subscriptions/my-sub",
+            "resource_type": "EventSubscription",
+            "product": "sub-test",
+            "name": "my-sub",
+            "source_product": "producer-app",
+            "event_type": "OrderPlaced",
+            "handler": "handle_order",
+        }));
+        projector.project(&event).await.unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?src WHERE {{ <https://picloud.local/products/sub-test/subscriptions/my-sub> <{PICLOUD_NS}sourceProduct> ?src }}")
+        ).unwrap();
+        assert_eq!(result.bindings[0]["src"]["value"].as_str().unwrap(), "producer-app");
+    }
+
+    // --- Versioned ontology IRI test (ADR-023) ---
+
+    #[tokio::test]
+    async fn product_deployed_projects_versioned_ontology_iri() {
+        let projector = OxigraphProjector::new().unwrap();
+        let event = make_event_generic("ProductDeployed", serde_json::json!({
+            "product_iri": "https://picloud.local/products/onto-test",
+            "product_name": "onto-test",
+            "version": "3.0.0",
+        }));
+        projector.project(&event).await.unwrap();
+
+        let result = projector.execute_query(
+            &format!("SELECT ?o WHERE {{ <https://picloud.local/products/onto-test> <{PICLOUD_NS}ontologyIri> ?o }}")
+        ).unwrap();
+        assert!(!result.bindings.is_empty());
+        let iri = result.bindings[0]["o"]["value"].as_str().unwrap();
+        assert!(iri.contains("ontology/3.0.0"), "Ontology IRI should contain version: {iri}");
     }
 }

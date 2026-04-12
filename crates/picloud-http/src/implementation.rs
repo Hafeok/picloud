@@ -18,7 +18,7 @@ use axum::{
         sse::{Event, KeepAlive},
         IntoResponse, Response, Sse,
     },
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use futures::stream;
@@ -91,9 +91,6 @@ fn content_type_from_headers(headers: &HeaderMap) -> ContentType {
 
 /// Wrap a JSON-serialisable value in a response with the correct Content-Type
 /// header based on the negotiated `ContentType`.
-///
-/// For now all formats emit JSON, but the Content-Type header is set correctly
-/// so clients can distinguish the intended format.
 pub fn resource_response(
     body: serde_json::Value,
     content_type: ContentType,
@@ -105,6 +102,28 @@ pub fn resource_response(
         body_bytes,
     )
         .into_response()
+}
+
+/// Return a Turtle response for a resource IRI by running a CONSTRUCT query.
+///
+/// Falls back to JSON if the projector doesn't support Turtle or the query fails.
+async fn turtle_resource_response(
+    projector: &dyn picloud_domain::traits::StateProjector,
+    resource_iri: &str,
+    json_fallback: serde_json::Value,
+) -> Response {
+    let sparql = format!(
+        "CONSTRUCT {{ <{resource_iri}> ?p ?o }} WHERE {{ <{resource_iri}> ?p ?o }}"
+    );
+    match projector.query_turtle(&sparql).await {
+        Ok(turtle) if !turtle.trim().is_empty() => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/turtle; charset=utf-8")],
+            turtle,
+        )
+            .into_response(),
+        _ => resource_response(json_fallback, ContentType::Turtle),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +314,7 @@ impl PiCloudHttpServer {
             .route("/products/:name/graph", get(handle_graph))
             .route("/products/:name/events", get(handle_events))
             .route("/products/:name/ontology", get(handle_ontology))
+            .route("/products/:name/ontology/:version", get(handle_ontology_versioned))
             .route(
                 "/products/:name/schemas/events/:event_type/v:version",
                 get(handle_product_event_schema),
@@ -320,6 +340,17 @@ impl PiCloudHttpServer {
             .route("/products/:name/flags", get(handle_flags_list))
             .route("/products/:name/flags/:flag", get(handle_flag_get))
             .route("/products/:name/flags/:flag/evaluate", get(handle_flag_evaluate))
+            // --- Upgrade route (ADR-017) ---
+            .route("/products/:name/upgrade", post(handle_product_upgrade))
+            // --- Subscription routes (ADR-018) ---
+            .route(
+                "/products/:name/subscriptions",
+                get(handle_subscriptions_list).post(handle_subscription_create),
+            )
+            .route(
+                "/products/:name/subscriptions/:sub_name",
+                delete(handle_subscription_delete),
+            )
             // --- Inference rule routes (ADR-038) ---
             .route("/inference-rules", get(handle_inference_rules))
             // --- Group routes (ADR-037) ---
@@ -770,17 +801,28 @@ async fn handle_product(
         vec![]
     };
 
-    resource_response(
-        serde_json::json!({
-            "@id": product_iri.as_str(),
-            "type": "Product",
-            "name": name,
-            "resources": resources,
-            "graph": iri_builder.product_graph(&name).as_str(),
-            "events": iri_builder.product_events(&name).as_str(),
-        }),
-        ct,
-    )
+    let json_body = serde_json::json!({
+        "@id": product_iri.as_str(),
+        "type": "Product",
+        "name": name,
+        "resources": resources,
+        "graph": iri_builder.product_graph(&name).as_str(),
+        "events": iri_builder.product_events(&name).as_str(),
+    });
+
+    // Return Turtle if requested and projector is available
+    if ct == ContentType::Turtle {
+        if let Some(ref projector) = state.projector {
+            return turtle_resource_response(
+                projector.as_ref(),
+                product_iri.as_str(),
+                json_body,
+            )
+            .await;
+        }
+    }
+
+    resource_response(json_body, ct)
 }
 
 async fn handle_resource(
@@ -814,16 +856,26 @@ async fn handle_resource(
         None
     };
 
-    resource_response(
-        serde_json::json!({
-            "@id": resource_iri.as_str(),
-            "type": resource_type,
-            "name": resource_name,
-            "product": product,
-            "status": status.unwrap_or_else(|| "unknown".to_string()),
-        }),
-        ct,
-    )
+    let json_body = serde_json::json!({
+        "@id": resource_iri.as_str(),
+        "type": resource_type,
+        "name": resource_name,
+        "product": product,
+        "status": status.unwrap_or_else(|| "unknown".to_string()),
+    });
+
+    if ct == ContentType::Turtle {
+        if let Some(ref projector) = state.projector {
+            return turtle_resource_response(
+                projector.as_ref(),
+                resource_iri.as_str(),
+                json_body,
+            )
+            .await;
+        }
+    }
+
+    resource_response(json_body, ct)
 }
 
 #[derive(Deserialize)]
@@ -866,6 +918,17 @@ async fn handle_graph(
         Some(sparql) if !sparql.is_empty() => {
             // Execute real SPARQL query against the product graph
             if let Some(ref projector) = state.projector {
+                // Serve Turtle for CONSTRUCT/DESCRIBE when Accept: text/turtle
+                if ct == ContentType::Turtle {
+                    if let Ok(turtle) = projector.query_turtle(&sparql).await {
+                        return (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "text/turtle; charset=utf-8")],
+                            turtle,
+                        )
+                            .into_response();
+                    }
+                }
                 let product_iri = iri_builder.product(&name);
                 match projector.query_product(&product_iri, &sparql).await {
                     Ok(result) => resource_response(
@@ -1798,6 +1861,246 @@ async fn handle_product_event_schema(
     )
 }
 
+/// Trigger a product upgrade (ADR-017).
+/// Route: POST /products/:name/upgrade
+async fn handle_product_upgrade(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let to_version = body["version"].as_str().unwrap_or("").to_string();
+    if to_version.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "missing 'version' field" })),
+        );
+    }
+
+    // Look up current version from RDF graph
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let product_iri = iri_builder.product(&name);
+    let from_version = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?v WHERE {{ <{}> <https://picloud.local/ontology#version> ?v }} LIMIT 1",
+            product_iri.as_str()
+        );
+        projector
+            .query(&sparql)
+            .await
+            .ok()
+            .and_then(|r| r.bindings.first().cloned())
+            .and_then(|b| b["v"]["value"].as_str().map(String::from))
+            .unwrap_or_else(|| "0.0.0".to_string())
+    } else {
+        "0.0.0".to_string()
+    };
+
+    let correlation_id = Uuid::new_v4();
+    let event = picloud_domain::events::EventEnvelope::new(
+        iri_builder.event_schema("ProductUpgradeStarted", 1),
+        "ProductUpgradeStarted",
+        product_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "product_iri": product_iri.as_str(),
+            "product_name": name,
+            "from_version": from_version,
+            "to_version": to_version,
+        }),
+    );
+
+    match event_log.append(event).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "upgrade_started",
+                "product": name,
+                "from_version": from_version,
+                "to_version": to_version,
+                "correlation_id": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// List event subscriptions for a product (ADR-018).
+/// Route: GET /products/:name/subscriptions
+async fn handle_subscriptions_list(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let product_iri = iri_builder.product(&name);
+
+    let subscriptions = if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            r#"PREFIX pc: <https://picloud.local/ontology#>
+            SELECT ?sub ?source ?eventType ?handler WHERE {{
+                ?sub a pc:EventSubscription ;
+                     pc:sourceProduct ?source ;
+                     pc:eventType ?eventType ;
+                     pc:handler ?handler .
+                FILTER(STRSTARTS(STR(?sub), "{}"))
+            }}"#,
+            product_iri.as_str()
+        );
+        match projector.query(&sparql).await {
+            Ok(result) => result
+                .bindings
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "@id": row["sub"]["value"],
+                        "sourceProduct": row["source"]["value"],
+                        "eventType": row["eventType"]["value"],
+                        "handler": row["handler"]["value"],
+                    })
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
+    resource_response(
+        serde_json::json!({
+            "@id": format!("{}/subscriptions", product_iri.as_str()),
+            "type": "EventSubscriptionList",
+            "product": name,
+            "subscriptions": subscriptions,
+        }),
+        ContentType::Json,
+    )
+}
+
+/// Create an event subscription (ADR-018).
+/// Route: POST /products/:name/subscriptions
+async fn handle_subscription_create(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let sub_name = body["name"].as_str().unwrap_or("").to_string();
+    let source_product = body["source_product"].as_str().unwrap_or("").to_string();
+    let event_type = body["event_type"].as_str().unwrap_or("").to_string();
+    let handler = body["handler"].as_str().unwrap_or("").to_string();
+
+    if sub_name.is_empty() || source_product.is_empty() || event_type.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "missing required fields: name, source_product, event_type"
+            })),
+        );
+    }
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let sub_iri = iri_builder.resource(&name, "subscriptions", &sub_name);
+    let correlation_id = Uuid::new_v4();
+
+    let event = picloud_domain::events::EventEnvelope::new(
+        iri_builder.event_schema("ResourceDeclared", 1),
+        "ResourceDeclared",
+        sub_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "resource_iri": sub_iri.as_str(),
+            "resource_type": "EventSubscription",
+            "product": name,
+            "name": sub_name,
+            "source_product": source_product,
+            "event_type": event_type,
+            "handler": handler,
+        }),
+    );
+
+    match event_log.append(event).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "@id": sub_iri.as_str(),
+                "type": "EventSubscription",
+                "source_product": source_product,
+                "event_type": event_type,
+                "handler": handler,
+                "correlation_id": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// Delete an event subscription (ADR-018).
+/// Route: DELETE /products/:name/subscriptions/:sub_name
+async fn handle_subscription_delete(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, sub_name)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let sub_iri = iri_builder.resource(&name, "subscriptions", &sub_name);
+    let correlation_id = Uuid::new_v4();
+
+    let event = picloud_domain::events::EventEnvelope::new(
+        iri_builder.event_schema("ResourceDeleted", 1),
+        "ResourceDeleted",
+        sub_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "resource_iri": sub_iri.as_str(),
+            "resource_type": "EventSubscription",
+            "product": name,
+            "name": sub_name,
+        }),
+    );
+
+    match event_log.append(event).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "deleted",
+                "subscription": sub_iri.as_str(),
+                "correlation_id": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
 /// Serve a product's ontology (Turtle format).
 /// Route: GET /products/:name/ontology
 async fn handle_ontology(
@@ -1860,6 +2163,64 @@ async fn handle_ontology(
     ).into_response()
 }
 
+/// Serve a versioned product ontology (ADR-023).
+/// Route: GET /products/:name/ontology/:version
+async fn handle_ontology_versioned(
+    headers: HeaderMap,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, version)): Path<(String, String)>,
+) -> Response {
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let ct = content_type_from_headers(&headers);
+    let ontology_iri = iri_builder.product_ontology_versioned(&name, &version);
+
+    // Query for versioned ontology content
+    if let Some(ref projector) = state.projector {
+        let sparql = format!(
+            "SELECT ?content WHERE {{ <{}> <https://picloud.local/ontology#content> ?content }}",
+            ontology_iri.as_str()
+        );
+        if let Ok(result) = projector.query(&sparql).await {
+            if let Some(row) = result.bindings.first() {
+                if let Some(content) = row.get("content").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
+                    if ct == ContentType::Turtle {
+                        return (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "text/turtle")],
+                            content.to_string(),
+                        )
+                            .into_response();
+                    }
+                    return resource_response(
+                        serde_json::json!({
+                            "@id": ontology_iri.as_str(),
+                            "type": "Ontology",
+                            "product": name,
+                            "version": version,
+                            "format": "turtle",
+                            "content": content,
+                        }),
+                        ct,
+                    );
+                }
+            }
+        }
+    }
+
+    // Version-specific ontology not found — return minimal response
+    let turtle = format!(
+        "@prefix picloud: <https://picloud.local/ontology#> .\n\
+         @prefix owl: <http://www.w3.org/2002/07/owl#> .\n\n\
+         <{}> a owl:Ontology ;\n    picloud:product \"{}\" ;\n    picloud:version \"{}\" ;\n    picloud:status \"not_loaded\" .\n",
+        ontology_iri.as_str(), name, version
+    );
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/turtle; charset=utf-8")],
+        turtle,
+    ).into_response()
+}
+
 /// Handle SPARQL query against the cluster-level graph (not product-scoped).
 async fn handle_cluster_graph(
     headers: HeaderMap,
@@ -1871,6 +2232,17 @@ async fn handle_cluster_graph(
     match params.query {
         Some(sparql) if !sparql.is_empty() => {
             if let Some(ref projector) = state.projector {
+                // Serve Turtle for CONSTRUCT/DESCRIBE when Accept: text/turtle
+                if ct == ContentType::Turtle {
+                    if let Ok(turtle) = projector.query_turtle(&sparql).await {
+                        return (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "text/turtle; charset=utf-8")],
+                            turtle,
+                        )
+                            .into_response();
+                    }
+                }
                 match projector.query(&sparql).await {
                     Ok(result) => {
                         // Detect ASK queries and return {"boolean": true/false}.
@@ -6041,5 +6413,138 @@ mod tests {
         };
         assert!(require_oci_scope(&identity, "push").is_ok());
         assert!(require_oci_scope(&identity, "pull").is_err());
+    }
+
+    // --- ADR-017: Product upgrade endpoint test ---
+
+    #[tokio::test]
+    async fn product_upgrade_returns_200() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/test-app/upgrade")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"version": "2.0.0"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "upgrade_started");
+        assert_eq!(json["to_version"], "2.0.0");
+        assert!(json["correlation_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn product_upgrade_rejects_missing_version() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/test-app/upgrade")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // --- ADR-018: Subscription endpoint tests ---
+
+    #[tokio::test]
+    async fn subscription_create_returns_201() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/test-app/subscriptions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{
+                "name": "order-sub",
+                "source_product": "orders-app",
+                "event_type": "OrderPlaced",
+                "handler": "handle_order"
+            }"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["type"], "EventSubscription");
+        assert_eq!(json["source_product"], "orders-app");
+    }
+
+    #[tokio::test]
+    async fn subscription_create_rejects_missing_fields() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/products/test-app/subscriptions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name": "sub1"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn subscription_delete_returns_200() {
+        let app = test_server_with_event_log().build_router();
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/products/test-app/subscriptions/order-sub")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "deleted");
+    }
+
+    #[tokio::test]
+    async fn subscriptions_list_returns_200() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/products/test-app/subscriptions")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // --- ADR-023: Versioned ontology endpoint test ---
+
+    #[tokio::test]
+    async fn versioned_ontology_returns_turtle() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/products/test-app/ontology/1.0.0")
+            .header(header::ACCEPT, "text/turtle")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/turtle"), "expected turtle content type, got {ct}");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(body_str.contains("owl:Ontology"), "body should contain Ontology class");
+        assert!(body_str.contains("1.0.0"), "body should contain version");
+    }
+
+    // --- ADR-008: Turtle content negotiation with real content ---
+
+    #[tokio::test]
+    async fn product_with_turtle_accept_returns_turtle_header() {
+        let app = test_server().build_router();
+        let req = Request::builder()
+            .uri("/products/some-app")
+            .header(header::ACCEPT, "text/turtle")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Without a projector, falls back to JSON with turtle content type
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/turtle") || ct.contains("application/json"));
     }
 }

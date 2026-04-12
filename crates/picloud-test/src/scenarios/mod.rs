@@ -66,6 +66,7 @@ mod cascading_delete;
 mod orphan_prevention;
 mod product_full_lifecycle;
 // ADR-017
+mod http_endpoint_coverage;
 mod jwks_key_rotation;
 mod oidc_authorization_code;
 mod oidc_client_credentials;
@@ -315,6 +316,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         Box::new(orphan_prevention::OrphanPrevention),
         Box::new(product_full_lifecycle::ProductFullLifecycle),
         // ADR-017
+        Box::new(http_endpoint_coverage::HttpEndpointCoverage),
         Box::new(jwks_key_rotation::JwksKeyRotation),
         Box::new(oidc_authorization_code::OidcAuthorizationCode),
         Box::new(oidc_client_credentials::OidcClientCredentials),

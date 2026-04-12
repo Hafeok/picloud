@@ -59,6 +59,17 @@ pub trait StateProjector: Send + Sync {
     /// Execute a SPARQL query against a product's named graph
     async fn query_product(&self, product_iri: &ResourceIri, sparql: &str)
         -> Result<QueryResult>;
+
+    /// Execute a SPARQL query and serialize the result as Turtle (text/turtle).
+    ///
+    /// For CONSTRUCT/DESCRIBE queries this produces proper RDF Turtle output.
+    /// For SELECT/ASK queries this falls back to a JSON representation.
+    async fn query_turtle(&self, sparql: &str) -> Result<String> {
+        let _ = sparql;
+        Err(crate::error::PiCloudError::Internal(
+            "Turtle serialization not supported by this projector".to_string(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -779,6 +779,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8b. Start authoritative DNS server (ADR-052)
     let dns_resolver = std::sync::Arc::new(
         picloud_network::dns::resolver::DnsResolver::new(config.cluster_domain.0.clone())
+            .with_cluster_info(config.node_id.to_string(), env!("CARGO_PKG_VERSION").to_string())
     );
     let dns_cache = dns_resolver.cache();
     {
@@ -791,6 +792,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(()) => info!(port = config.dns_port, "Authoritative DNS server started"),
             Err(e) => warn!(error = %e, port = config.dns_port, "Failed to start DNS server"),
         }
+    }
+
+    // 8b-ii. Wire DNS cache invalidation to platform events (ADR-052).
+    //
+    // Subscribe to the event log and invalidate DNS cache entries when
+    // DNS-relevant events arrive (ingress changes, node joins, reschedules, etc.).
+    {
+        let dns_cache = dns_cache.clone();
+        let dns_domain = config.cluster_domain.0.clone();
+        let event_log_for_dns = event_log_trait.clone();
+        tokio::spawn(async move {
+            let mut rx = match event_log_for_dns.subscribe(EventFilter::default()).await {
+                Ok(rx) => rx,
+                Err(e) => {
+                    error!("Failed to subscribe to event log for DNS cache invalidation: {e}");
+                    return;
+                }
+            };
+            info!("DNS cache invalidation watcher started");
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        let dominated = picloud_network::dns::events::DNS_INVALIDATION_EVENTS
+                            .contains(&event.event_type.as_str());
+                        if dominated {
+                            picloud_network::dns::events::handle_event(
+                                &dns_cache,
+                                &dns_domain,
+                                &event.event_type,
+                                &event.payload,
+                            )
+                            .await;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "DNS cache invalidation watcher lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("Event log closed — stopping DNS cache invalidation watcher");
+                        break;
+                    }
+                }
+            }
+        });
     }
 
     // 8c. Initialize Certificate Revocation List (ADR-053)

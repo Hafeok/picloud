@@ -79,7 +79,7 @@ impl Scenario for SparqlQueryTypes {
             Err(e) => issues.push(format!("ASK query failed: {}", e)),
         }
 
-        // CONSTRUCT query — should return non-empty RDF.
+        // CONSTRUCT query — should return non-empty triples with subject/predicate/object.
         let construct_query = r#"
             PREFIX picloud: <https://picloud.local/ontology#>
             CONSTRUCT { ?s a picloud:Node } WHERE { ?s a picloud:Node } LIMIT 10
@@ -88,12 +88,30 @@ impl Scenario for SparqlQueryTypes {
             Ok(body) => {
                 if body.trim().is_empty() {
                     issues.push("CONSTRUCT returned empty body".to_string());
+                } else if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                    // Verify CONSTRUCT returns triples (subject/predicate/object bindings)
+                    let bindings = v.pointer("/results/bindings")
+                        .or_else(|| v.get("results"))
+                        .and_then(|r| r.as_array());
+                    if let Some(arr) = bindings {
+                        if arr.is_empty() {
+                            issues.push("CONSTRUCT returned zero triples".to_string());
+                        } else {
+                            let first = &arr[0];
+                            if first.get("subject").is_none() || first.get("predicate").is_none() || first.get("object").is_none() {
+                                issues.push(format!(
+                                    "CONSTRUCT triple missing subject/predicate/object fields: {}",
+                                    serde_json::to_string(first).unwrap_or_default()
+                                ));
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => issues.push(format!("CONSTRUCT query failed: {}", e)),
         }
 
-        // DESCRIBE query — should return non-empty RDF.
+        // DESCRIBE query — should return non-empty triples.
         let describe_query = r#"
             PREFIX picloud: <https://picloud.local/ontology#>
             DESCRIBE ?s WHERE { ?s a picloud:Node } LIMIT 1
@@ -102,9 +120,45 @@ impl Scenario for SparqlQueryTypes {
             Ok(body) => {
                 if body.trim().is_empty() {
                     issues.push("DESCRIBE returned empty body".to_string());
+                } else if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                    let bindings = v.pointer("/results/bindings")
+                        .or_else(|| v.get("results"))
+                        .and_then(|r| r.as_array());
+                    if let Some(arr) = bindings {
+                        if arr.is_empty() {
+                            issues.push("DESCRIBE returned zero triples".to_string());
+                        }
+                    }
                 }
             }
             Err(e) => issues.push(format!("DESCRIBE query failed: {}", e)),
+        }
+
+        // Turtle content negotiation — request Turtle for a CONSTRUCT query
+        {
+            let url = format!("{}/graph", ctx.config.base_url());
+            let construct_for_turtle = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 5";
+            match ctx.http_client
+                .get(&url)
+                .query(&[("query", construct_for_turtle)])
+                .header("Accept", "text/turtle")
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let ct = resp.headers().get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if !ct.contains("text/turtle") {
+                        issues.push(format!("Turtle request got Content-Type: {ct} (expected text/turtle)"));
+                    }
+                    let body = resp.text().await.unwrap_or_default();
+                    if body.trim().is_empty() {
+                        issues.push("Turtle CONSTRUCT returned empty body".to_string());
+                    }
+                }
+                Err(e) => issues.push(format!("Turtle CONSTRUCT request failed: {e}")),
+            }
         }
 
         if issues.is_empty() {

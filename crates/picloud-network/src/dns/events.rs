@@ -17,6 +17,8 @@ pub const DNS_INVALIDATION_EVENTS: &[&str] = &[
     "NodeLeft",
     "ProductDeployed",
     "ProductUpgradeCompleted",
+    "StagingDeploymentReady",
+    "StagingTeardownCompleted",
 ];
 
 /// Handle a platform event and invalidate DNS cache if relevant.
@@ -32,6 +34,7 @@ pub async fn handle_event(
         "IngressDeleted" => invalidate_ingress(cache, payload).await,
         "NodeJoined" | "NodeLeft" => invalidate_node(cache, domain, payload).await,
         "ProductDeployed" | "ProductUpgradeCompleted" => invalidate_product(cache, domain, payload).await,
+        "StagingDeploymentReady" | "StagingTeardownCompleted" => invalidate_staging(cache, domain, payload).await,
         _ => {
             debug!(event_type = %event_type, "DNS event handler: unhandled event type");
         }
@@ -77,5 +80,17 @@ async fn invalidate_product(cache: &SharedDnsCache, domain: &str, payload: &serd
             let mut cache = cache.write().await;
             cache.invalidate(&hostname);
         }
+    }
+}
+
+async fn invalidate_staging(cache: &SharedDnsCache, domain: &str, payload: &serde_json::Value) {
+    // Staging ingress uses a hostname like staging.photo-api.picloud.local
+    if let Some(hostname) = payload.get("hostname").and_then(|v| v.as_str()) {
+        let mut cache = cache.write().await;
+        cache.invalidate(hostname);
+    } else if let Some(product_name) = payload.get("product_name").and_then(|v| v.as_str()) {
+        let hostname = format!("staging.{product_name}.{domain}");
+        let mut cache = cache.write().await;
+        cache.invalidate(&hostname);
     }
 }
