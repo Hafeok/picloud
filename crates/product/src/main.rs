@@ -444,6 +444,14 @@ enum MetricsCommands {
 // ---------------------------------------------------------------------------
 
 fn main() {
+    // Handle SIGPIPE gracefully — exit silently when piped to `head` etc.
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+
     let cli = Cli::parse();
 
     let result = run(cli);
