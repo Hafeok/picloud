@@ -343,6 +343,8 @@ pub fn execute_plan(
             depends_on: vec![],
             adrs: vec![],
             tests: vec![],
+            domains: vec![],
+            domains_acknowledged: std::collections::HashMap::new(),
         };
         let content = crate::parser::render_feature(&front, &f.body);
         crate::fileops::write_file_atomic(&path, &content)?;
@@ -374,6 +376,8 @@ pub fn execute_plan(
             features: vec![],
             supersedes: vec![],
             superseded_by: vec![],
+            domains: vec![],
+            scope: crate::types::AdrScope::Domain,
         };
         let content = crate::parser::render_adr(&front, &a.body);
         crate::fileops::write_file_atomic(&path, &content)?;

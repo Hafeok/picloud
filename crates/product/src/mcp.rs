@@ -353,6 +353,7 @@ impl ToolRegistry {
                     id: id.clone(), title: title.to_string(), phase,
                     status: crate::types::FeatureStatus::Planned,
                     depends_on: vec![], adrs: vec![], tests: vec![],
+                    domains: vec![], domains_acknowledged: std::collections::HashMap::new(),
                 };
                 let body = format!("## Description\n\n[Describe {} here.]\n", title);
                 let content = crate::parser::render_feature(&front, &body);
@@ -373,6 +374,7 @@ impl ToolRegistry {
                     id: id.clone(), title: title.to_string(),
                     status: crate::types::AdrStatus::Proposed,
                     features: vec![], supersedes: vec![], superseded_by: vec![],
+                    domains: vec![], scope: crate::types::AdrScope::Domain,
                 };
                 let body = "**Status:** Proposed\n\n**Context:**\n\n**Decision:**\n\n**Rationale:**\n\n**Rejected alternatives:**\n".to_string();
                 let content = crate::parser::render_adr(&front, &body);

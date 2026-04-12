@@ -21,6 +21,12 @@ pub struct FeatureFrontMatter {
     pub adrs: Vec<String>,
     #[serde(default)]
     pub tests: Vec<String>,
+    /// Concern domains this feature touches (ADR-025)
+    #[serde(default)]
+    pub domains: Vec<String>,
+    /// Acknowledged domain gaps with reasoning (ADR-025)
+    #[serde(rename = "domains-acknowledged", default)]
+    pub domains_acknowledged: std::collections::HashMap<String, String>,
 }
 
 fn default_phase() -> u32 {
@@ -79,6 +85,35 @@ pub struct AdrFrontMatter {
     pub supersedes: Vec<String>,
     #[serde(rename = "superseded-by", default)]
     pub superseded_by: Vec<String>,
+    /// Concern domains this ADR governs (ADR-025)
+    #[serde(default)]
+    pub domains: Vec<String>,
+    /// Scope: cross-cutting, domain, or feature-specific (ADR-025)
+    #[serde(default = "default_scope")]
+    pub scope: AdrScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AdrScope {
+    CrossCutting,
+    Domain,
+    #[default]
+    FeatureSpecific,
+}
+
+fn default_scope() -> AdrScope {
+    AdrScope::FeatureSpecific
+}
+
+impl std::fmt::Display for AdrScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CrossCutting => write!(f, "cross-cutting"),
+            Self::Domain => write!(f, "domain"),
+            Self::FeatureSpecific => write!(f, "feature-specific"),
+        }
+    }
 }
 
 fn default_adr_status() -> AdrStatus {

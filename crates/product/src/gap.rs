@@ -426,6 +426,8 @@ mod tests {
                 features: vec![],
                 supersedes: vec![],
                 superseded_by: vec![],
+                domains: vec![],
+                scope: AdrScope::FeatureSpecific,
             },
             body: body.to_string(),
             path: PathBuf::from(format!("{}.md", id)),

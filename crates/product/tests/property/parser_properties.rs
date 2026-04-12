@@ -41,6 +41,8 @@ proptest! {
             depends_on: vec![],
             adrs: vec![],
             tests: vec![],
+            domains: vec![],
+            domains_acknowledged: std::collections::HashMap::new(),
         };
         let body = "Test body content.\n";
         let rendered = parser::render_feature(&front, body);

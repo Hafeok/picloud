@@ -318,6 +318,8 @@ mod tests {
                 features: vec![],
                 supersedes: vec![],
                 superseded_by: vec![],
+                domains: vec![],
+                scope: AdrScope::FeatureSpecific,
             },
             body: String::new(),
             path: PathBuf::from("adr.md"),

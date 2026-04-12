@@ -24,6 +24,9 @@ pub struct ProductConfig {
     pub mcp: Option<McpConfig>,
     #[serde(default)]
     pub metrics: Option<MetricsConfig>,
+    /// Concern domain vocabulary (ADR-025)
+    #[serde(default)]
+    pub domains: HashMap<String, String>,
 }
 
 fn default_version() -> String {

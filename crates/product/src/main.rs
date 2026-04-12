@@ -5,7 +5,7 @@
 
 #![deny(clippy::unwrap_used)]
 
-use product_lib::{author, checklist, config, context, drift, error, fileops, gap, graph, implement, mcp, metrics, migrate, parser, rdf, types};
+use product_lib::{author, checklist, config, context, domains, drift, error, fileops, gap, graph, implement, mcp, metrics, migrate, parser, rdf, types};
 
 use clap::{Parser, Subcommand};
 use config::ProductConfig;
@@ -156,6 +156,11 @@ enum Commands {
         #[command(subcommand)]
         command: MetricsCommands,
     },
+    /// Pre-flight analysis — check domain and cross-cutting coverage
+    Preflight {
+        /// Feature ID
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -247,6 +252,20 @@ enum FeatureCommands {
         id: String,
         /// New status: planned, in-progress, complete, abandoned
         new_status: String,
+    },
+    /// Acknowledge a domain or ADR gap with reasoning
+    Acknowledge {
+        /// Feature ID
+        id: String,
+        /// Domain to acknowledge
+        #[arg(long)]
+        domain: Option<String>,
+        /// ADR to acknowledge
+        #[arg(long)]
+        adr: Option<String>,
+        /// Reasoning (required)
+        #[arg(long)]
+        reason: String,
     },
 }
 
@@ -349,6 +368,15 @@ enum GraphCommands {
         /// Only show what would be linked (don't write)
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Show feature x domain coverage matrix
+    Coverage {
+        /// Filter to a specific domain
+        #[arg(long)]
+        domain: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        format: Option<String>,
     },
 }
 
@@ -503,6 +531,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::InstallHooks => handle_install_hooks(),
         Commands::Drift { command } => handle_drift(command, fmt),
         Commands::Metrics { command } => handle_metrics(command),
+        Commands::Preflight { id } => handle_preflight(&id),
     }
 }
 
@@ -665,6 +694,8 @@ fn handle_feature(cmd: FeatureCommands, fmt: &str) -> BoxResult {
                 depends_on: vec![],
                 adrs: vec![],
                 tests: vec![],
+                domains: vec![],
+                domains_acknowledged: std::collections::HashMap::new(),
             };
             let body = format!("## Description\n\n[Describe {} here.]\n", title);
             let content = parser::render_feature(&front, &body);
@@ -760,6 +791,35 @@ fn handle_feature(cmd: FeatureCommands, fmt: &str) -> BoxResult {
                         println!("  {} — removed {} from validates.features", test_id, id);
                     }
                 }
+            }
+        }
+        FeatureCommands::Acknowledge { id, domain, adr, reason } => {
+            let (_, _, graph) = load_graph()?;
+            let feature = graph
+                .features
+                .get(&id)
+                .ok_or_else(|| ProductError::NotFound(format!("feature {}", id)))?;
+
+            let updated_front = if let Some(ref domain_name) = domain {
+                domains::acknowledge_domain(feature, domain_name, &reason)?
+            } else if let Some(ref adr_id) = adr {
+                let adr_obj = graph
+                    .adrs
+                    .get(adr_id.as_str())
+                    .ok_or_else(|| ProductError::NotFound(format!("ADR {}", adr_id)))?;
+                domains::acknowledge_adr(feature, adr_obj, &reason)?
+            } else {
+                return Err(Box::new(ProductError::ConfigError(
+                    "must specify --domain or --adr".to_string(),
+                )));
+            };
+
+            let content = parser::render_feature(&updated_front, &feature.body);
+            fileops::write_file_atomic(&feature.path, &content)?;
+            if let Some(ref d) = domain {
+                println!("{} acknowledged domain '{}': {}", id, d, reason);
+            } else if let Some(ref a) = adr {
+                println!("{} acknowledged ADR '{}': {}", id, a, reason);
             }
         }
     }
@@ -897,6 +957,8 @@ fn handle_adr(cmd: AdrCommands, fmt: &str) -> BoxResult {
                 features: vec![],
                 supersedes: vec![],
                 superseded_by: vec![],
+                domains: vec![],
+                scope: types::AdrScope::Domain,
             };
             let body = "**Status:** Proposed\n\n**Context:**\n\n[Describe the context here.]\n\n**Decision:**\n\n[Describe the decision.]\n\n**Rationale:**\n\n[Explain why.]\n\n**Rejected alternatives:**\n\n- [Alternative 1]\n".to_string();
             let content = parser::render_adr(&front, &body);
@@ -1169,8 +1231,9 @@ fn handle_context(
 fn handle_graph(cmd: GraphCommands, global_format: &str) -> BoxResult {
     match cmd {
         GraphCommands::Check { format } => {
-            let (_, _, graph) = load_graph()?;
-            let result = graph.check();
+            let (config, _, graph) = load_graph()?;
+            let mut result = graph.check();
+            domains::validate_domains(&graph, &config.domains, &mut result.errors, &mut result.warnings);
             let fmt = format.as_deref().unwrap_or(global_format);
 
             if fmt == "json" {
@@ -1401,6 +1464,18 @@ fn handle_graph(cmd: GraphCommands, global_format: &str) -> BoxResult {
                 "  Updated {} feature files, {} TC files",
                 features_written, tcs_written
             );
+        }
+        GraphCommands::Coverage { domain, format } => {
+            let (config, _, graph) = load_graph()?;
+            let matrix = domains::build_coverage_matrix(&graph, &config.domains);
+            let fmt = format.as_deref().unwrap_or(global_format);
+            if fmt == "json" {
+                let json = domains::coverage_matrix_to_json(&matrix);
+                println!("{}", serde_json::to_string_pretty(&json).unwrap_or_default());
+            } else {
+                let _ = domain; // domain filter is available for future use
+                print!("{}", domains::render_coverage_matrix(&matrix, &graph));
+            }
         }
     }
     Ok(())
@@ -1975,6 +2050,16 @@ fn handle_drift(cmd: DriftCommands, fmt: &str) -> BoxResult {
 // ---------------------------------------------------------------------------
 // Implement command
 // ---------------------------------------------------------------------------
+
+fn handle_preflight(id: &str) -> BoxResult {
+    let (config, _root, graph) = load_graph()?;
+    let result = domains::preflight(&graph, id, &config.domains)?;
+    print!("{}", domains::render_preflight(&result));
+    if !result.is_clean {
+        process::exit(1);
+    }
+    Ok(())
+}
 
 fn handle_implement(id: &str, dry_run: bool, no_verify: bool) -> BoxResult {
     let (config, root, graph) = load_graph()?;

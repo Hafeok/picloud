@@ -31,6 +31,18 @@ pub fn run_implement(
     println!("product implement {}", feature_id);
     println!();
 
+    // Step 0 — Preflight (domain + cross-cutting coverage)
+    print!("  Step 0: Preflight... ");
+    let preflight_result = crate::domains::preflight(graph, feature_id, &config.domains)?;
+    if !preflight_result.is_clean {
+        println!("BLOCKED");
+        eprintln!();
+        eprintln!("{}", crate::domains::render_preflight(&preflight_result));
+        eprintln!("  resolve domain/cross-cutting gaps or acknowledge them before implementing.");
+        return Err(ProductError::ConfigError("preflight not clean".to_string()));
+    }
+    println!("OK (all domains and cross-cutting ADRs covered)");
+
     // Step 1 — Gap gate
     print!("  Step 1: Gap gate... ");
     let baseline = gap::GapBaseline::load(&root.join("gaps.json"));
