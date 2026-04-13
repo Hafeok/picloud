@@ -2,11 +2,14 @@
 id: TC-234
 title: Networking model exit criteria — DNS resolution and HTTP IRI dereferencing functional
 type: exit-criteria
-status: unimplemented
+status: passing
 validates:
-  features: []
+  features: [FT-006]
   adrs: []
 phase: 1
+runner: cargo-test
+runner-args: "tc234_networking_model_exit_criteria"
+last-run: 2026-04-13T20:03:21.025167245+00:00
 ---
 
 ⟦Λ:ExitCriteria⟧{

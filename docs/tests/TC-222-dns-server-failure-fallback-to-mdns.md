@@ -2,13 +2,14 @@
 id: TC-222
 title: DNS server failure — fallback to mDNS
 type: chaos
-status: failing
+status: passing
 validates:
   features: []
   adrs: []
 phase: 1
-runner: picloud-test
-runner-args: "dns-server-failure--fallback-to-mdns"
+runner: cargo-test
+runner-args: "tc222_dns_server_failure_fallback_to_mdns"
+last-run: 2026-04-13T20:03:21.025167245+00:00
 ---
 
 ⟦Σ:Types⟧{

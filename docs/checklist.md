@@ -129,7 +129,7 @@
 - [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
 - [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
 
-### FT-006 — Networking Model [~]
+### FT-006 — Networking Model [x]
 
 - [x] ADR-003: mDNS for Node Discovery (accepted)
 - [x] ADR-014: Service Discovery and Internal DNS in MVP (accepted)
@@ -138,35 +138,35 @@
 - [x] ADR-048: Native Ingress Router in picloud-http (accepted)
 - [x] ADR-052: Integrated DNS Server — Authoritative for Tenant Domain (accepted)
 - [x] ADR-053: Node Certificate Issuance and Enrollment (accepted)
-- [!] TC-008: dns_resolution (scenario) — failing
-- [!] TC-009: node_join_dns (scenario) — failing
-- [!] TC-010: product_fqdn_dns (scenario) — failing
-- [!] TC-011: picloud.local (scenario) — failing
-- [!] TC-012: picloud.local (scenario) — failing
-- [!] TC-040: internal_dns_resolution (scenario) — failing
-- [!] TC-041: cross_product_isolation (scenario) — failing
-- [!] TC-081: slice_dependency_enforcement (scenario) — failing
-- [!] TC-082: no_cross_slice_imports (scenario) — failing
-- [!] TC-083: cargo tree -p picloud-{slice} (scenario) — failing
-- [!] TC-084: platform_ca_export (scenario) — failing
-- [!] TC-085: byo_ca (scenario) — failing
-- [!] TC-086: cert_chain_validation (scenario) — failing
-- [!] TC-159: ingress_host_routing (scenario) — failing
-- [!] TC-160: workload_reschedule_routing (scenario) — failing
-- [!] TC-161: internal_port_isolation (scenario) — failing
-- [!] TC-162: sni_cert_selection (scenario) — failing
-- [!] TC-175: dns_a_records (scenario) — failing
-- [!] TC-176: dns_srv_records (scenario) — failing
-- [!] TC-177: dns_txt_records (scenario) — failing
-- [!] TC-178: dns_cache_invalidation (scenario) — failing
-- [!] TC-179: dns_nxdomain (scenario) — failing
-- [!] TC-180: auto_enroll_mode (scenario) — failing
-- [!] TC-181: token_enroll_single_use (scenario) — failing
-- [!] TC-182: token_enroll_expiry (scenario) — failing
-- [!] TC-183: cert_revocation (scenario) — failing
-- [!] TC-184: csr_wildcard_rejection (scenario) — failing
-- [!] TC-222: DNS server failure — fallback to mDNS (chaos) — failing
-- [ ] TC-234: Networking model exit criteria — DNS resolution and HTTP IRI dereferencing functional (exit-criteria) — unimplemented
+- [x] TC-008: dns_resolution (scenario) — passing
+- [x] TC-009: node_join_dns (scenario) — passing
+- [x] TC-010: product_fqdn_dns (scenario) — passing
+- [x] TC-011: picloud.local (scenario) — passing
+- [x] TC-012: picloud.local (scenario) — passing
+- [x] TC-040: internal_dns_resolution (scenario) — passing
+- [x] TC-041: cross_product_isolation (scenario) — passing
+- [x] TC-081: slice_dependency_enforcement (scenario) — passing
+- [x] TC-082: no_cross_slice_imports (scenario) — passing
+- [x] TC-083: cargo tree -p picloud-{slice} (scenario) — passing
+- [x] TC-084: platform_ca_export (scenario) — passing
+- [x] TC-085: byo_ca (scenario) — passing
+- [x] TC-086: cert_chain_validation (scenario) — passing
+- [x] TC-159: ingress_host_routing (scenario) — passing
+- [x] TC-160: workload_reschedule_routing (scenario) — passing
+- [x] TC-161: internal_port_isolation (scenario) — passing
+- [x] TC-162: sni_cert_selection (scenario) — passing
+- [x] TC-175: dns_a_records (scenario) — passing
+- [x] TC-176: dns_srv_records (scenario) — passing
+- [x] TC-177: dns_txt_records (scenario) — passing
+- [x] TC-178: dns_cache_invalidation (scenario) — passing
+- [x] TC-179: dns_nxdomain (scenario) — passing
+- [x] TC-180: auto_enroll_mode (scenario) — passing
+- [x] TC-181: token_enroll_single_use (scenario) — passing
+- [x] TC-182: token_enroll_expiry (scenario) — passing
+- [x] TC-183: cert_revocation (scenario) — passing
+- [x] TC-184: csr_wildcard_rejection (scenario) — passing
+- [x] TC-222: DNS server failure — fallback to mDNS (chaos) — passing
+- [x] TC-234: Networking model exit criteria — DNS resolution and HTTP IRI dereferencing functional (exit-criteria) — passing
 
 ### FT-007 — IaC & CLI Design [~]
 

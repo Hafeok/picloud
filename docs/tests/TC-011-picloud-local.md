@@ -2,13 +2,14 @@
 id: TC-011
 title: picloud.local
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-006
   adrs:
   - ADR-003
 phase: 1
-runner: picloud-test
-runner-args: "dns-resolution"
+runner: cargo-test
+runner-args: "tc011_picloud_local_root"
+last-run: 2026-04-13T20:03:21.025167245+00:00
 ---

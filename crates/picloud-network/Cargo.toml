@@ -26,3 +26,7 @@ sha2         = { workspace = true }
 ring         = { workspace = true }
 rand          = { workspace = true }
 hickory-proto = { workspace = true }
+
+[dev-dependencies]
+rustls-pemfile = { workspace = true }
+x509-parser   = { workspace = true }
