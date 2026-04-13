@@ -11,6 +11,7 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "data_product_deletion_guard"
+last-run: 2026-04-13T21:47:42.689812716+00:00
 ---
 
 attempt to delete `data-product 'photo-locations'` while `maps-app` declares a `dataProducts` dependency on it. Assert the delete is rejected. Assert the data product and its named graph remain intact.
