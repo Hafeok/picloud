@@ -2,7 +2,7 @@
 id: ADR-026
 title: Bootstrap Token Exchange and Three-Tier Passkey Recovery
 status: accepted
-features: []
+features: [FT-003]
 supersedes: []
 superseded-by: []
 domains: []
@@ -29,3 +29,7 @@ scope: domain
 - Backup key enforcement ensures Tier 1 (admin reset) is always available as long as at least one admin is accessible
 - The same token exchange mechanism is reused across bootstrap and all recovery tiers — one implementation, multiple use cases
 - All recovery operations are auditable events in the platform event log
+
+**Rejected alternatives:**
+- **Recovery via password fallback** — reintroduces passwords, contradicting the passkey-only authentication model (ADR-025).
+- **Admin-only recovery (no physical tier)** — if all admin accounts are locked out, the cluster becomes permanently inaccessible with no recovery path.

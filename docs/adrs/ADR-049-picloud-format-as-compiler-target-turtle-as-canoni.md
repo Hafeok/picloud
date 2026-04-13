@@ -2,8 +2,8 @@
 id: ADR-049
 title: .picloud Format as Compiler Target — Turtle as Canonical IaC
 status: accepted
-features: []
-supersedes: []
+features: [FT-007]
+supersedes: [ADR-007]
 superseded-by: []
 domains: []
 scope: domain
@@ -263,6 +263,10 @@ picloud-compiler/
 - `.picloud` surface format preserves developer ergonomics without requiring every developer to learn Turtle
 - Offline validation means CI/CD pipelines can validate without cluster access
 - Both `.picloud` and `.ttl` accepted means power users and LLMs can write Turtle directly when appropriate
+
+**Rejected alternatives:**
+- **YAML or JSON as IaC format** — neither is natively RDF-compatible; translating between YAML and the RDF graph requires a custom mapping layer that Turtle eliminates.
+- **Bicep-only (no Turtle)** — the Bicep-inspired DSL is a convenience; Turtle is the canonical form because it is the same language as the RDF graph, enabling round-trip fidelity.
 
 **Consequences:**
 - `picloud-compiler` is a new crate added to the workspace (depends only on `picloud-domain`)

@@ -2,7 +2,7 @@
 id: ADR-041
 title: Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events
 status: accepted
-features: []
+features: [FT-009, FT-036, FT-076, FT-077]
 supersedes: []
 superseded-by: []
 domains: []
@@ -99,6 +99,10 @@ ORDER BY DESC(?timestamp)
 - No built-in notification targets — consistent with the platform's composability philosophy (ADR-018). A notification product built on PiCloud handles Slack, email, PagerDuty etc.
 - Active alerts are queryable from the RDF graph at any time — `picloud graph query` gives the current alert state
 - Alert resolution is automatic — when the condition clears, the event fires. No manual acknowledgement needed (though products can implement that on top)
+
+**Rejected alternatives:**
+- **External alerting (Alertmanager, PagerDuty rules)** — requires external infrastructure and a separate rule language when SPARQL already queries the full platform state.
+- **Threshold-only alerting** — simple thresholds cannot express complex conditions that span multiple resource types, which SPARQL handles naturally.
 
 **Consequences:**
 - The inference engine must efficiently diff produced triples between evaluations to detect assertions and retractions

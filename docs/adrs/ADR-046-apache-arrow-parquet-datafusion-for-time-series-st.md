@@ -2,7 +2,7 @@
 id: ADR-046
 title: Apache Arrow + Parquet + DataFusion for Time-Series Storage
 status: accepted
-features: []
+features: [FT-009, FT-044, FT-045, FT-049]
 supersedes: []
 superseded-by: []
 domains: []
@@ -135,6 +135,10 @@ Delta Lake is built on Parquet and adds ACID transactions, schema evolution, and
 - Hourly partitioning means retention cleanup is O(1) — delete a directory, no compaction needed
 - Parquet is self-describing and portable — files can be analysed off-node with any Arrow-compatible tool
 - Natural upgrade path to Delta Lake when a Rust-native implementation is available
+
+**Rejected alternatives:**
+- **InfluxDB or TimescaleDB** — adds a JVM or PostgreSQL dependency; neither integrates with the platform's RDF and event log data model.
+- **RDF-only for time-series** — Oxigraph is optimised for graph queries, not columnar scans over millions of time-series data points.
 
 **Consequences:**
 - `picloud-storage` gains a `TelemetryStore` implementation backed by Parquet

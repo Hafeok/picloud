@@ -4,75 +4,112 @@
 @prefix tc: <https://product-meta/test/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-ft:FT-004 a pm:Feature ;
-    pm:title "Storage Model" ;
+ft:FT-016 a pm:Feature ;
+    pm:title "Oxigraph RDF projection of cluster state" ;
     pm:phase 1 ;
-    pm:status pm:InProgress ;
-    pm:implementedBy adr:ADR-011 ;
-    pm:implementedBy adr:ADR-012 ;
-    pm:implementedBy adr:ADR-013 ;
-    pm:implementedBy adr:ADR-024 ;
-    pm:implementedBy adr:ADR-047 ;
-    pm:validatedBy tc:TC-034 ;
-    pm:validatedBy tc:TC-035 ;
-    pm:validatedBy tc:TC-036 ;
-    pm:validatedBy tc:TC-037 ;
-    pm:validatedBy tc:TC-038 ;
-    pm:validatedBy tc:TC-039 ;
-    pm:validatedBy tc:TC-068 ;
-    pm:validatedBy tc:TC-069 ;
-    pm:validatedBy tc:TC-070 ;
-    pm:validatedBy tc:TC-153 ;
-    pm:validatedBy tc:TC-154 ;
-    pm:validatedBy tc:TC-155 ;
-    pm:validatedBy tc:TC-156 ;
-    pm:validatedBy tc:TC-157 ;
-    pm:validatedBy tc:TC-158 ;
-    pm:validatedBy tc:TC-209 ;
-    pm:validatedBy tc:TC-220 ;
-    pm:validatedBy tc:TC-221 ;
-    pm:dependsOn ft:FT-002 .
+    pm:status pm:Planned .
 
-ft:FT-001 a pm:Feature ;
-    pm:title "Resource Model" ;
+ft:FT-017 a pm:Feature ;
+    pm:title "Basic IAM: human identities, workload identities, RBAC, token issuance" ;
     pm:phase 1 ;
-    pm:status pm:Complete ;
-    pm:implementedBy adr:ADR-007 ;
-    pm:implementedBy adr:ADR-015 ;
-    pm:implementedBy adr:ADR-016 ;
-    pm:implementedBy adr:ADR-001 ;
-    pm:implementedBy adr:ADR-029 ;
-    pm:implementedBy adr:ADR-034 ;
-    pm:validatedBy tc:TC-022 ;
-    pm:validatedBy tc:TC-023 ;
-    pm:validatedBy tc:TC-024 ;
-    pm:validatedBy tc:TC-042 ;
-    pm:validatedBy tc:TC-043 ;
-    pm:validatedBy tc:TC-044 ;
-    pm:validatedBy tc:TC-045 ;
-    pm:validatedBy tc:TC-046 ;
-    pm:validatedBy tc:TC-047 ;
-    pm:validatedBy tc:TC-209 .
+    pm:status pm:Planned .
 
-ft:FT-005 a pm:Feature ;
-    pm:title "Workload Model" ;
-    pm:phase 1 ;
-    pm:status pm:InProgress ;
-    pm:implementedBy adr:ADR-010 ;
-    pm:implementedBy adr:ADR-020 ;
-    pm:implementedBy adr:ADR-022 ;
-    pm:validatedBy tc:TC-031 ;
-    pm:validatedBy tc:TC-032 ;
-    pm:validatedBy tc:TC-033 ;
-    pm:validatedBy tc:TC-058 ;
-    pm:validatedBy tc:TC-059 ;
-    pm:validatedBy tc:TC-063 ;
-    pm:validatedBy tc:TC-064 ;
-    pm:validatedBy tc:TC-065 ;
-    pm:validatedBy tc:TC-209 ;
-    pm:validatedBy tc:TC-211 ;
+ft:FT-059 a pm:Feature ;
+    pm:title "capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-232 .
+
+ft:FT-068 a pm:Feature ;
+    pm:title "Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-044 a pm:Feature ;
+    pm:title "Parquet time-series store — traces, metrics, logs with hourly partitioning" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-066 a pm:Feature ;
+    pm:title "data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-231 .
+
+ft:FT-011 a pm:Feature ;
+    pm:title "Operational Maturity" ;
+    pm:phase 4 ;
+    pm:status pm:Planned ;
     pm:dependsOn ft:FT-004 ;
-    pm:dependsOn ft:FT-003 .
+    pm:dependsOn ft:FT-002 ;
+    pm:dependsOn ft:FT-005 .
+
+ft:FT-053 a pm:Feature ;
+    pm:title "Ontology resource type — .ttl and .shacl files bound to Product version" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-029 a pm:Feature ;
+    pm:title "Raw block device support" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-034 a pm:Feature ;
+    pm:title "Offsite backup — S3-compatible, client-side encryption, incremental deduplication" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-015 a pm:Feature ;
+    pm:title "Append-only event log with Raft replication" ;
+    pm:phase 1 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-225 .
+
+ft:FT-051 a pm:Feature ;
+    pm:title "rdf-store resource type — managed Oxigraph per Product" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-070 a pm:Feature ;
+    pm:title "Data product lifecycle events" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-073 a pm:Feature ;
+    pm:title "picloud data-product list and picloud data-domain list" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-036 a pm:Feature ;
+    pm:title "Backup failure alert rules (built-in)" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-042 a pm:Feature ;
+    pm:title "OTLP endpoint at picloud.local/otel" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-037 a pm:Feature ;
+    pm:title "CLI: volume snapshots, volume restore, volume backup" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-049 a pm:Feature ;
+    pm:title "Telemetry retention policy — configurable per signal type" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-058 a pm:Feature ;
+    pm:title "Group membership rules via inference engine" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-228 .
+
+ft:FT-065 a pm:Feature ;
+    pm:title "data-domain resource type — cluster-scoped governance boundary" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
 
 ft:FT-006 a pm:Feature ;
     pm:title "Networking Model" ;
@@ -115,56 +152,129 @@ ft:FT-006 a pm:Feature ;
     pm:validatedBy tc:TC-222 ;
     pm:dependsOn ft:FT-002 .
 
-ft:FT-007 a pm:Feature ;
-    pm:title "IaC & CLI Design" ;
+ft:FT-018 a pm:Feature ;
+    pm:title "Block storage pool: NVMe contribution, volume allocation, full-replication durability" ;
     pm:phase 1 ;
-    pm:status pm:Complete ;
-    pm:implementedBy adr:ADR-015 ;
-    pm:implementedBy adr:ADR-042 ;
-    pm:implementedBy adr:ADR-049 ;
-    pm:implementedBy adr:ADR-050 ;
-    pm:validatedBy tc:TC-042 ;
-    pm:validatedBy tc:TC-043 ;
-    pm:validatedBy tc:TC-044 ;
-    pm:validatedBy tc:TC-133 ;
-    pm:validatedBy tc:TC-134 ;
-    pm:validatedBy tc:TC-135 ;
-    pm:validatedBy tc:TC-163 ;
-    pm:validatedBy tc:TC-164 ;
-    pm:validatedBy tc:TC-165 ;
-    pm:validatedBy tc:TC-166 ;
-    pm:validatedBy tc:TC-167 ;
-    pm:validatedBy tc:TC-168 ;
-    pm:validatedBy tc:TC-169 ;
-    pm:validatedBy tc:TC-170 ;
-    pm:dependsOn ft:FT-001 .
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-224 ;
+    pm:validatedBy tc:TC-225 .
 
-ft:FT-008 a pm:Feature ;
-    pm:title "Product Event Store" ;
-    pm:phase 2 ;
+ft:FT-022 a pm:Feature ;
+    pm:title "CLI: cluster init, resource apply, resource status, identity create" ;
+    pm:phase 1 ;
+    pm:status pm:Planned .
+
+ft:FT-077 a pm:Feature ;
+    pm:title "AlertFired / AlertResolved events" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-229 .
+
+ft:FT-086 a pm:Feature ;
+    pm:title "SDK generator — Rust, TypeScript, .NET generated from platform ontology" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-233 .
+
+ft:FT-095 a pm:Feature ;
+    pm:title "Multi-node Raft voter configuration tuning" ;
+    pm:phase 4 ;
+    pm:status pm:Planned .
+
+ft:FT-093 a pm:Feature ;
+    pm:title "Event log compaction and snapshotting" ;
+    pm:phase 4 ;
+    pm:status pm:Planned .
+
+ft:FT-067 a pm:Feature ;
+    pm:title "Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-231 .
+
+ft:FT-010 a pm:Feature ;
+    pm:title "SDK Model" ;
+    pm:phase 3 ;
     pm:status pm:InProgress ;
-    pm:implementedBy adr:ADR-018 ;
-    pm:implementedBy adr:ADR-019 ;
-    pm:implementedBy adr:ADR-021 ;
-    pm:implementedBy adr:ADR-023 ;
-    pm:implementedBy adr:ADR-032 ;
-    pm:validatedBy tc:TC-052 ;
-    pm:validatedBy tc:TC-053 ;
-    pm:validatedBy tc:TC-054 ;
-    pm:validatedBy tc:TC-055 ;
-    pm:validatedBy tc:TC-056 ;
-    pm:validatedBy tc:TC-057 ;
-    pm:validatedBy tc:TC-060 ;
-    pm:validatedBy tc:TC-061 ;
-    pm:validatedBy tc:TC-062 ;
-    pm:validatedBy tc:TC-066 ;
-    pm:validatedBy tc:TC-067 ;
-    pm:validatedBy tc:TC-093 ;
-    pm:validatedBy tc:TC-094 ;
-    pm:validatedBy tc:TC-095 ;
-    pm:validatedBy tc:TC-096 ;
-    pm:validatedBy tc:TC-211 ;
-    pm:dependsOn ft:FT-005 .
+    pm:implementedBy adr:ADR-033 ;
+    pm:validatedBy tc:TC-097 ;
+    pm:validatedBy tc:TC-098 ;
+    pm:validatedBy tc:TC-099 ;
+    pm:validatedBy tc:TC-218 ;
+    pm:dependsOn ft:FT-008 .
+
+ft:FT-084 a pm:Feature ;
+    pm:title "Platform-managed event routing between Products" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-030 a pm:Feature ;
+    pm:title "Secret management — encrypted at rest, workload injection" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-045 a pm:Feature ;
+    pm:title "DataFusion SQL over Parquet via picloud telemetry query" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-064 a pm:Feature ;
+    pm:title "picloud capability list — all capabilities, implementors, consumers, and fulfilment status" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-079 a pm:Feature ;
+    pm:title "Product event schema IRIs served from platform HTTP layer" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-082 a pm:Feature ;
+    pm:title "Aggregate-scoped replay (single and batch up to 1000)" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-039 a pm:Feature ;
+    pm:title "Feature flags — version-bound on/off, SDK evaluation, event invalidation" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-075 a pm:Feature ;
+    pm:title "Platform metrics agent — MetricRecorded events at 15s interval per node" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-229 .
+
+ft:FT-023 a pm:Feature ;
+    pm:title "mTLS node-to-node communication with platform-issued certificates" ;
+    pm:phase 1 ;
+    pm:status pm:Planned .
+
+ft:FT-061 a pm:Feature ;
+    pm:title "capabilities field on product — resolution validated at resource apply time" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-232 .
+
+ft:FT-050 a pm:Feature ;
+    pm:title "CLI: events stream, graph query, identity token, telemetry query" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-035 a pm:Feature ;
+    pm:title "Snapshot and backup lifecycle events" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-031 a pm:Feature ;
+    pm:title "Cascading deletion — delete Product cascades to all child resources" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-032 a pm:Feature ;
+    pm:title "Per-product event bus" ;
+    pm:phase 2 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-226 .
 
 ft:FT-009 a pm:Feature ;
     pm:title "Inference, Metrics & Alerts" ;
@@ -257,6 +367,91 @@ ft:FT-009 a pm:Feature ;
     pm:validatedBy tc:TC-217 ;
     pm:dependsOn ft:FT-008 .
 
+ft:FT-008 a pm:Feature ;
+    pm:title "Product Event Store" ;
+    pm:phase 2 ;
+    pm:status pm:InProgress ;
+    pm:implementedBy adr:ADR-018 ;
+    pm:implementedBy adr:ADR-019 ;
+    pm:implementedBy adr:ADR-021 ;
+    pm:implementedBy adr:ADR-023 ;
+    pm:implementedBy adr:ADR-032 ;
+    pm:validatedBy tc:TC-052 ;
+    pm:validatedBy tc:TC-053 ;
+    pm:validatedBy tc:TC-054 ;
+    pm:validatedBy tc:TC-055 ;
+    pm:validatedBy tc:TC-056 ;
+    pm:validatedBy tc:TC-057 ;
+    pm:validatedBy tc:TC-060 ;
+    pm:validatedBy tc:TC-061 ;
+    pm:validatedBy tc:TC-062 ;
+    pm:validatedBy tc:TC-066 ;
+    pm:validatedBy tc:TC-067 ;
+    pm:validatedBy tc:TC-093 ;
+    pm:validatedBy tc:TC-094 ;
+    pm:validatedBy tc:TC-095 ;
+    pm:validatedBy tc:TC-096 ;
+    pm:validatedBy tc:TC-211 ;
+    pm:dependsOn ft:FT-005 .
+
+ft:FT-005 a pm:Feature ;
+    pm:title "Workload Model" ;
+    pm:phase 1 ;
+    pm:status pm:InProgress ;
+    pm:implementedBy adr:ADR-010 ;
+    pm:implementedBy adr:ADR-020 ;
+    pm:implementedBy adr:ADR-022 ;
+    pm:validatedBy tc:TC-031 ;
+    pm:validatedBy tc:TC-032 ;
+    pm:validatedBy tc:TC-033 ;
+    pm:validatedBy tc:TC-058 ;
+    pm:validatedBy tc:TC-059 ;
+    pm:validatedBy tc:TC-063 ;
+    pm:validatedBy tc:TC-064 ;
+    pm:validatedBy tc:TC-065 ;
+    pm:validatedBy tc:TC-209 ;
+    pm:validatedBy tc:TC-211 ;
+    pm:dependsOn ft:FT-004 ;
+    pm:dependsOn ft:FT-003 .
+
+ft:FT-028 a pm:Feature ;
+    pm:title "Raw binary workload support" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-063 a pm:Feature ;
+    pm:title "Capability-aware event routing — platform resolves implementing Product at dispatch time" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-024 a pm:Feature ;
+    pm:title "Product resource type with versioning" ;
+    pm:phase 2 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-226 .
+
+ft:FT-071 a pm:Feature ;
+    pm:title "Data domain lifecycle events" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-057 a pm:Feature ;
+    pm:title "inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-228 .
+
+ft:FT-080 a pm:Feature ;
+    pm:title "Automatic RDF projection of Product aggregate events into Product graph" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-230 .
+
+ft:FT-013 a pm:Feature ;
+    pm:title "mDNS node discovery" ;
+    pm:phase 1 ;
+    pm:status pm:Planned .
+
 ft:FT-003 a pm:Feature ;
     pm:title "IAM Model" ;
     pm:phase 1 ;
@@ -291,29 +486,161 @@ ft:FT-003 a pm:Feature ;
     pm:validatedBy tc:TC-212 ;
     pm:dependsOn ft:FT-002 .
 
-ft:FT-010 a pm:Feature ;
-    pm:title "SDK Model" ;
-    pm:phase 3 ;
-    pm:status pm:InProgress ;
-    pm:implementedBy adr:ADR-033 ;
-    pm:validatedBy tc:TC-097 ;
-    pm:validatedBy tc:TC-098 ;
-    pm:validatedBy tc:TC-099 ;
-    pm:validatedBy tc:TC-218 ;
-    pm:dependsOn ft:FT-008 .
+ft:FT-033 a pm:Feature ;
+    pm:title "Volume snapshots — NAS storage, configurable schedule and retention" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
 
-ft:FT-011 a pm:Feature ;
-    pm:title "Operational Maturity" ;
-    pm:phase 4 ;
+ft:FT-027 a pm:Feature ;
+    pm:title "Product as App Registration — OIDC client credentials" ;
+    pm:phase 2 ;
     pm:status pm:Planned ;
-    pm:dependsOn ft:FT-004 ;
-    pm:dependsOn ft:FT-002 ;
-    pm:dependsOn ft:FT-005 .
+    pm:validatedBy tc:TC-227 .
+
+ft:FT-072 a pm:Feature ;
+    pm:title "DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-078 a pm:Feature ;
+    pm:title "event-store resource type — managed event log + aggregate streams per Product" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-230 .
+
+ft:FT-062 a pm:Feature ;
+    pm:title "Capability lifecycle events" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-083 a pm:Feature ;
+    pm:title "event-subscription resource type" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-089 a pm:Feature ;
+    pm:title ".NET Aspire integration package" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-043 a pm:Feature ;
+    pm:title "OTel event stream — in-process pub/sub for traces, metrics, logs" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-047 a pm:Feature ;
+    pm:title "CLI traces — every command produces an OTel trace" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-052 a pm:Feature ;
+    pm:title "IAM-gated SPARQL endpoint per Product" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-056 a pm:Feature ;
+    pm:title "group resource type — roles assignable to groups, users inherit" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-046 a pm:Feature ;
+    pm:title "Metric aggregator — OTel stream to MetricRecorded events every 15s" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-019 a pm:Feature ;
+    pm:title "Mounted volume support" ;
+    pm:phase 1 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-224 .
+
+ft:FT-012 a pm:Feature ;
+    pm:title "Single binary compiles to ARM64" ;
+    pm:phase 1 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-224 .
+
+ft:FT-060 a pm:Feature ;
+    pm:title "implements field on product — structural SHACL conformance validated at resource apply time" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-232 .
+
+ft:FT-040 a pm:Feature ;
+    pm:title "PICLOUD_PRODUCT_VERSION injected into all workloads at startup" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-074 a pm:Feature ;
+    pm:title "Cross-product internal graph access blocked at HTTP layer — 403 for non-owner non-admin" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-081 a pm:Feature ;
+    pm:title "Event replay — shadow projection, atomic swap, marked replay events" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-087 a pm:Feature ;
+    pm:title "SDK publication — crates.io, npm, NuGet via platform CI" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-233 .
+
+ft:FT-026 a pm:Feature ;
+    pm:title "Platform as OIDC provider — authorization endpoint, token endpoint, JWKS" ;
+    pm:phase 2 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-227 .
+
+ft:FT-090 a pm:Feature ;
+    pm:title "Additional storage intent tiers (quorum, local, archive, fast)" ;
+    pm:phase 4 ;
+    pm:status pm:Planned .
+
+ft:FT-014 a pm:Feature ;
+    pm:title "Raft consensus and leader election (openraft)" ;
+    pm:phase 1 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-224 ;
+    pm:validatedBy tc:TC-225 .
+
+ft:FT-076 a pm:Feature ;
+    pm:title "Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure)" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-229 .
+
+ft:FT-088 a pm:Feature ;
+    pm:title "picloud sdk publish command" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-233 .
+
+ft:FT-092 a pm:Feature ;
+    pm:title "Node drain and graceful workload migration" ;
+    pm:phase 4 ;
+    pm:status pm:Planned .
+
+ft:FT-041 a pm:Feature ;
+    pm:title "OTel environment variables injected into all workloads at startup" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-048 a pm:Feature ;
+    pm:title "W3C trace context propagation — platform to workload correlation" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-094 a pm:Feature ;
+    pm:title "Platform self-monitoring via its own RDF graph" ;
+    pm:phase 4 ;
+    pm:status pm:Planned .
 
 ft:FT-002 a pm:Feature ;
     pm:title "Event & State Model" ;
     pm:phase 1 ;
-    pm:status pm:Complete ;
+    pm:status pm:InProgress ;
     pm:implementedBy adr:ADR-004 ;
     pm:implementedBy adr:ADR-005 ;
     pm:implementedBy adr:ADR-006 ;
@@ -345,73 +672,142 @@ ft:FT-002 a pm:Feature ;
     pm:validatedBy tc:TC-223 ;
     pm:dependsOn ft:FT-001 .
 
-adr:ADR-029 a pm:ArchitecturalDecision ;
-    pm:title "IRI-Based Resource Addressing" ;
+ft:FT-091 a pm:Feature ;
+    pm:title "Workload resource constraints (CPU/memory limits)" ;
+    pm:phase 4 ;
+    pm:status pm:Planned .
+
+ft:FT-025 a pm:Feature ;
+    pm:title "Product-scoped IAM and role assignment" ;
+    pm:phase 2 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-226 ;
+    pm:validatedBy tc:TC-227 .
+
+ft:FT-055 a pm:Feature ;
+    pm:title "Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-228 .
+
+ft:FT-020 a pm:Feature ;
+    pm:title "OCI container scheduling (youki)" ;
+    pm:phase 1 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-224 .
+
+ft:FT-007 a pm:Feature ;
+    pm:title "IaC & CLI Design" ;
+    pm:phase 1 ;
+    pm:status pm:InProgress ;
+    pm:implementedBy adr:ADR-015 ;
+    pm:implementedBy adr:ADR-042 ;
+    pm:implementedBy adr:ADR-049 ;
+    pm:implementedBy adr:ADR-050 ;
+    pm:validatedBy tc:TC-042 ;
+    pm:validatedBy tc:TC-043 ;
+    pm:validatedBy tc:TC-044 ;
+    pm:validatedBy tc:TC-133 ;
+    pm:validatedBy tc:TC-134 ;
+    pm:validatedBy tc:TC-135 ;
+    pm:validatedBy tc:TC-163 ;
+    pm:validatedBy tc:TC-164 ;
+    pm:validatedBy tc:TC-165 ;
+    pm:validatedBy tc:TC-166 ;
+    pm:validatedBy tc:TC-167 ;
+    pm:validatedBy tc:TC-168 ;
+    pm:validatedBy tc:TC-169 ;
+    pm:validatedBy tc:TC-170 ;
+    pm:dependsOn ft:FT-001 .
+
+ft:FT-021 a pm:Feature ;
+    pm:title "Internal DNS and service discovery" ;
+    pm:phase 1 ;
+    pm:status pm:Planned .
+
+ft:FT-001 a pm:Feature ;
+    pm:title "Resource Model" ;
+    pm:phase 1 ;
+    pm:status pm:InProgress ;
+    pm:implementedBy adr:ADR-007 ;
+    pm:implementedBy adr:ADR-015 ;
+    pm:implementedBy adr:ADR-016 ;
+    pm:implementedBy adr:ADR-001 ;
+    pm:implementedBy adr:ADR-029 ;
+    pm:implementedBy adr:ADR-034 ;
+    pm:validatedBy tc:TC-022 ;
+    pm:validatedBy tc:TC-023 ;
+    pm:validatedBy tc:TC-024 ;
+    pm:validatedBy tc:TC-042 ;
+    pm:validatedBy tc:TC-043 ;
+    pm:validatedBy tc:TC-044 ;
+    pm:validatedBy tc:TC-045 ;
+    pm:validatedBy tc:TC-046 ;
+    pm:validatedBy tc:TC-047 ;
+    pm:validatedBy tc:TC-209 .
+
+ft:FT-004 a pm:Feature ;
+    pm:title "Storage Model" ;
+    pm:phase 1 ;
+    pm:status pm:InProgress ;
+    pm:implementedBy adr:ADR-011 ;
+    pm:implementedBy adr:ADR-012 ;
+    pm:implementedBy adr:ADR-013 ;
+    pm:implementedBy adr:ADR-024 ;
+    pm:implementedBy adr:ADR-047 ;
+    pm:validatedBy tc:TC-034 ;
+    pm:validatedBy tc:TC-035 ;
+    pm:validatedBy tc:TC-036 ;
+    pm:validatedBy tc:TC-037 ;
+    pm:validatedBy tc:TC-038 ;
+    pm:validatedBy tc:TC-039 ;
+    pm:validatedBy tc:TC-068 ;
+    pm:validatedBy tc:TC-069 ;
+    pm:validatedBy tc:TC-070 ;
+    pm:validatedBy tc:TC-153 ;
+    pm:validatedBy tc:TC-154 ;
+    pm:validatedBy tc:TC-155 ;
+    pm:validatedBy tc:TC-156 ;
+    pm:validatedBy tc:TC-157 ;
+    pm:validatedBy tc:TC-158 ;
+    pm:validatedBy tc:TC-209 ;
+    pm:validatedBy tc:TC-220 ;
+    pm:validatedBy tc:TC-221 ;
+    pm:dependsOn ft:FT-002 .
+
+ft:FT-038 a pm:Feature ;
+    pm:title "Product configuration store — typed key-value with tags, workload override, live reload" ;
+    pm:phase 2 ;
+    pm:status pm:Planned .
+
+ft:FT-069 a pm:Feature ;
+    pm:title "dataProducts field on product — consumer dependency validated at resource apply time" ;
+    pm:phase 3 ;
+    pm:status pm:Planned ;
+    pm:validatedBy tc:TC-231 .
+
+ft:FT-085 a pm:Feature ;
+    pm:title "Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+ft:FT-054 a pm:Feature ;
+    pm:title "RDFS/OWL inference enabled on platform and product graphs" ;
+    pm:phase 3 ;
+    pm:status pm:Planned .
+
+adr:ADR-007 a pm:ArchitecturalDecision ;
+    pm:title "Bicep-Inspired Declarative Resource Syntax" ;
     pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.021 .
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-006 a pm:ArchitecturalDecision ;
+    pm:title "Oxigraph as Embedded Triplestore" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
 
 adr:ADR-054 a pm:ArchitecturalDecision ;
     pm:title "Test-Augmented ADR Template" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-015 a pm:ArchitecturalDecision ;
-    pm:title "Imperative API with Idempotent Execution" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-033 a pm:ArchitecturalDecision ;
-    pm:title "Generated Multi-Language SDKs Published to Package Registries" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-028 a pm:ArchitecturalDecision ;
-    pm:title "Low Coupling, High Cohesion as a Structural Platform Constraint" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-005 a pm:ArchitecturalDecision ;
-    pm:title "RDF Graph as Event Projection and Read Model" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-041 a pm:ArchitecturalDecision ;
-    pm:title "Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-012 a pm:ArchitecturalDecision ;
-    pm:title "Mounted and Raw Block Device Support" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-027 a pm:ArchitecturalDecision ;
-    pm:title "mTLS for Workload-to-Platform and Direct Workload-to-SPARQL Communication" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-026 a pm:ArchitecturalDecision ;
-    pm:title "Bootstrap Token Exchange and Three-Tier Passkey Recovery" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-013 a pm:ArchitecturalDecision ;
-    pm:title "Platform-Managed Replication Factor" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-031 a pm:ArchitecturalDecision ;
-    pm:title "Event Schema Versioning via Schema IRIs" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-051 a pm:ArchitecturalDecision ;
-    pm:title "Product IAM — Roles, Custom Claims, Scopes, and Audience" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-053 a pm:ArchitecturalDecision ;
-    pm:title "Node Certificate Issuance and Enrollment" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
@@ -420,18 +816,23 @@ adr:ADR-019 a pm:ArchitecturalDecision ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-035 a pm:ArchitecturalDecision ;
-    pm:title "Event Replay as First-Class Platform and Product Capability" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-017 a pm:ArchitecturalDecision ;
-    pm:title "Platform as Full OIDC Provider" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
 adr:ADR-037 a pm:ArchitecturalDecision ;
     pm:title "Groups as IAM Resource with SPARQL CONSTRUCT Membership Rules" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-009 a pm:ArchitecturalDecision ;
+    pm:title "Standalone IAM — Users and Workload Identities" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-028 a pm:ArchitecturalDecision ;
+    pm:title "Low Coupling, High Cohesion as a Structural Platform Constraint" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-030 a pm:ArchitecturalDecision ;
+    pm:title "Platform-Generated CA with BYO-CA Support" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
@@ -440,8 +841,48 @@ adr:ADR-010 a pm:ArchitecturalDecision ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
+adr:ADR-033 a pm:ArchitecturalDecision ;
+    pm:title "Generated Multi-Language SDKs Published to Package Registries" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-013 a pm:ArchitecturalDecision ;
+    pm:title "Platform-Managed Replication Factor" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-034 a pm:ArchitecturalDecision ;
+    pm:title "Vertical Slice Architecture with Stable Domain Dependency" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.012 .
+
+adr:ADR-035 a pm:ArchitecturalDecision ;
+    pm:title "Event Replay as First-Class Platform and Product Capability" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-036 a pm:ArchitecturalDecision ;
+    pm:title "Universal Tagging System" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-005 a pm:ArchitecturalDecision ;
+    pm:title "RDF Graph as Event Projection and Read Model" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-031 a pm:ArchitecturalDecision ;
+    pm:title "Event Schema Versioning via Schema IRIs" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
 adr:ADR-046 a pm:ArchitecturalDecision ;
     pm:title "Apache Arrow + Parquet + DataFusion for Time-Series Storage" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-050 a pm:ArchitecturalDecision ;
+    pm:title "Builder Pattern CLI for Resource Generation" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
@@ -455,108 +896,28 @@ adr:ADR-052 a pm:ArchitecturalDecision ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-040 a pm:ArchitecturalDecision ;
-    pm:title "Platform Metrics Agent — Hardware Telemetry as Events" ;
+adr:ADR-051 a pm:ArchitecturalDecision ;
+    pm:title "Product IAM — Roles, Custom Claims, Scopes, and Audience" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-001 a pm:ArchitecturalDecision ;
-    pm:title "Rust as Implementation Language" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.028 .
-
-adr:ADR-007 a pm:ArchitecturalDecision ;
-    pm:title "Bicep-Inspired Declarative Resource Syntax" ;
+adr:ADR-038 a pm:ArchitecturalDecision ;
+    pm:title "SPARQL CONSTRUCT Inference Rules as Platform Resources" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-009 a pm:ArchitecturalDecision ;
-    pm:title "Standalone IAM — Users and Workload Identities" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-055 a pm:ArchitecturalDecision ;
-    pm:title "Capability as a First-Class Interface Contract" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-014 a pm:ArchitecturalDecision ;
-    pm:title "Service Discovery and Internal DNS in MVP" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-016 a pm:ArchitecturalDecision ;
-    pm:title "Product as Native Deployment Unit" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-023 a pm:ArchitecturalDecision ;
-    pm:title "Ontology Files Bound to Product Version" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-011 a pm:ArchitecturalDecision ;
-    pm:title "Block Storage Before RDF Application Storage" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-030 a pm:ArchitecturalDecision ;
-    pm:title "Platform-Generated CA with BYO-CA Support" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-036 a pm:ArchitecturalDecision ;
-    pm:title "Universal Tagging System" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-043 a pm:ArchitecturalDecision ;
-    pm:title "Product Configuration Store" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-048 a pm:ArchitecturalDecision ;
-    pm:title "Native Ingress Router in picloud-http" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-056 a pm:ArchitecturalDecision ;
-    pm:title "Data Products and Data Domains as First-Class Analytical Sharing Primitives" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.001 .
-
-adr:ADR-049 a pm:ArchitecturalDecision ;
-    pm:title ".picloud Format as Compiler Target — Turtle as Canonical IaC" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-021 a pm:ArchitecturalDecision ;
-    pm:title "One Active Version Per Product" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-024 a pm:ArchitecturalDecision ;
-    pm:title "Storage Intent Model" ;
+adr:ADR-042 a pm:ArchitecturalDecision ;
+    pm:title "Tenant Identity — Domain and Cluster ID as Dual Boundary" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
 adr:ADR-002 a pm:ArchitecturalDecision ;
     pm:title "openraft for Cluster Consensus" ;
     pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.021 .
-
-adr:ADR-022 a pm:ArchitecturalDecision ;
-    pm:title "Inter-Product Event Subscriptions as First-Class Resources" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
+    pm:betweennessCentrality 0.012 .
 
 adr:ADR-020 a pm:ArchitecturalDecision ;
     pm:title "Cluster Graph as Semantic Service Registry" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.000 .
-
-adr:ADR-018 a pm:ArchitecturalDecision ;
-    pm:title "Product Event Bus as Only Inter-Product Interface" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
@@ -565,18 +926,28 @@ adr:ADR-039 a pm:ArchitecturalDecision ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-006 a pm:ArchitecturalDecision ;
-    pm:title "Oxigraph as Embedded Triplestore" ;
+adr:ADR-015 a pm:ArchitecturalDecision ;
+    pm:title "Imperative API with Idempotent Execution" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-032 a pm:ArchitecturalDecision ;
-    pm:title "Product Event Store as First-Class Storage Primitive" ;
+adr:ADR-001 a pm:ArchitecturalDecision ;
+    pm:title "Rust as Implementation Language" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.016 .
+
+adr:ADR-003 a pm:ArchitecturalDecision ;
+    pm:title "mDNS for Node Discovery" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-042 a pm:ArchitecturalDecision ;
-    pm:title "Tenant Identity — Domain and Cluster ID as Dual Boundary" ;
+adr:ADR-012 a pm:ArchitecturalDecision ;
+    pm:title "Mounted and Raw Block Device Support" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-018 a pm:ArchitecturalDecision ;
+    pm:title "Product Event Bus as Only Inter-Product Interface" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
@@ -590,8 +961,18 @@ adr:ADR-047 a pm:ArchitecturalDecision ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-050 a pm:ArchitecturalDecision ;
-    pm:title "Builder Pattern CLI for Resource Generation" ;
+adr:ADR-011 a pm:ArchitecturalDecision ;
+    pm:title "Block Storage Before RDF Application Storage" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-041 a pm:ArchitecturalDecision ;
+    pm:title "Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-014 a pm:ArchitecturalDecision ;
+    pm:title "Service Discovery and Internal DNS in MVP" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
@@ -600,1030 +981,115 @@ adr:ADR-025 a pm:ArchitecturalDecision ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-008 a pm:ArchitecturalDecision ;
-    pm:title "Eventually Consistent Command Model" ;
+adr:ADR-016 a pm:ArchitecturalDecision ;
+    pm:title "Product as Native Deployment Unit" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-034 a pm:ArchitecturalDecision ;
-    pm:title "Vertical Slice Architecture with Stable Domain Dependency" ;
-    pm:status pm:Accepted ;
-    pm:betweennessCentrality 0.021 .
-
-adr:ADR-038 a pm:ArchitecturalDecision ;
-    pm:title "SPARQL CONSTRUCT Inference Rules as Platform Resources" ;
+adr:ADR-026 a pm:ArchitecturalDecision ;
+    pm:title "Bootstrap Token Exchange and Three-Tier Passkey Recovery" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
+
+adr:ADR-029 a pm:ArchitecturalDecision ;
+    pm:title "IRI-Based Resource Addressing" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.012 .
 
 adr:ADR-044 a pm:ArchitecturalDecision ;
     pm:title "Feature Flags as First-Class Product Resources" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-adr:ADR-003 a pm:ArchitecturalDecision ;
-    pm:title "mDNS for Node Discovery" ;
+adr:ADR-043 a pm:ArchitecturalDecision ;
+    pm:title "Product Configuration Store" ;
     pm:status pm:Accepted ;
     pm:betweennessCentrality 0.000 .
 
-tc:TC-168 a pm:TestCriterion ;
-    pm:title "new_resource_partial" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-050 .
-
-tc:TC-193 a pm:TestCriterion ;
-    pm:title "capability_deletion_guard" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
-
-tc:TC-018 a pm:TestCriterion ;
-    pm:title "graph_isolation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-005 .
-
-tc:TC-060 a pm:TestCriterion ;
-    pm:title "atomic_version_cutover" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-021 .
-
-tc:TC-205 a pm:TestCriterion ;
-    pm:title "data_domain_deletion_guard" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-031 a pm:TestCriterion ;
-    pm:title "container_schedule" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-010 .
-
-tc:TC-129 a pm:TestCriterion ;
-    pm:title "alert_dampening" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-041 .
-
-tc:TC-164 a pm:TestCriterion ;
-    pm:title "iri_determinism" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-049 .
-
-tc:TC-117 a pm:TestCriterion ;
-    pm:title "inference_retraction" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-038 .
-
-tc:TC-034 a pm:TestCriterion ;
-    pm:title "phase_dependency_order" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-011 .
-
-tc:TC-076 a pm:TestCriterion ;
-    pm:title "tier1_admin_reset" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-026 .
-
-tc:TC-200 a pm:TestCriterion ;
-    pm:title "data_product_atomic_swap" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-008 a pm:TestCriterion ;
-    pm:title "dns_resolution" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-003 .
-
-tc:TC-101 a pm:TestCriterion ;
-    pm:title "composition_root_only" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-034 .
-
-tc:TC-134 a pm:TestCriterion ;
-    pm:title "cross_cluster_join_rejection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-042 .
-
-tc:TC-087 a pm:TestCriterion ;
-    pm:title "iri_dereferencing" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-029 .
-
-tc:TC-135 a pm:TestCriterion ;
-    pm:title "iri_namespace_uniqueness" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-042 .
-
-tc:TC-127 a pm:TestCriterion ;
-    pm:title "alert_fired" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-041 .
-
-tc:TC-064 a pm:TestCriterion ;
-    pm:title "undeclared_subscription_rejection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-022 .
-
-tc:TC-166 a pm:TestCriterion ;
-    pm:title "offline_validation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-049 .
-
-tc:TC-198 a pm:TestCriterion ;
-    pm:title "data_product_projection_on_trigger" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-011 a pm:TestCriterion ;
-    pm:title "picloud.local" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-003 .
-
-tc:TC-081 a pm:TestCriterion ;
-    pm:title "slice_dependency_enforcement" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-028 .
-
-tc:TC-108 a pm:TestCriterion ;
-    pm:title "tag_rdf_projection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-036 .
-
-tc:TC-005 a pm:TestCriterion ;
-    pm:title "raft_leader_election" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-002 .
-
-tc:TC-103 a pm:TestCriterion ;
-    pm:title "platform_replay_full" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-035 .
-
-tc:TC-161 a pm:TestCriterion ;
-    pm:title "internal_port_isolation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-048 .
-
-tc:TC-072 a pm:TestCriterion ;
-    pm:title "fido2_cli_auth" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-025 .
-
-tc:TC-038 a pm:TestCriterion ;
-    pm:title "full_replication_coverage" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-013 .
-
-tc:TC-165 a pm:TestCriterion ;
-    pm:title "shacl_validation_errors" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-049 .
-
-tc:TC-015 a pm:TestCriterion ;
-    pm:title "event_ordering" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-004 .
-
-tc:TC-039 a pm:TestCriterion ;
-    pm:title "replication_on_node_join" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-013 .
-
-tc:TC-019 a pm:TestCriterion ;
-    pm:title "oxigraph_sparql_compliance" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-006 .
-
-tc:TC-150 a pm:TestCriterion ;
-    pm:title "retention_enforcement" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-046 .
-
-tc:TC-153 a pm:TestCriterion ;
-    pm:title "snapshot_create_verify" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-047 .
-
-tc:TC-024 a pm:TestCriterion ;
-    pm:title "symbolic_reference_resolution" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates adr:ADR-007 .
-
-tc:TC-115 a pm:TestCriterion ;
-    pm:title "group_role_inheritance" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-037 .
-
-tc:TC-004 a pm:TestCriterion ;
-    pm:title "ldd" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-001 .
-
-tc:TC-013 a pm:TestCriterion ;
-    pm:title "event_log_replay" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-004 .
-
-tc:TC-051 a pm:TestCriterion ;
-    pm:title "GET /.well-known/openid-configuration" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-017 .
-
-tc:TC-099 a pm:TestCriterion ;
-    pm:title "sdk_ontology_sync" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-010 ;
-    pm:validates adr:ADR-033 .
-
-tc:TC-155 a pm:TestCriterion ;
-    pm:title "snapshot_retention" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-047 .
-
-tc:TC-123 a pm:TestCriterion ;
-    pm:title "metrics_collection_interval" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-040 .
-
-tc:TC-157 a pm:TestCriterion ;
-    pm:title "backup_failure_alert" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-047 .
-
-tc:TC-158 a pm:TestCriterion ;
-    pm:title "BackupFailed" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-047 .
-
-tc:TC-171 a pm:TestCriterion ;
-    pm:title "role_inheritance_claims" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-051 .
-
-tc:TC-176 a pm:TestCriterion ;
-    pm:title "dns_srv_records" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-052 .
-
-tc:TC-211 a pm:TestCriterion ;
-    pm:title "Product with container, volume, workload identity deploys end-to-end" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
-
-tc:TC-221 a pm:TestCriterion ;
-    pm:title "Node restart during replication — eventual consistency restored" ;
-    pm:type pm:Chaos ;
-    pm:status pm:Unimplemented .
-
-tc:TC-084 a pm:TestCriterion ;
-    pm:title "platform_ca_export" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-030 .
-
-tc:TC-180 a pm:TestCriterion ;
-    pm:title "auto_enroll_mode" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-053 .
-
-tc:TC-092 a pm:TestCriterion ;
-    pm:title "schema_iri_permanence" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-031 .
-
-tc:TC-073 a pm:TestCriterion ;
-    pm:title "webauthn_challenge_replay_rejection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-025 .
-
-tc:TC-090 a pm:TestCriterion ;
-    pm:title "schema_iri_resolution" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-031 .
-
-tc:TC-204 a pm:TestCriterion ;
-    pm:title "data_product_deletion_guard" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-212 a pm:TestCriterion ;
-    pm:title "User authenticates against Product-hosted application via OIDC" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
-
-tc:TC-023 a pm:TestCriterion ;
-    pm:title "invalid_syntax_rejection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates adr:ADR-007 .
-
-tc:TC-048 a pm:TestCriterion ;
-    pm:title "oidc_authorization_code" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-017 .
-
-tc:TC-065 a pm:TestCriterion ;
-    pm:title "subscription_lifecycle" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-022 .
-
-tc:TC-001 a pm:TestCriterion ;
-    pm:title "binary_compiles" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-001 .
-
-tc:TC-037 a pm:TestCriterion ;
-    pm:title "volume_mount_restart" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-012 .
-
-tc:TC-114 a pm:TestCriterion ;
-    pm:title "circular_group_rejection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-037 .
-
-tc:TC-120 a pm:TestCriterion ;
-    pm:title "rdfs_subclass_inference" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-039 .
-
-tc:TC-163 a pm:TestCriterion ;
-    pm:title "compiler_roundtrip" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-049 .
-
-tc:TC-057 a pm:TestCriterion ;
-    pm:title "ontology_served" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-019 .
-
-tc:TC-196 a pm:TestCriterion ;
-    pm:title "data_domain_declaration" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-201 a pm:TestCriterion ;
-    pm:title "cross_product_internal_graph_blocked" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-213 a pm:TestCriterion ;
-    pm:title "Inference rule assigns user to group on tag change" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
-
-tc:TC-095 a pm:TestCriterion ;
-    pm:title "event_store_replay" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-032 .
-
-tc:TC-105 a pm:TestCriterion ;
-    pm:title "replay_marked_flag" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-035 .
-
-tc:TC-062 a pm:TestCriterion ;
-    pm:title "one_active_version_invariant" ;
-    pm:type pm:Invariant ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-021 .
-
-tc:TC-052 a pm:TestCriterion ;
-    pm:title "inter_product_event_delivery" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-018 .
-
-tc:TC-069 a pm:TestCriterion ;
-    pm:title "intent_translated_to_implementation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-024 .
-
-tc:TC-075 a pm:TestCriterion ;
-    pm:title "bootstrap_token_expiry" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-026 .
-
-tc:TC-130 a pm:TestCriterion ;
-    pm:title "all_builtin_rules" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-041 .
-
-tc:TC-041 a pm:TestCriterion ;
-    pm:title "cross_product_isolation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-014 .
-
-tc:TC-059 a pm:TestCriterion ;
-    pm:title "registry_version_binding" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-020 .
-
-tc:TC-174 a pm:TestCriterion ;
-    pm:title "m2m_permission_required" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-051 .
+adr:ADR-008 a pm:ArchitecturalDecision ;
+    pm:title "Eventually Consistent Command Model" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-023 a pm:ArchitecturalDecision ;
+    pm:title "Ontology Files Bound to Product Version" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-048 a pm:ArchitecturalDecision ;
+    pm:title "Native Ingress Router in picloud-http" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-032 a pm:ArchitecturalDecision ;
+    pm:title "Product Event Store as First-Class Storage Primitive" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-049 a pm:ArchitecturalDecision ;
+    pm:title ".picloud Format as Compiler Target — Turtle as Canonical IaC" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-053 a pm:ArchitecturalDecision ;
+    pm:title "Node Certificate Issuance and Enrollment" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-022 a pm:ArchitecturalDecision ;
+    pm:title "Inter-Product Event Subscriptions as First-Class Resources" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-040 a pm:ArchitecturalDecision ;
+    pm:title "Platform Metrics Agent — Hardware Telemetry as Events" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-027 a pm:ArchitecturalDecision ;
+    pm:title "mTLS for Workload-to-Platform and Direct Workload-to-SPARQL Communication" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-055 a pm:ArchitecturalDecision ;
+    pm:title "Capability as a First-Class Interface Contract" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-056 a pm:ArchitecturalDecision ;
+    pm:title "Data Products and Data Domains as First-Class Analytical Sharing Primitives" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.001 .
+
+adr:ADR-021 a pm:ArchitecturalDecision ;
+    pm:title "One Active Version Per Product" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-017 a pm:ArchitecturalDecision ;
+    pm:title "Platform as Full OIDC Provider" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
+
+adr:ADR-024 a pm:ArchitecturalDecision ;
+    pm:title "Storage Intent Model" ;
+    pm:status pm:Accepted ;
+    pm:betweennessCentrality 0.000 .
 
 tc:TC-074 a pm:TestCriterion ;
     pm:title "bootstrap_token_single_use" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-003 ;
     pm:validates adr:ADR-026 .
 
 tc:TC-042 a pm:TestCriterion ;
     pm:title "idempotent_apply" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-001 ;
     pm:validates ft:FT-007 ;
     pm:validates adr:ADR-015 .
-
-tc:TC-077 a pm:TestCriterion ;
-    pm:title "tier3_physical_recovery" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-026 .
-
-tc:TC-149 a pm:TestCriterion ;
-    pm:title "parquet_write_read" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-046 .
-
-tc:TC-006 a pm:TestCriterion ;
-    pm:title "raft_leader_failover" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-002 .
-
-tc:TC-088 a pm:TestCriterion ;
-    pm:title "content_negotiation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-029 .
-
-tc:TC-154 a pm:TestCriterion ;
-    pm:title "snapshot_restore" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-047 .
-
-tc:TC-218 a pm:TestCriterion ;
-    pm:title "SDKs published to package registries" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
-
-tc:TC-220 a pm:TestCriterion ;
-    pm:title "Node crash during volume write — no data corruption" ;
-    pm:type pm:Chaos ;
-    pm:status pm:Unimplemented .
-
-tc:TC-028 a pm:TestCriterion ;
-    pm:title "human_identity_lifecycle" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-009 .
-
-tc:TC-190 a pm:TestCriterion ;
-    pm:title "capability_routing" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
-
-tc:TC-020 a pm:TestCriterion ;
-    pm:title "named_graph_isolation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-006 .
-
-tc:TC-012 a pm:TestCriterion ;
-    pm:title "picloud.local" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-003 .
-
-tc:TC-175 a pm:TestCriterion ;
-    pm:title "dns_a_records" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-052 .
-
-tc:TC-044 a pm:TestCriterion ;
-    pm:title "idempotency_key_uniqueness" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-015 .
-
-tc:TC-007 a pm:TestCriterion ;
-    pm:title "raft_learner_join" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-002 .
-
-tc:TC-178 a pm:TestCriterion ;
-    pm:title "dns_cache_invalidation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-052 .
-
-tc:TC-016 a pm:TestCriterion ;
-    pm:title "rdf_projection_roundtrip" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-005 .
-
-tc:TC-022 a pm:TestCriterion ;
-    pm:title "picloud_syntax_parse" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates adr:ADR-007 .
-
-tc:TC-203 a pm:TestCriterion ;
-    pm:title "data_product_slo_breach_and_restore" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-132 a pm:TestCriterion ;
-    pm:title "AlertResolved" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-041 .
-
-tc:TC-197 a pm:TestCriterion ;
-    pm:title "data_product_field_validation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-070 a pm:TestCriterion ;
-    pm:title "full-replication" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-024 .
-
-tc:TC-138 a pm:TestCriterion ;
-    pm:title "workload_config_override" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-043 .
-
-tc:TC-183 a pm:TestCriterion ;
-    pm:title "cert_revocation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-053 .
-
-tc:TC-026 a pm:TestCriterion ;
-    pm:title "progress_streaming" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-008 .
-
-tc:TC-054 a pm:TestCriterion ;
-    pm:title "event_bus_burst" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-018 .
-
-tc:TC-085 a pm:TestCriterion ;
-    pm:title "byo_ca" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-030 .
-
-tc:TC-106 a pm:TestCriterion ;
-    pm:title "aggregate_replay" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-035 .
-
-tc:TC-162 a pm:TestCriterion ;
-    pm:title "sni_cert_selection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-048 .
-
-tc:TC-194 a pm:TestCriterion ;
-    pm:title "resource apply" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
-
-tc:TC-199 a pm:TestCriterion ;
-    pm:title "data_product_named_graph_separation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-003 a pm:TestCriterion ;
-    pm:title "cargo build --release" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-001 .
-
-tc:TC-055 a pm:TestCriterion ;
-    pm:title "product_sparql_endpoint" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-019 .
-
-tc:TC-079 a pm:TestCriterion ;
-    pm:title "workload_cert_injection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-027 .
-
-tc:TC-096 a pm:TestCriterion ;
-    pm:title "event_store_survivor" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-032 .
-
-tc:TC-111 a pm:TestCriterion ;
-    pm:title "picloud tag find" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-036 .
-
-tc:TC-029 a pm:TestCriterion ;
-    pm:title "workload_identity_injection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-009 .
-
-tc:TC-113 a pm:TestCriterion ;
-    pm:title "group_membership_removal" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-037 .
-
-tc:TC-121 a pm:TestCriterion ;
-    pm:title "owl_transitivity" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-039 .
-
-tc:TC-080 a pm:TestCriterion ;
-    pm:title "sparql_direct_mtls" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-027 .
-
-tc:TC-147 a pm:TestCriterion ;
-    pm:title "cli_trace_propagation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-045 .
-
-tc:TC-151 a pm:TestCriterion ;
-    pm:title "datafusion_time_range" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-046 .
-
-tc:TC-159 a pm:TestCriterion ;
-    pm:title "ingress_host_routing" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-048 .
-
-tc:TC-021 a pm:TestCriterion ;
-    pm:title "oxigraph_persistence" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-006 .
-
-tc:TC-181 a pm:TestCriterion ;
-    pm:title "token_enroll_single_use" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-053 .
-
-tc:TC-208 a pm:TestCriterion ;
-    pm:title "data-domain" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-209 a pm:TestCriterion ;
-    pm:title "Two-node cluster runs containerized workload with replicated volume" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Passing .
-
-tc:TC-206 a pm:TestCriterion ;
-    pm:title "capability_triggers_data_product" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-056 .
-
-tc:TC-188 a pm:TestCriterion ;
-    pm:title "capability_implements_shacl_validation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
-
-tc:TC-222 a pm:TestCriterion ;
-    pm:title "DNS server failure — fallback to mDNS" ;
-    pm:type pm:Chaos ;
-    pm:status pm:Unimplemented .
-
-tc:TC-146 a pm:TestCriterion ;
-    pm:title "otlp_trace_ingestion" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-045 .
-
-tc:TC-185 a pm:TestCriterion ;
-    pm:title "adr_test_coverage_completeness" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-054 .
-
-tc:TC-140 a pm:TestCriterion ;
-    pm:title "ConfigChanged" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-043 .
-
-tc:TC-091 a pm:TestCriterion ;
-    pm:title "schema_evolution" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-031 .
-
-tc:TC-192 a pm:TestCriterion ;
-    pm:title "capability_implementor_removed_unfulfilled" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
-
-tc:TC-215 a pm:TestCriterion ;
-    pm:title "Product appends to event store and queries RDF projection" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
-
-tc:TC-056 a pm:TestCriterion ;
-    pm:title "sparql_iam_enforcement" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-019 .
-
-tc:TC-223 a pm:TestCriterion ;
-    pm:title "Split brain scenario — exactly one leader invariant" ;
-    pm:type pm:Chaos ;
-    pm:status pm:Unimplemented .
-
-tc:TC-089 a pm:TestCriterion ;
-    pm:title "iri_stability" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-029 .
-
-tc:TC-125 a pm:TestCriterion ;
-    pm:title "metrics_upsert" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-040 .
-
-tc:TC-142 a pm:TestCriterion ;
-    pm:title "flag_live_update" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-044 .
-
-tc:TC-100 a pm:TestCriterion ;
-    pm:title "per_slice_build" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-034 .
-
-tc:TC-050 a pm:TestCriterion ;
-    pm:title "jwks_key_rotation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-017 .
-
-tc:TC-046 a pm:TestCriterion ;
-    pm:title "cascading_delete" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates adr:ADR-016 .
-
-tc:TC-045 a pm:TestCriterion ;
-    pm:title "product_full_lifecycle" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates adr:ADR-016 .
-
-tc:TC-027 a pm:TestCriterion ;
-    pm:title "concurrent_commands" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-008 .
-
-tc:TC-094 a pm:TestCriterion ;
-    pm:title "event_store_rdf_projection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-032 .
-
-tc:TC-035 a pm:TestCriterion ;
-    pm:title "mounted_volume" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-012 .
 
 tc:TC-102 a pm:TestCriterion ;
     pm:title "cargo deny" ;
@@ -1631,203 +1097,185 @@ tc:TC-102 a pm:TestCriterion ;
     pm:status pm:Passing ;
     pm:validates adr:ADR-034 .
 
-tc:TC-136 a pm:TestCriterion ;
-    pm:title "config_api_lifecycle" ;
+tc:TC-158 a pm:TestCriterion ;
+    pm:title "BackupFailed" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-043 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-047 .
 
-tc:TC-002 a pm:TestCriterion ;
-    pm:title "no_runtime_panics" ;
+tc:TC-157 a pm:TestCriterion ;
+    pm:title "backup_failure_alert" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates adr:ADR-001 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-047 .
 
-tc:TC-160 a pm:TestCriterion ;
-    pm:title "workload_reschedule_routing" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-048 .
-
-tc:TC-195 a pm:TestCriterion ;
-    pm:title "CapabilityUnfulfilled" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
-
-tc:TC-214 a pm:TestCriterion ;
-    pm:title "CPU temperature alert fires and resolves" ;
+tc:TC-230 a pm:TestCriterion ;
+    pm:title "Product appends to event store and queries RDF projection" ;
     pm:type pm:ExitCriteria ;
     pm:status pm:Unimplemented .
+
+tc:TC-159 a pm:TestCriterion ;
+    pm:title "ingress_host_routing" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-048 .
 
 tc:TC-033 a pm:TestCriterion ;
     pm:title "workload_identity_injection" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-005 ;
     pm:validates adr:ADR-010 .
 
-tc:TC-217 a pm:TestCriterion ;
-    pm:title "Capability declared and fulfilled by implementing product" ;
+tc:TC-215 a pm:TestCriterion ;
+    pm:title "Product appends to event store and queries RDF projection" ;
     pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
+    pm:status pm:Failing .
 
-tc:TC-187 a pm:TestCriterion ;
-    pm:title "capability_declaration" ;
+tc:TC-001 a pm:TestCriterion ;
+    pm:title "binary_compiles" ;
     pm:type pm:Scenario ;
     pm:status pm:Passing ;
+    pm:validates adr:ADR-001 .
+
+tc:TC-106 a pm:TestCriterion ;
+    pm:title "aggregate_replay" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-035 .
+
+tc:TC-124 a pm:TestCriterion ;
+    pm:title "metrics_rdf_projection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-055 .
+    pm:validates adr:ADR-040 .
 
-tc:TC-017 a pm:TestCriterion ;
-    pm:title "sparql_query_types" ;
+tc:TC-111 a pm:TestCriterion ;
+    pm:title "picloud tag find" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-036 .
+
+tc:TC-210 a pm:TestCriterion ;
+    pm:title "Cluster survives one node restart without data loss" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-018 a pm:TestCriterion ;
+    pm:title "graph_isolation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-002 ;
     pm:validates adr:ADR-005 .
 
-tc:TC-049 a pm:TestCriterion ;
-    pm:title "oidc_client_credentials" ;
+tc:TC-029 a pm:TestCriterion ;
+    pm:title "workload_identity_injection" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-017 .
+    pm:validates adr:ADR-009 .
+
+tc:TC-038 a pm:TestCriterion ;
+    pm:title "full_replication_coverage" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-013 .
+
+tc:TC-103 a pm:TestCriterion ;
+    pm:title "platform_replay_full" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-035 .
+
+tc:TC-024 a pm:TestCriterion ;
+    pm:title "symbolic_reference_resolution" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-007 .
+
+tc:TC-163 a pm:TestCriterion ;
+    pm:title "compiler_roundtrip" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-049 .
+
+tc:TC-067 a pm:TestCriterion ;
+    pm:title "ontology_shacl_validation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-023 .
+
+tc:TC-125 a pm:TestCriterion ;
+    pm:title "metrics_upsert" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-040 .
+
+tc:TC-055 a pm:TestCriterion ;
+    pm:title "product_sparql_endpoint" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-019 .
+
+tc:TC-083 a pm:TestCriterion ;
+    pm:title "cargo tree -p picloud-{slice}" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-028 .
+
+tc:TC-108 a pm:TestCriterion ;
+    pm:title "tag_rdf_projection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-036 .
+
+tc:TC-153 a pm:TestCriterion ;
+    pm:title "snapshot_create_verify" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-047 .
+
+tc:TC-080 a pm:TestCriterion ;
+    pm:title "sparql_direct_mtls" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-027 .
+
+tc:TC-047 a pm:TestCriterion ;
+    pm:title "orphan_prevention" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-016 .
 
 tc:TC-093 a pm:TestCriterion ;
     pm:title "event_store_append_read" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-008 ;
     pm:validates adr:ADR-032 .
 
-tc:TC-104 a pm:TestCriterion ;
-    pm:title "shadow_swap_live_traffic" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-035 .
-
-tc:TC-078 a pm:TestCriterion ;
-    pm:title "mtls_enforcement" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-027 .
-
-tc:TC-133 a pm:TestCriterion ;
-    pm:title "dual_cluster_mDNS_isolation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-042 .
-
-tc:TC-098 a pm:TestCriterion ;
-    pm:title "sdk_publish" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-010 ;
-    pm:validates adr:ADR-033 .
-
-tc:TC-167 a pm:TestCriterion ;
-    pm:title "new_resource_flags" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-050 .
-
-tc:TC-063 a pm:TestCriterion ;
-    pm:title "event_subscription_provisioning" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-022 .
-
-tc:TC-014 a pm:TestCriterion ;
-    pm:title "projection_consistency" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-002 ;
-    pm:validates adr:ADR-004 .
-
-tc:TC-097 a pm:TestCriterion ;
-    pm:title "sdk_generation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-010 ;
-    pm:validates adr:ADR-033 .
-
-tc:TC-071 a pm:TestCriterion ;
-    pm:title "passkey_registration" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-025 .
-
-tc:TC-107 a pm:TestCriterion ;
-    pm:title "tag_add_event" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-036 .
-
-tc:TC-040 a pm:TestCriterion ;
-    pm:title "internal_dns_resolution" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-014 .
-
-tc:TC-170 a pm:TestCriterion ;
-    pm:title "auto_validation_failure" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-050 .
-
-tc:TC-172 a pm:TestCriterion ;
-    pm:title "audience_enforcement" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-051 .
-
-tc:TC-173 a pm:TestCriterion ;
-    pm:title "token_exchange_on_behalf_of" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-051 .
-
-tc:TC-030 a pm:TestCriterion ;
-    pm:title "token_expiry_enforcement" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-003 ;
-    pm:validates adr:ADR-009 .
-
-tc:TC-082 a pm:TestCriterion ;
-    pm:title "no_cross_slice_imports" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-028 .
-
-tc:TC-010 a pm:TestCriterion ;
-    pm:title "product_fqdn_dns" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-003 .
-
-tc:TC-086 a pm:TestCriterion ;
-    pm:title "cert_chain_validation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-030 .
+tc:TC-216 a pm:TestCriterion ;
+    pm:title "Data product declared, projection rebuilt, second product queries it" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
 
 tc:TC-189 a pm:TestCriterion ;
     pm:title "capability_consumer_blocked_without_implementor" ;
@@ -1836,136 +1284,523 @@ tc:TC-189 a pm:TestCriterion ;
     pm:validates ft:FT-009 ;
     pm:validates adr:ADR-055 .
 
-tc:TC-191 a pm:TestCriterion ;
-    pm:title "capability_version_selection" ;
+tc:TC-041 a pm:TestCriterion ;
+    pm:title "cross_product_isolation" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-014 .
+
+tc:TC-194 a pm:TestCriterion ;
+    pm:title "resource apply" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
     pm:validates adr:ADR-055 .
 
-tc:TC-025 a pm:TestCriterion ;
-    pm:title "command_correlation" ;
+tc:TC-109 a pm:TestCriterion ;
+    pm:title "tag_remove" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-036 .
+
+tc:TC-084 a pm:TestCriterion ;
+    pm:title "platform_ca_export" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-030 .
+
+tc:TC-063 a pm:TestCriterion ;
+    pm:title "event_subscription_provisioning" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-022 .
+
+tc:TC-026 a pm:TestCriterion ;
+    pm:title "progress_streaming" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-002 ;
     pm:validates adr:ADR-008 .
 
-tc:TC-186 a pm:TestCriterion ;
-    pm:title "scenario_catalogue_sync" ;
+tc:TC-022 a pm:TestCriterion ;
+    pm:title "picloud_syntax_parse" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-054 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-007 .
 
-tc:TC-207 a pm:TestCriterion ;
-    pm:title "DataProductSLOBreached" ;
+tc:TC-049 a pm:TestCriterion ;
+    pm:title "oidc_client_credentials" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-017 .
+
+tc:TC-051 a pm:TestCriterion ;
+    pm:title "GET /.well-known/openid-configuration" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-017 .
+
+tc:TC-138 a pm:TestCriterion ;
+    pm:title "workload_config_override" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-043 .
+
+tc:TC-156 a pm:TestCriterion ;
+    pm:title "offsite_backup_complete" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-047 .
+
+tc:TC-171 a pm:TestCriterion ;
+    pm:title "role_inheritance_claims" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-051 .
+
+tc:TC-066 a pm:TestCriterion ;
+    pm:title "ontology_version_binding" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-023 .
+
+tc:TC-199 a pm:TestCriterion ;
+    pm:title "data_product_named_graph_separation" ;
     pm:type pm:Scenario ;
     pm:status pm:Passing ;
     pm:validates ft:FT-009 ;
     pm:validates adr:ADR-056 .
 
-tc:TC-210 a pm:TestCriterion ;
-    pm:title "Cluster survives one node restart without data loss" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Passing .
-
-tc:TC-131 a pm:TestCriterion ;
-    pm:title "AlertFired" ;
+tc:TC-012 a pm:TestCriterion ;
+    pm:title "picloud.local" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-041 .
-
-tc:TC-032 a pm:TestCriterion ;
-    pm:title "binary_workload" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-010 .
-
-tc:TC-053 a pm:TestCriterion ;
-    pm:title "direct_network_blocked" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-018 .
-
-tc:TC-083 a pm:TestCriterion ;
-    pm:title "cargo tree -p picloud-{slice}" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-028 .
+    pm:validates adr:ADR-003 .
 
-tc:TC-109 a pm:TestCriterion ;
-    pm:title "tag_remove" ;
+tc:TC-079 a pm:TestCriterion ;
+    pm:title "workload_cert_injection" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-036 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-027 .
 
-tc:TC-144 a pm:TestCriterion ;
-    pm:title "flag_in_process_evaluation" ;
+tc:TC-099 a pm:TestCriterion ;
+    pm:title "sdk_ontology_sync" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-044 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-010 ;
+    pm:validates adr:ADR-033 .
 
-tc:TC-058 a pm:TestCriterion ;
-    pm:title "cluster_registry_discovery" ;
+tc:TC-048 a pm:TestCriterion ;
+    pm:title "oidc_authorization_code" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-005 ;
-    pm:validates adr:ADR-020 .
-
-tc:TC-139 a pm:TestCriterion ;
-    pm:title "config_secret_separation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-043 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-017 .
 
 tc:TC-177 a pm:TestCriterion ;
     pm:title "dns_txt_records" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-006 ;
     pm:validates adr:ADR-052 .
 
-tc:TC-110 a pm:TestCriterion ;
-    pm:title "tag_sparql_queryable" ;
+tc:TC-050 a pm:TestCriterion ;
+    pm:title "jwks_key_rotation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-017 .
+
+tc:TC-032 a pm:TestCriterion ;
+    pm:title "binary_workload" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-010 .
+
+tc:TC-070 a pm:TestCriterion ;
+    pm:title "full-replication" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-024 .
+
+tc:TC-088 a pm:TestCriterion ;
+    pm:title "content_negotiation" ;
     pm:type pm:Scenario ;
     pm:status pm:Passing ;
+    pm:validates adr:ADR-029 .
+
+tc:TC-122 a pm:TestCriterion ;
+    pm:title "ontology_deploy_immediate" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-036 .
-
-tc:TC-148 a pm:TestCriterion ;
-    pm:title "otel_does_not_starve_raft" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-045 .
-
-tc:TC-182 a pm:TestCriterion ;
-    pm:title "token_enroll_expiry" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-053 .
-
-tc:TC-066 a pm:TestCriterion ;
-    pm:title "ontology_version_binding" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-023 .
+    pm:validates adr:ADR-039 .
 
 tc:TC-126 a pm:TestCriterion ;
     pm:title "MetricRecorded" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
     pm:validates adr:ADR-040 .
+
+tc:TC-013 a pm:TestCriterion ;
+    pm:title "event_log_replay" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-004 .
+
+tc:TC-014 a pm:TestCriterion ;
+    pm:title "projection_consistency" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-004 .
+
+tc:TC-225 a pm:TestCriterion ;
+    pm:title "Cluster survives one node restart without data loss" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-226 a pm:TestCriterion ;
+    pm:title "Product with container, volume, and workload identity deploys end-to-end" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-096 a pm:TestCriterion ;
+    pm:title "event_store_survivor" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-032 .
+
+tc:TC-119 a pm:TestCriterion ;
+    pm:title "rule_idempotency" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-038 .
+
+tc:TC-208 a pm:TestCriterion ;
+    pm:title "data-domain" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-224 a pm:TestCriterion ;
+    pm:title "Two-node cluster runs a containerized workload with a replicated volume" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-185 a pm:TestCriterion ;
+    pm:title "adr_test_coverage_completeness" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-054 .
+
+tc:TC-206 a pm:TestCriterion ;
+    pm:title "capability_triggers_data_product" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-068 a pm:TestCriterion ;
+    pm:title "storage_intent_full_replication" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-024 .
+
+tc:TC-020 a pm:TestCriterion ;
+    pm:title "named_graph_isolation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-006 .
+
+tc:TC-006 a pm:TestCriterion ;
+    pm:title "raft_leader_failover" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-002 .
+
+tc:TC-105 a pm:TestCriterion ;
+    pm:title "replay_marked_flag" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-035 .
+
+tc:TC-046 a pm:TestCriterion ;
+    pm:title "cascading_delete" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-016 .
+
+tc:TC-139 a pm:TestCriterion ;
+    pm:title "config_secret_separation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-043 .
+
+tc:TC-120 a pm:TestCriterion ;
+    pm:title "rdfs_subclass_inference" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-039 .
+
+tc:TC-053 a pm:TestCriterion ;
+    pm:title "direct_network_blocked" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-018 .
+
+tc:TC-064 a pm:TestCriterion ;
+    pm:title "undeclared_subscription_rejection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-022 .
+
+tc:TC-169 a pm:TestCriterion ;
+    pm:title "overwrite_protection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-050 .
+
+tc:TC-201 a pm:TestCriterion ;
+    pm:title "cross_product_internal_graph_blocked" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-179 a pm:TestCriterion ;
+    pm:title "dns_nxdomain" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-052 .
+
+tc:TC-117 a pm:TestCriterion ;
+    pm:title "inference_retraction" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-038 .
+
+tc:TC-141 a pm:TestCriterion ;
+    pm:title "flag_version_evaluation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-044 .
+
+tc:TC-148 a pm:TestCriterion ;
+    pm:title "otel_does_not_starve_raft" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-045 .
+
+tc:TC-129 a pm:TestCriterion ;
+    pm:title "alert_dampening" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-041 .
+
+tc:TC-176 a pm:TestCriterion ;
+    pm:title "dns_srv_records" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-052 .
+
+tc:TC-204 a pm:TestCriterion ;
+    pm:title "data_product_deletion_guard" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-115 a pm:TestCriterion ;
+    pm:title "group_role_inheritance" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-037 .
+
+tc:TC-076 a pm:TestCriterion ;
+    pm:title "tier1_admin_reset" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-026 .
+
+tc:TC-180 a pm:TestCriterion ;
+    pm:title "auto_enroll_mode" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-053 .
+
+tc:TC-211 a pm:TestCriterion ;
+    pm:title "Product with container, volume, workload identity deploys end-to-end" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-186 a pm:TestCriterion ;
+    pm:title "scenario_catalogue_sync" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-054 .
+
+tc:TC-005 a pm:TestCriterion ;
+    pm:title "raft_leader_election" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-002 .
+
+tc:TC-062 a pm:TestCriterion ;
+    pm:title "one_active_version_invariant" ;
+    pm:type pm:Invariant ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-021 .
+
+tc:TC-127 a pm:TestCriterion ;
+    pm:title "alert_fired" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-041 .
+
+tc:TC-174 a pm:TestCriterion ;
+    pm:title "m2m_permission_required" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-051 .
+
+tc:TC-054 a pm:TestCriterion ;
+    pm:title "event_bus_burst" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-018 .
+
+tc:TC-168 a pm:TestCriterion ;
+    pm:title "new_resource_partial" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-050 .
+
+tc:TC-071 a pm:TestCriterion ;
+    pm:title "passkey_registration" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-025 .
+
+tc:TC-116 a pm:TestCriterion ;
+    pm:title "inference_rule_lifecycle" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-038 .
+
+tc:TC-187 a pm:TestCriterion ;
+    pm:title "capability_declaration" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-218 a pm:TestCriterion ;
+    pm:title "SDKs published to package registries" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-036 a pm:TestCriterion ;
+    pm:title "raw_block_device" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-012 .
+
+tc:TC-059 a pm:TestCriterion ;
+    pm:title "registry_version_binding" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-020 .
+
+tc:TC-044 a pm:TestCriterion ;
+    pm:title "idempotency_key_uniqueness" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-015 .
+
+tc:TC-173 a pm:TestCriterion ;
+    pm:title "token_exchange_on_behalf_of" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-051 .
+
+tc:TC-172 a pm:TestCriterion ;
+    pm:title "audience_enforcement" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-051 .
+
+tc:TC-229 a pm:TestCriterion ;
+    pm:title "CPU temperature alert fires and resolves" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-155 a pm:TestCriterion ;
+    pm:title "snapshot_retention" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-047 .
+
+tc:TC-035 a pm:TestCriterion ;
+    pm:title "mounted_volume" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-012 .
 
 tc:TC-202 a pm:TestCriterion ;
     pm:title "data_product_consumer_blocked_without_product" ;
@@ -1974,175 +1809,841 @@ tc:TC-202 a pm:TestCriterion ;
     pm:validates ft:FT-009 ;
     pm:validates adr:ADR-056 .
 
-tc:TC-216 a pm:TestCriterion ;
-    pm:title "Data product declared, projection rebuilt, second product queries it" ;
-    pm:type pm:ExitCriteria ;
-    pm:status pm:Unimplemented .
-
-tc:TC-009 a pm:TestCriterion ;
-    pm:title "node_join_dns" ;
+tc:TC-170 a pm:TestCriterion ;
+    pm:title "auto_validation_failure" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-003 .
-
-tc:TC-067 a pm:TestCriterion ;
-    pm:title "ontology_shacl_validation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-008 ;
-    pm:validates adr:ADR-023 .
-
-tc:TC-116 a pm:TestCriterion ;
-    pm:title "inference_rule_lifecycle" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-038 .
-
-tc:TC-068 a pm:TestCriterion ;
-    pm:title "storage_intent_full_replication" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-024 .
-
-tc:TC-112 a pm:TestCriterion ;
-    pm:title "group_membership_via_inference" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-037 .
-
-tc:TC-119 a pm:TestCriterion ;
-    pm:title "rule_idempotency" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-038 .
-
-tc:TC-219 a pm:TestCriterion ;
-    pm:title "Raft leader failover under network partition" ;
-    pm:type pm:Chaos ;
-    pm:status pm:Unimplemented .
-
-tc:TC-179 a pm:TestCriterion ;
-    pm:title "dns_nxdomain" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-006 ;
-    pm:validates adr:ADR-052 .
-
-tc:TC-122 a pm:TestCriterion ;
-    pm:title "ontology_deploy_immediate" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-039 .
-
-tc:TC-141 a pm:TestCriterion ;
-    pm:title "flag_version_evaluation" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-044 .
-
-tc:TC-145 a pm:TestCriterion ;
-    pm:title "FeatureFlagChanged" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-044 .
-
-tc:TC-169 a pm:TestCriterion ;
-    pm:title "overwrite_protection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-007 ;
     pm:validates adr:ADR-050 .
 
-tc:TC-047 a pm:TestCriterion ;
-    pm:title "orphan_prevention" ;
+tc:TC-030 a pm:TestCriterion ;
+    pm:title "token_expiry_enforcement" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
-    pm:validates adr:ADR-016 .
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-009 .
 
-tc:TC-128 a pm:TestCriterion ;
-    pm:title "alert_resolved" ;
+tc:TC-081 a pm:TestCriterion ;
+    pm:title "slice_dependency_enforcement" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-028 .
+
+tc:TC-056 a pm:TestCriterion ;
+    pm:title "sparql_iam_enforcement" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-019 .
+
+tc:TC-011 a pm:TestCriterion ;
+    pm:title "picloud.local" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-003 .
+
+tc:TC-146 a pm:TestCriterion ;
+    pm:title "otlp_trace_ingestion" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-041 .
+    pm:validates adr:ADR-045 .
 
-tc:TC-043 a pm:TestCriterion ;
-    pm:title "partial_failure_reapply" ;
+tc:TC-089 a pm:TestCriterion ;
+    pm:title "iri_stability" ;
     pm:type pm:Scenario ;
     pm:status pm:Passing ;
-    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-029 .
+
+tc:TC-134 a pm:TestCriterion ;
+    pm:title "cross_cluster_join_rejection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-007 ;
-    pm:validates adr:ADR-015 .
+    pm:validates adr:ADR-042 .
+
+tc:TC-003 a pm:TestCriterion ;
+    pm:title "cargo build --release" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-001 .
+
+tc:TC-098 a pm:TestCriterion ;
+    pm:title "sdk_publish" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-010 ;
+    pm:validates adr:ADR-033 .
+
+tc:TC-228 a pm:TestCriterion ;
+    pm:title "Inference rule automatically assigns user to group on tag change" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-154 a pm:TestCriterion ;
+    pm:title "snapshot_restore" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-047 .
+
+tc:TC-209 a pm:TestCriterion ;
+    pm:title "Two-node cluster runs containerized workload with replicated volume" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-031 a pm:TestCriterion ;
+    pm:title "container_schedule" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-010 .
+
+tc:TC-107 a pm:TestCriterion ;
+    pm:title "tag_add_event" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-036 .
+
+tc:TC-223 a pm:TestCriterion ;
+    pm:title "Split brain scenario — exactly one leader invariant" ;
+    pm:type pm:Chaos ;
+    pm:status pm:Failing .
+
+tc:TC-167 a pm:TestCriterion ;
+    pm:title "new_resource_flags" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-050 .
+
+tc:TC-233 a pm:TestCriterion ;
+    pm:title "SDKs published to crates.io, npm, and NuGet" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-073 a pm:TestCriterion ;
+    pm:title "webauthn_challenge_replay_rejection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-025 .
+
+tc:TC-100 a pm:TestCriterion ;
+    pm:title "per_slice_build" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-034 .
+
+tc:TC-027 a pm:TestCriterion ;
+    pm:title "concurrent_commands" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-008 .
 
 tc:TC-184 a pm:TestCriterion ;
     pm:title "csr_wildcard_rejection" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-006 ;
     pm:validates adr:ADR-053 .
+
+tc:TC-221 a pm:TestCriterion ;
+    pm:title "Node restart during replication — eventual consistency restored" ;
+    pm:type pm:Chaos ;
+    pm:status pm:Failing .
+
+tc:TC-087 a pm:TestCriterion ;
+    pm:title "iri_dereferencing" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-029 .
+
+tc:TC-104 a pm:TestCriterion ;
+    pm:title "shadow_swap_live_traffic" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-035 .
+
+tc:TC-164 a pm:TestCriterion ;
+    pm:title "iri_determinism" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-049 .
+
+tc:TC-227 a pm:TestCriterion ;
+    pm:title "User authenticates against Product-hosted application via OIDC" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-086 a pm:TestCriterion ;
+    pm:title "cert_chain_validation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-030 .
+
+tc:TC-040 a pm:TestCriterion ;
+    pm:title "internal_dns_resolution" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-014 .
+
+tc:TC-110 a pm:TestCriterion ;
+    pm:title "tag_sparql_queryable" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-036 .
+
+tc:TC-113 a pm:TestCriterion ;
+    pm:title "group_membership_removal" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-037 .
+
+tc:TC-150 a pm:TestCriterion ;
+    pm:title "retention_enforcement" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-046 .
+
+tc:TC-019 a pm:TestCriterion ;
+    pm:title "oxigraph_sparql_compliance" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-006 .
+
+tc:TC-034 a pm:TestCriterion ;
+    pm:title "phase_dependency_order" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-011 .
+
+tc:TC-160 a pm:TestCriterion ;
+    pm:title "workload_reschedule_routing" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-048 .
+
+tc:TC-188 a pm:TestCriterion ;
+    pm:title "capability_implements_shacl_validation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-200 a pm:TestCriterion ;
+    pm:title "data_product_atomic_swap" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-007 a pm:TestCriterion ;
+    pm:title "raft_learner_join" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-002 .
+
+tc:TC-205 a pm:TestCriterion ;
+    pm:title "data_domain_deletion_guard" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-222 a pm:TestCriterion ;
+    pm:title "DNS server failure — fallback to mDNS" ;
+    pm:type pm:Chaos ;
+    pm:status pm:Failing .
+
+tc:TC-178 a pm:TestCriterion ;
+    pm:title "dns_cache_invalidation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-052 .
+
+tc:TC-123 a pm:TestCriterion ;
+    pm:title "metrics_collection_interval" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-040 .
+
+tc:TC-232 a pm:TestCriterion ;
+    pm:title "Capability declared and fulfilled by implementing product" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-130 a pm:TestCriterion ;
+    pm:title "all_builtin_rules" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-041 .
+
+tc:TC-213 a pm:TestCriterion ;
+    pm:title "Inference rule assigns user to group on tag change" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-025 a pm:TestCriterion ;
+    pm:title "command_correlation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-008 .
 
 tc:TC-118 a pm:TestCriterion ;
     pm:title "reconciliation_pass" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
     pm:validates adr:ADR-038 .
 
-tc:TC-137 a pm:TestCriterion ;
-    pm:title "config_live_reload" ;
+tc:TC-094 a pm:TestCriterion ;
+    pm:title "event_store_rdf_projection" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-032 .
+
+tc:TC-010 a pm:TestCriterion ;
+    pm:title "product_fqdn_dns" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-003 .
+
+tc:TC-043 a pm:TestCriterion ;
+    pm:title "partial_failure_reapply" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-015 .
+
+tc:TC-114 a pm:TestCriterion ;
+    pm:title "circular_group_rejection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-043 .
-
-tc:TC-143 a pm:TestCriterion ;
-    pm:title "flag_version_range" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-044 .
-
-tc:TC-152 a pm:TestCriterion ;
-    pm:title "parquet_portability" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-046 .
-
-tc:TC-156 a pm:TestCriterion ;
-    pm:title "offsite_backup_complete" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-047 .
-
-tc:TC-036 a pm:TestCriterion ;
-    pm:title "raw_block_device" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-004 ;
-    pm:validates adr:ADR-012 .
-
-tc:TC-124 a pm:TestCriterion ;
-    pm:title "metrics_rdf_projection" ;
-    pm:type pm:Scenario ;
-    pm:status pm:Passing ;
-    pm:validates ft:FT-009 ;
-    pm:validates adr:ADR-040 .
+    pm:validates adr:ADR-037 .
 
 tc:TC-061 a pm:TestCriterion ;
     pm:title "failed_upgrade_rollback" ;
     pm:type pm:Scenario ;
-    pm:status pm:Passing ;
+    pm:status pm:Failing ;
     pm:validates ft:FT-008 ;
     pm:validates adr:ADR-021 .
+
+tc:TC-144 a pm:TestCriterion ;
+    pm:title "flag_in_process_evaluation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-044 .
+
+tc:TC-075 a pm:TestCriterion ;
+    pm:title "bootstrap_token_expiry" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-026 .
+
+tc:TC-131 a pm:TestCriterion ;
+    pm:title "AlertFired" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-041 .
+
+tc:TC-217 a pm:TestCriterion ;
+    pm:title "Capability declared and fulfilled by implementing product" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-009 a pm:TestCriterion ;
+    pm:title "node_join_dns" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-003 .
+
+tc:TC-023 a pm:TestCriterion ;
+    pm:title "invalid_syntax_rejection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-007 .
+
+tc:TC-058 a pm:TestCriterion ;
+    pm:title "cluster_registry_discovery" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-020 .
+
+tc:TC-195 a pm:TestCriterion ;
+    pm:title "CapabilityUnfulfilled" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-136 a pm:TestCriterion ;
+    pm:title "config_api_lifecycle" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-043 .
+
+tc:TC-192 a pm:TestCriterion ;
+    pm:title "capability_implementor_removed_unfulfilled" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-021 a pm:TestCriterion ;
+    pm:title "oxigraph_persistence" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-006 .
+
+tc:TC-197 a pm:TestCriterion ;
+    pm:title "data_product_field_validation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-128 a pm:TestCriterion ;
+    pm:title "alert_resolved" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-041 .
+
+tc:TC-220 a pm:TestCriterion ;
+    pm:title "Node crash during volume write — no data corruption" ;
+    pm:type pm:Chaos ;
+    pm:status pm:Failing .
+
+tc:TC-198 a pm:TestCriterion ;
+    pm:title "data_product_projection_on_trigger" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-212 a pm:TestCriterion ;
+    pm:title "User authenticates against Product-hosted application via OIDC" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-101 a pm:TestCriterion ;
+    pm:title "composition_root_only" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-034 .
+
+tc:TC-037 a pm:TestCriterion ;
+    pm:title "volume_mount_restart" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-012 .
+
+tc:TC-045 a pm:TestCriterion ;
+    pm:title "product_full_lifecycle" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-001 ;
+    pm:validates adr:ADR-016 .
+
+tc:TC-219 a pm:TestCriterion ;
+    pm:title "Raft leader failover under network partition" ;
+    pm:type pm:Chaos ;
+    pm:status pm:Failing .
+
+tc:TC-166 a pm:TestCriterion ;
+    pm:title "offline_validation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-049 .
+
+tc:TC-175 a pm:TestCriterion ;
+    pm:title "dns_a_records" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-052 .
+
+tc:TC-135 a pm:TestCriterion ;
+    pm:title "iri_namespace_uniqueness" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-042 .
+
+tc:TC-161 a pm:TestCriterion ;
+    pm:title "internal_port_isolation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-048 .
+
+tc:TC-149 a pm:TestCriterion ;
+    pm:title "parquet_write_read" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-046 .
+
+tc:TC-121 a pm:TestCriterion ;
+    pm:title "owl_transitivity" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-039 .
+
+tc:TC-133 a pm:TestCriterion ;
+    pm:title "dual_cluster_mDNS_isolation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-042 .
+
+tc:TC-015 a pm:TestCriterion ;
+    pm:title "event_ordering" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-004 .
+
+tc:TC-231 a pm:TestCriterion ;
+    pm:title "Data product declared, projection rebuilt on trigger event, second product queries it" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Unimplemented .
+
+tc:TC-145 a pm:TestCriterion ;
+    pm:title "FeatureFlagChanged" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-044 .
+
+tc:TC-077 a pm:TestCriterion ;
+    pm:title "tier3_physical_recovery" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-026 .
+
+tc:TC-112 a pm:TestCriterion ;
+    pm:title "group_membership_via_inference" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-037 .
+
+tc:TC-152 a pm:TestCriterion ;
+    pm:title "parquet_portability" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-046 .
+
+tc:TC-165 a pm:TestCriterion ;
+    pm:title "shacl_validation_errors" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-007 ;
+    pm:validates adr:ADR-049 .
+
+tc:TC-002 a pm:TestCriterion ;
+    pm:title "no_runtime_panics" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-001 .
+
+tc:TC-193 a pm:TestCriterion ;
+    pm:title "capability_deletion_guard" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-004 a pm:TestCriterion ;
+    pm:title "ldd" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates adr:ADR-001 .
+
+tc:TC-082 a pm:TestCriterion ;
+    pm:title "no_cross_slice_imports" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-028 .
+
+tc:TC-190 a pm:TestCriterion ;
+    pm:title "capability_routing" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-016 a pm:TestCriterion ;
+    pm:title "rdf_projection_roundtrip" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-005 .
+
+tc:TC-060 a pm:TestCriterion ;
+    pm:title "atomic_version_cutover" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-021 .
+
+tc:TC-191 a pm:TestCriterion ;
+    pm:title "capability_version_selection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-055 .
+
+tc:TC-028 a pm:TestCriterion ;
+    pm:title "human_identity_lifecycle" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-009 .
+
+tc:TC-078 a pm:TestCriterion ;
+    pm:title "mtls_enforcement" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-027 .
+
+tc:TC-065 a pm:TestCriterion ;
+    pm:title "subscription_lifecycle" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-005 ;
+    pm:validates adr:ADR-022 .
+
+tc:TC-207 a pm:TestCriterion ;
+    pm:title "DataProductSLOBreached" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-097 a pm:TestCriterion ;
+    pm:title "sdk_generation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-010 ;
+    pm:validates adr:ADR-033 .
+
+tc:TC-151 a pm:TestCriterion ;
+    pm:title "datafusion_time_range" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-046 .
+
+tc:TC-162 a pm:TestCriterion ;
+    pm:title "sni_cert_selection" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-048 .
+
+tc:TC-137 a pm:TestCriterion ;
+    pm:title "config_live_reload" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-043 .
+
+tc:TC-203 a pm:TestCriterion ;
+    pm:title "data_product_slo_breach_and_restore" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-143 a pm:TestCriterion ;
+    pm:title "flag_version_range" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-044 .
+
+tc:TC-147 a pm:TestCriterion ;
+    pm:title "cli_trace_propagation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-045 .
+
+tc:TC-140 a pm:TestCriterion ;
+    pm:title "ConfigChanged" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-043 .
+
+tc:TC-142 a pm:TestCriterion ;
+    pm:title "flag_live_update" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-044 .
+
+tc:TC-085 a pm:TestCriterion ;
+    pm:title "byo_ca" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-030 .
+
+tc:TC-181 a pm:TestCriterion ;
+    pm:title "token_enroll_single_use" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-053 .
+
+tc:TC-039 a pm:TestCriterion ;
+    pm:title "replication_on_node_join" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-013 .
+
+tc:TC-090 a pm:TestCriterion ;
+    pm:title "schema_iri_resolution" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-031 .
+
+tc:TC-183 a pm:TestCriterion ;
+    pm:title "cert_revocation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-053 .
+
+tc:TC-095 a pm:TestCriterion ;
+    pm:title "event_store_replay" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-032 .
+
+tc:TC-072 a pm:TestCriterion ;
+    pm:title "fido2_cli_auth" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-003 ;
+    pm:validates adr:ADR-025 .
+
+tc:TC-132 a pm:TestCriterion ;
+    pm:title "AlertResolved" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-041 .
+
+tc:TC-196 a pm:TestCriterion ;
+    pm:title "data_domain_declaration" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Passing ;
+    pm:validates ft:FT-009 ;
+    pm:validates adr:ADR-056 .
+
+tc:TC-214 a pm:TestCriterion ;
+    pm:title "CPU temperature alert fires and resolves" ;
+    pm:type pm:ExitCriteria ;
+    pm:status pm:Failing .
+
+tc:TC-008 a pm:TestCriterion ;
+    pm:title "dns_resolution" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-003 .
+
+tc:TC-182 a pm:TestCriterion ;
+    pm:title "token_enroll_expiry" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-006 ;
+    pm:validates adr:ADR-053 .
+
+tc:TC-057 a pm:TestCriterion ;
+    pm:title "ontology_served" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-019 .
+
+tc:TC-091 a pm:TestCriterion ;
+    pm:title "schema_evolution" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-031 .
+
+tc:TC-052 a pm:TestCriterion ;
+    pm:title "inter_product_event_delivery" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-008 ;
+    pm:validates adr:ADR-018 .
+
+tc:TC-017 a pm:TestCriterion ;
+    pm:title "sparql_query_types" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-005 .
+
+tc:TC-092 a pm:TestCriterion ;
+    pm:title "schema_iri_permanence" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-002 ;
+    pm:validates adr:ADR-031 .
+
+tc:TC-069 a pm:TestCriterion ;
+    pm:title "intent_translated_to_implementation" ;
+    pm:type pm:Scenario ;
+    pm:status pm:Failing ;
+    pm:validates ft:FT-004 ;
+    pm:validates adr:ADR-024 .
 

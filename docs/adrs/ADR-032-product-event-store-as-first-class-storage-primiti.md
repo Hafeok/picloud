@@ -2,7 +2,7 @@
 id: ADR-032
 title: Product Event Store as First-Class Storage Primitive
 status: accepted
-features: []
+features: [FT-008, FT-078, FT-080]
 supersedes: []
 superseded-by: []
 domains: []
@@ -42,6 +42,10 @@ Event schemas are declared as `.ttl` or `.shacl` files deployed with the Product
 - Schema IRIs are consistent with ADR-031 — one versioning model for all events, platform and Product alike
 - Automatic RDF projection means the Product's SPARQL endpoint reflects aggregate state immediately — no custom projectors needed for standard cases
 - The HTTP API is consistent with the IRI model (ADR-029) — no custom protocol
+
+**Rejected alternatives:**
+- **Products implement their own event sourcing** — duplicates infrastructure, produces inconsistent implementations, and loses integration with the platform's RDF projection layer.
+- **CRUD-only product storage** — discards the auditability and replay benefits of event sourcing that the platform itself relies on.
 
 **Consequences:**
 - The platform must support multi-tenant event log partitioning — platform events and Product events coexist but are scoped separately

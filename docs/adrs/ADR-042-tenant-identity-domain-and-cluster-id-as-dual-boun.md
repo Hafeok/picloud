@@ -2,7 +2,7 @@
 id: ADR-042
 title: Tenant Identity — Domain and Cluster ID as Dual Boundary
 status: accepted
-features: []
+features: [FT-007, FT-040]
 supersedes: []
 superseded-by: []
 domains: []
@@ -75,6 +75,10 @@ When running multiple tenants, each cluster is fully independent — separate ev
 - The dual boundary provides defence in depth: human-readable discrimination via domain, cryptographic enforcement via cluster CA
 - Defaulting to `picloud.local` means zero configuration for the common single-tenant home lab case
 - The cluster identity is established at `cluster init` and never changes — it is permanent for the lifetime of the cluster
+
+**Rejected alternatives:**
+- **Domain-only identity** — domains can change (DNS migration), breaking all IRIs and certificates if the identity is domain-bound.
+- **UUID-only identity** — UUIDs are not human-readable and cannot serve as the base for the IRI hierarchy or TLS certificates.
 
 **Consequences:**
 - `ClusterIdentity` must be the first thing written to Raft state on `cluster init` — before any other operation

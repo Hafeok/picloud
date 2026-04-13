@@ -2,7 +2,7 @@
 id: ADR-047
 title: Volume Snapshots and Offsite Backup as Storage Intent Primitives
 status: accepted
-features: []
+features: [FT-004, FT-033, FT-034, FT-035, FT-036, FT-037]
 supersedes: []
 superseded-by: []
 domains: []
@@ -174,6 +174,10 @@ inference-rule 'backup-failed-alert' = {
 - Separating snapshot storage from cluster NVMe preserves full cluster storage capacity for live data
 - Backup failures emit events and fire alert rules — operators are notified before they discover data loss the hard way
 - Secrets for NAS and S3 credentials follow the existing secret injection model (ADR-009) — no new credential management needed
+
+**Rejected alternatives:**
+- **External backup tools (Restic, Velero)** — adds external dependencies and operates outside the platform's event log, making backup state unauditable.
+- **No built-in backup** — unacceptable for a platform that promises durability; operators would need to build backup infrastructure from scratch.
 
 **Consequences:**
 - `picloud-storage` gains NFS/SMB mount capability for snapshot storage

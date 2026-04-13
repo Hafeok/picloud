@@ -2,7 +2,7 @@
 id: ADR-024
 title: Storage Intent Model
 status: accepted
-features: []
+features: [FT-004, FT-018, FT-090]
 supersedes: []
 superseded-by: []
 domains: []
@@ -32,3 +32,7 @@ scope: domain
 - Operators express requirements, not implementation details — consistent with the cloud abstraction model
 - Platform can make better placement decisions than operators (which nodes have capacity, which nodes are healthy)
 - Adding new storage tiers in Phase 4 does not require changes to Product resource files — only the platform implementation changes
+
+**Rejected alternatives:**
+- **Direct replication factor specification** — exposes implementation details, creates operator error risk, and requires changes to product files when the platform's storage capabilities evolve.
+- **Single storage tier (one size fits all)** — fails to distinguish between a write-intensive database and a media archive, leading to suboptimal resource allocation.

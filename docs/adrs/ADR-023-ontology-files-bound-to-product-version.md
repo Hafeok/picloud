@@ -2,7 +2,7 @@
 id: ADR-023
 title: Ontology Files Bound to Product Version
 status: accepted
-features: []
+features: [FT-008, FT-053]
 supersedes: []
 superseded-by: []
 domains: []
@@ -19,3 +19,7 @@ scope: domain
 - Schema and implementation are versioned together — no schema/implementation drift
 - Consumers can discover the exact schema for any Product version from the cluster graph
 - SHACL files provide validation shapes — the platform can optionally validate graph updates against them
+
+**Rejected alternatives:**
+- **Unversioned ontology (latest only)** — consumers cannot know which schema they are querying when the ontology changes, breaking backward compatibility.
+- **Ontology managed outside the product lifecycle** — decouples schema from implementation, enabling drift between what the product stores and what consumers expect.

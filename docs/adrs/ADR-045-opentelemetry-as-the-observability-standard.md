@@ -2,7 +2,7 @@
 id: ADR-045
 title: OpenTelemetry as the Observability Standard
 status: accepted
-features: []
+features: [FT-009, FT-041, FT-042, FT-043, FT-046, FT-047, FT-048]
 supersedes: []
 superseded-by: []
 domains: []
@@ -109,6 +109,10 @@ otel-export 'grafana' = {
 - Injecting OTel config as environment variables means workloads need zero platform-specific code to be observable
 - W3C trace context propagation is standard — no custom headers, any OTel SDK handles it
 - Unifying hardware metrics (ADR-040) and product metrics at the `MetricRecorded` event level means one alert rule syntax for all metric types
+
+**Rejected alternatives:**
+- **Proprietary observability format** — fragments tooling ecosystem; developers would need platform-specific instrumentation instead of standard OpenTelemetry SDKs.
+- **No structured observability** — workload developers would have no standard way to emit or query traces and metrics, making debugging distributed products impossible.
 
 **Consequences:**
 - `picloud-http` must serve an OTLP endpoint at `https://picloud.local/otel` — workloads export here

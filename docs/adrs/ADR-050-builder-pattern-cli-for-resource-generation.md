@@ -2,7 +2,7 @@
 id: ADR-050
 title: Builder Pattern CLI for Resource Generation
 status: accepted
-features: []
+features: [FT-007, FT-022, FT-037, FT-047, FT-050]
 supersedes: []
 superseded-by: []
 domains: []
@@ -59,6 +59,10 @@ picloud new container --product photo-app --name api-server --overwrite
 - Overwrite protection prevents accidental data loss on hand-edited files
 - Flag names matching property names means one mental model for CLI and file format
 - Generated files are plain `.picloud` text — developers can open and edit them immediately
+
+**Rejected alternatives:**
+- **Template-based scaffolding** — templates are static and cannot adapt to the platform's current state or validate against the live ontology.
+- **Manual file creation only** — error-prone; operators must know the exact resource schema, which the builder pattern discovers interactively.
 
 **Consequences:**
 - `picloud new` is implemented in `picloud-cli` using the `picloud-compiler` crate for generation and validation

@@ -2,7 +2,7 @@
 id: ADR-019
 title: Per-Product SPARQL Endpoint and Ontology Exposure
 status: accepted
-features: []
+features: [FT-008, FT-051, FT-052, FT-074]
 supersedes: []
 superseded-by: []
 domains: []
@@ -20,3 +20,7 @@ scope: domain
 - IAM-gating means SPARQL endpoints respect the same access control as all other resources
 - Ontology files are the schema contract for a Product's graph — consumers can understand the domain before querying
 - Binding ontology to Product version means consumers always know which schema they are querying
+
+**Rejected alternatives:**
+- **Custom query API per product** — reinvents a query language that SPARQL already provides, fragmenting the platform's data access model.
+- **Shared cluster-level SPARQL only** — loses product-level IAM scoping and mixes product data in a single query surface, breaking isolation.

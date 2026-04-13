@@ -2,7 +2,7 @@
 id: ADR-012
 title: Mounted and Raw Block Device Support
 status: accepted
-features: []
+features: [FT-004, FT-019, FT-029]
 supersedes: []
 superseded-by: []
 domains: []
@@ -19,3 +19,7 @@ scope: domain
 - Mounted volumes cover the majority of use cases
 - Raw block devices are required for databases (PostgreSQL, RocksDB) that manage their own storage layout
 - Both types use the same allocation and replication mechanisms — no storage layer duplication
+
+**Rejected alternatives:**
+- **Mounted volumes only** — excludes databases like PostgreSQL and RocksDB that require direct block device access for performance and correctness.
+- **Raw block devices only** — forces every workload to manage its own filesystem, adding unnecessary complexity for the majority of use cases.

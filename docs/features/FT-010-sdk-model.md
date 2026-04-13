@@ -7,6 +7,8 @@ depends-on:
 - FT-008
 adrs:
 - ADR-033
+- ADR-032
+- ADR-019
 tests:
 - TC-097
 - TC-098

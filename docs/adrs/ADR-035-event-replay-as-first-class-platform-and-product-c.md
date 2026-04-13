@@ -2,7 +2,7 @@
 id: ADR-035
 title: Event Replay as First-Class Platform and Product Capability
 status: accepted
-features: []
+features: [FT-002, FT-081, FT-082]
 supersedes: []
 superseded-by: []
 domains: []
@@ -121,6 +121,10 @@ All replay events are written to the platform log and projected into the cluster
 - Using current projectors against historical events (via schema IRIs) is the mechanism by which bugs are fixed retroactively — this is the core value of the ADR-031 schema versioning decision
 - Batch aggregate replay (up to 1000) covers the common operational case of targeted repair without requiring a full store replay
 - CLI, HTTP API, and SDK access means replay can be scripted, automated, or triggered by monitoring systems
+
+**Rejected alternatives:**
+- **Manual replay scripts** — operators would need to write custom replay logic, with no shadow graph protection and no auditable lifecycle.
+- **Snapshot-based recovery only** — snapshots capture state at a point in time but cannot fix projector bugs retroactively, which is the primary use case for replay.
 
 **Consequences:**
 - The shadow graph mechanism requires Oxigraph to support multiple named graphs simultaneously — it does (ADR-006)

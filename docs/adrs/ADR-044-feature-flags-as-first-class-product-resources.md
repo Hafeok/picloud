@@ -2,7 +2,7 @@
 id: ADR-044
 title: Feature Flags as First-Class Product Resources
 status: accepted
-features: []
+features: [FT-009, FT-039]
 supersedes: []
 superseded-by: []
 domains: []
@@ -127,6 +127,10 @@ When a flag changes (`enabled` toggled, version expression updated), the platfor
 - SDK-local evaluation with event invalidation gives zero-latency flag checks in the hot path
 - On/off MVP is the right starting point — variant flags add complexity that is not needed for Phase 1
 - `FeatureFlagChanged` as an event means monitoring products can observe flag lifecycle across the cluster
+
+**Rejected alternatives:**
+- **External feature flag service (LaunchDarkly, Unleash)** — adds an external dependency; flag state would live outside the platform's event log and RDF graph.
+- **Code-level flags only** — requires redeployment to change flag state, losing the runtime toggle capability that feature flags provide.
 
 **Consequences:**
 - `feature-flag` is a new Product-scoped resource type

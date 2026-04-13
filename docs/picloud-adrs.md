@@ -442,6 +442,10 @@ Exit criteria:
 - Phasing reduces the surface area of Phase 1 to the minimum needed for a working cluster
 - RDF application storage builds on the same block storage primitives — no rework required
 
+**Rejected alternatives:**
+- **Parallel implementation** — implementing both simultaneously increases Phase 1 surface area and risks delays in the core block storage path that other capabilities depend on.
+- **RDF storage first** — RDF storage depends on block storage for persistence; reversing the order would require temporary in-memory-only storage that is later replaced.
+
 **Test coverage:**
 
 Scenario tests:
@@ -464,6 +468,10 @@ Exit criteria:
 - Mounted volumes cover the majority of use cases
 - Raw block devices are required for databases (PostgreSQL, RocksDB) that manage their own storage layout
 - Both types use the same allocation and replication mechanisms — no storage layer duplication
+
+**Rejected alternatives:**
+- **Mounted volumes only** — excludes databases like PostgreSQL and RocksDB that require direct block device access for performance and correctness.
+- **Raw block devices only** — forces every workload to manage its own filesystem, adding unnecessary complexity for the majority of use cases.
 
 **Test coverage:**
 
@@ -496,6 +504,10 @@ Exit criteria:
 - On a 5-node Pi cluster, full-replication is feasible and NVMe bandwidth is sufficient
 - Full-replication in MVP simplifies the storage implementation significantly
 
+**Rejected alternatives:**
+- **Operator-specified replication factor** — introduces a class of operator error (under-replicated volumes, inconsistent replication across the cluster) without meaningful benefit on a small Pi cluster.
+- **No replication** — unacceptable for a platform that promises durability; a single node failure would mean data loss.
+
 **Future:** Additional durability tiers (quorum, local) will be added in Phase 4 as the storage implementation matures.
 
 **Test coverage:**
@@ -525,6 +537,10 @@ Exit criteria:
 - Without service discovery, containers cannot find each other — the platform is not useful
 - Internal DNS is a small implementation surface relative to its impact
 - Automatic registration means operators never configure DNS manually
+
+**Rejected alternatives:**
+- **Deferred to Phase 2** — without service discovery, containers cannot find each other, making the platform unusable for any multi-container product in Phase 1.
+- **Manual DNS configuration** — operators configuring DNS entries for every container contradicts the platform's automation-first principle.
 
 **Test coverage:**
 
@@ -594,6 +610,10 @@ Exit criteria:
 - Cascading deletion prevents orphaned resources
 - One active version per Product prevents version sprawl and simplifies the operational model
 
+**Rejected alternatives:**
+- **Flat resource model (no grouping)** — operators would manage individual resources with no lifecycle boundary, making deployment, IAM scoping, and cascading deletion impossible.
+- **Namespace-based grouping (Kubernetes model)** — namespaces are a weak boundary with no versioning, no cascading lifecycle, and no built-in IAM scoping.
+
 **Test coverage:**
 
 Scenario tests:
@@ -622,6 +642,10 @@ Exit criteria:
 - Applications get SSO for free — no Keycloak, no Authentik, no Auth0 required
 - The identity model is unified — the same identity a user uses for `picloud` CLI is the identity they use for applications
 - Product-scoped tokens mean a user's permissions within an application are distinct from their platform permissions
+
+**Rejected alternatives:**
+- **External IdP only (Keycloak, Auth0)** — adds an external dependency to a platform designed for zero external dependencies; breaks the single-binary model.
+- **Simple token-based auth without OIDC** — non-standard, requires every application to implement custom auth logic, and prevents interoperability with standard OIDC clients.
 
 **Security requirements:**
 - Token signing keys are stored in the platform's encrypted secret store
@@ -661,6 +685,10 @@ Exit criteria:
 - Event-driven communication enables temporal decoupling — the subscribing Product does not need to be running when the event is emitted
 - Consistent with the event-sourcing foundation of the platform
 
+**Rejected alternatives:**
+- **Direct HTTP between products** — creates tight coupling, makes the dependency graph opaque, and prevents temporal decoupling between products.
+- **Shared database between products** — violates product isolation, creates hidden data dependencies, and makes independent deployment impossible.
+
 **Consequences:**
 - Synchronous request-response between Products is not possible by design
 - Cross-product data consistency is eventual, not immediate
@@ -696,6 +724,10 @@ Exit criteria:
 - Ontology files are the schema contract for a Product's graph — consumers can understand the domain before querying
 - Binding ontology to Product version means consumers always know which schema they are querying
 
+**Rejected alternatives:**
+- **Custom query API per product** — reinvents a query language that SPARQL already provides, fragmenting the platform's data access model.
+- **Shared cluster-level SPARQL only** — loses product-level IAM scoping and mixes product data in a single query surface, breaking isolation.
+
 **Test coverage:**
 
 Scenario tests:
@@ -726,6 +758,10 @@ Exit criteria:
 - New Products can discover existing Products' interfaces through graph queries
 - Consistent with RDF as the universal data model for the platform
 
+**Rejected alternatives:**
+- **Separate service catalog (Consul-style)** — introduces a separate system with its own data model when the RDF graph already contains all the necessary information.
+- **No service registry** — operators would need to read source files or configuration to discover deployed products and their interfaces.
+
 **Test coverage:**
 
 Scenario tests:
@@ -751,6 +787,10 @@ Exit criteria:
 - Simplifies the IAM model — Product-scoped tokens are always for the active version
 - Ontology binding is unambiguous — there is always exactly one schema for a Product
 - Consistent with the hermetic Product model — a Product is a well-defined, stable deployment unit
+
+**Rejected alternatives:**
+- **Multi-version with traffic splitting (canary/blue-green)** — adds version-aware routing, traffic splitting percentages, and version-scoped IAM complexity without clear benefit on a small Pi cluster.
+- **In-place rolling update** — creates a window where mixed versions serve traffic simultaneously, complicating debugging, IAM, and ontology binding.
 
 **Upgrade path:** Deploying a new Product version is an atomic cutover. The platform provisions all resources for the new version in full. Only when every resource reaches `ResourceReady` does the platform cut traffic over to the new version and tear down the old one. If any resource fails to reach `ResourceReady`, the deployment is aborted and the old version remains live. There is no partial cutover — the cluster is never in a state where two versions are simultaneously serving traffic.
 
@@ -783,6 +823,10 @@ Exit criteria:
 - The platform can enforce that a subscription's source Product and event type exist before provisioning
 - Consistent with the IaC-as-only-interface principle — everything exists in a file
 
+**Rejected alternatives:**
+- **Runtime subscriptions without resource declaration** — inter-product dependencies become invisible, unauditable, and impossible to validate at deploy time.
+- **Implicit subscription by convention** — relies on naming conventions rather than explicit declarations, creating fragile and undiscoverable dependencies.
+
 **Test coverage:**
 
 Scenario tests:
@@ -808,6 +852,10 @@ Exit criteria:
 - Schema and implementation are versioned together — no schema/implementation drift
 - Consumers can discover the exact schema for any Product version from the cluster graph
 - SHACL files provide validation shapes — the platform can optionally validate graph updates against them
+
+**Rejected alternatives:**
+- **Unversioned ontology (latest only)** — consumers cannot know which schema they are querying when the ontology changes, breaking backward compatibility.
+- **Ontology managed outside the product lifecycle** — decouples schema from implementation, enabling drift between what the product stores and what consumers expect.
 
 **Test coverage:**
 
@@ -847,6 +895,10 @@ Exit criteria:
 - Operators express requirements, not implementation details — consistent with the cloud abstraction model
 - Platform can make better placement decisions than operators (which nodes have capacity, which nodes are healthy)
 - Adding new storage tiers in Phase 4 does not require changes to Product resource files — only the platform implementation changes
+
+**Rejected alternatives:**
+- **Direct replication factor specification** — exposes implementation details, creates operator error risk, and requires changes to product files when the platform's storage capabilities evolve.
+- **Single storage tier (one size fits all)** — fails to distinguish between a write-intensive database and a media archive, leading to suboptimal resource allocation.
 
 **Test coverage:**
 
@@ -934,6 +986,10 @@ Exit criteria:
 - The same token exchange mechanism is reused across bootstrap and all recovery tiers — one implementation, multiple use cases
 - All recovery operations are auditable events in the platform event log
 
+**Rejected alternatives:**
+- **Recovery via password fallback** — reintroduces passwords, contradicting the passkey-only authentication model (ADR-025).
+- **Admin-only recovery (no physical tier)** — if all admin accounts are locked out, the cluster becomes permanently inaccessible with no recovery path.
+
 **Test coverage:**
 
 Scenario tests:
@@ -1019,6 +1075,10 @@ Exit criteria:
 
 **This principle is the architectural north star for PiCloud.** When a new feature or capability is being designed, the first question is: does this increase coupling between Products, or does it preserve their independence? If it increases coupling, the design should be reconsidered.
 
+**Rejected alternatives:**
+- **Coupling by convention** — relying on developer discipline rather than platform enforcement means coupling will inevitably appear as the number of products grows.
+- **Shared service layer between products** — a shared service creates a coupling point that defeats the independence of the product model.
+
 **Test coverage:**
 
 Scenario tests:
@@ -1061,6 +1121,10 @@ Exit criteria:
 - External clients (operator laptops, browsers, RDF tools) must trust the platform CA to connect to `picloud.local` over HTTPS — one-time operation via `picloud ca export`
 - In BYO-CA mode, the external CA must be accessible during node join and certificate rotation operations
 - The platform CA private key is the most sensitive secret in the cluster — its storage and replication must be treated with the highest security priority
+
+**Rejected alternatives:**
+- **External CA required** — adds a mandatory external dependency for TLS, breaking the zero-dependency single-binary model.
+- **Self-signed certificates per node** — prevents mutual authentication; nodes cannot verify each other's identity without a shared trust root.
 
 **Test coverage:**
 
@@ -1128,6 +1192,10 @@ Accept: text/html              → Human-readable view (future portal)
 - TLS certificates must be issued for `picloud.local` by the platform's built-in CA — external clients need to trust this CA
 - Resource IRIs must be assigned at declaration time and remain stable for the lifetime of the resource
 
+**Rejected alternatives:**
+- **Opaque internal IDs (UUIDs)** — breaks RDF Linked Data navigation; external tools and LLMs cannot follow links to explore the cluster.
+- **Subdomain-based addressing** — requires wildcard TLS certificates, does not convey resource hierarchy, and does not align with Linked Data conventions.
+
 **Test coverage:**
 
 Scenario tests:
@@ -1193,6 +1261,10 @@ Each schema IRI returns a JSON Schema or SHACL document describing the event pay
 - Schema definitions must be written before the events that use them — schemas are deployed as part of platform releases
 - Projectors accumulate handlers over time as schemas evolve — this is intentional and explicit rather than hidden
 
+**Rejected alternatives:**
+- **Embedded schema version number** — not dereferenceable; projectors and LLMs cannot fetch the schema definition without out-of-band documentation.
+- **Schema registry (Confluent-style)** — adds an external dependency and a separate data model when the platform's IRI space already provides schema resolution.
+
 **Test coverage:**
 
 Scenario tests:
@@ -1247,6 +1319,10 @@ Event schemas are declared as `.ttl` or `.shacl` files deployed with the Product
 - The platform must support multi-tenant event log partitioning — platform events and Product events coexist but are scoped separately
 - Custom projectors (for non-standard projection logic) are a future concern — Phase 3 ships automatic projection only
 - Product event stores add to the Raft replication load — large, high-frequency event stores may require tuning
+
+**Rejected alternatives:**
+- **Products implement their own event sourcing** — duplicates infrastructure, produces inconsistent implementations, and loses integration with the platform's RDF projection layer.
+- **CRUD-only product storage** — discards the auditability and replay benefits of event sourcing that the platform itself relies on.
 
 **Test coverage:**
 
@@ -1313,6 +1389,10 @@ The .NET SDK ships a companion `PiCloud.Sdk.Aspire` package. PiCloud resources a
 - SDK versioning is coupled to platform versioning — breaking platform changes are breaking SDK changes
 - The generator must be part of the platform's own CI from day one — not an afterthought
 
+**Rejected alternatives:**
+- **Handwritten SDKs** — unsustainable for three languages; SDK drift from the API is inevitable as the platform evolves.
+- **OpenAPI-based generation** — the platform's source of truth is an RDF ontology, not an OpenAPI spec; generating from OpenAPI would require maintaining a redundant schema definition.
+
 **Test coverage:**
 
 Scenario tests:
@@ -1378,6 +1458,10 @@ The dependency rule is enforced by `Cargo.toml` — slices literally cannot impo
 - Slices communicate via injected trait implementations, not direct calls
 - The composition root in `src/main.rs` grows as slices are added — this is expected and correct
 - LLMs can be given a single slice plus `picloud-domain` as context and make meaningful progress without understanding the full platform
+
+**Rejected alternatives:**
+- **Layered architecture** — slices would share horizontal layers (data access, business logic), creating coupling where a change in one capability breaks another.
+- **Monolithic single crate** — an LLM working on storage would need to understand the entire codebase, and a change anywhere could break anything.
 
 **Test coverage:**
 
@@ -1515,6 +1599,10 @@ All replay events are written to the platform log and projected into the cluster
 - `ReplayProgress` events should be emitted frequently enough to be useful but not so frequently that they flood the event log — every 100 events processed is a reasonable default
 - Subscribers that perform irreversible side effects (email, payment, external API calls) must inspect the `replay.is_replay` field — this should be documented prominently in the SDK
 
+**Rejected alternatives:**
+- **Manual replay scripts** — operators would need to write custom replay logic, with no shadow graph protection and no auditable lifecycle.
+- **Snapshot-based recovery only** — snapshots capture state at a point in time but cannot fix projector bugs retroactively, which is the primary use case for replay.
+
 **Test coverage:**
 
 Scenario tests:
@@ -1580,6 +1668,10 @@ picloud tag find environment=production          # all resources with this tag
 - RDF representation makes tags immediately queryable via SPARQL across all resource types
 - Event-driven — `TagAdded`/`TagRemoved` trigger inference rule evaluation instantly (ADR-037, ADR-038)
 - Key:value pairs are the simplest model that supports meaningful inference patterns
+
+**Rejected alternatives:**
+- **Labels as metadata only (not events)** — tag changes would not trigger inference rule evaluation, breaking the SPARQL CONSTRUCT membership model (ADR-037).
+- **Hierarchical taxonomy** — rigid hierarchies are harder to evolve and do not support the flexible, cross-cutting labelling patterns that inference rules require.
 
 **Consequences:**
 - `Tag` becomes a domain type in `picloud-domain` used by all resource types
@@ -1670,6 +1762,10 @@ inference-rule 'backend-group-membership' = {
 - 10-minute reconciliation catches any drift between events
 - The graph is always the source of truth — no separate membership database
 
+**Rejected alternatives:**
+- **Manual group membership only** — does not scale; every new user requires manual role assignment across all relevant groups.
+- **Attribute-based access control (ABAC) without groups** — evaluating policies at every access check is expensive; groups materialise permissions once and serve them at read time.
+
 **Consequences:**
 - Token issuance in `picloud-iam` must read group memberships from the RDF graph before assembling claims
 - `GroupMembershipChanged` must be a platform event so downstream systems can react
@@ -1755,6 +1851,10 @@ Every 10 minutes, all rules with `reconciliation: true` are evaluated regardless
 - Scoping means products can define their own inference rules without platform operator involvement
 - Alert lifecycle (fired/resolved) as events means any product can subscribe and build notification workflows
 
+**Rejected alternatives:**
+- **Hardcoded inference logic** — new inference patterns would require platform code changes and releases rather than declarative resource definitions.
+- **External rules engine (Drools, OPA)** — adds an external dependency with its own data model when the platform already has SPARQL and RDF as native capabilities.
+
 **Consequences:**
 - The inference engine needs to track which triples were produced by which rule to detect retractions
 - Rule evaluation must be idempotent — running the same rule twice produces the same triples
@@ -1811,6 +1911,10 @@ Any permission check for `picloud:OperatorRole` automatically applies to admins.
 - Ontology files already deployed with products (ADR-023) — RDFS/OWL axioms are declared there
 - Structural inference is always live — no schedule, no trigger, no rule to maintain
 - Complements ADR-038 — RDFS/OWL handles structural facts, CONSTRUCT handles operational rules
+
+**Rejected alternatives:**
+- **External reasoner (Pellet, HermiT)** — adds a JVM dependency and network hop for inference, contradicting the single-binary zero-dependency model.
+- **No inference** — loses subclass hierarchies and property inheritance that make the RDF graph navigable and self-describing.
 
 **Consequences:**
 - Product ontology authors must understand RDFS/OWL 2 RL — this is documented in the SDK
@@ -1888,6 +1992,10 @@ Workloads emit domain metrics (request count, error rate, latency) as events to 
 - Latest-value-only projection keeps the graph lean — historical analysis uses event log replay
 - 15-second default interval is sufficient for alert rules while not flooding the event log
 - `MetricRecorded` events trigger inference rule evaluation (ADR-038) — alert rules fire within seconds of a threshold breach
+
+**Rejected alternatives:**
+- **External monitoring (Prometheus, Grafana Agent)** — adds external dependencies; metrics would live outside the event log and RDF graph, breaking the unified data model.
+- **No built-in metrics** — operators would have no visibility into node health, making scheduling and capacity decisions impossible.
 
 **Consequences:**
 - At 15-second intervals across 5 nodes, `MetricRecorded` generates ~20 events/minute — well within Raft throughput
@@ -2005,6 +2113,10 @@ ORDER BY DESC(?timestamp)
 - Active alerts are queryable from the RDF graph at any time — `picloud graph query` gives the current alert state
 - Alert resolution is automatic — when the condition clears, the event fires. No manual acknowledgement needed (though products can implement that on top)
 
+**Rejected alternatives:**
+- **External alerting (Alertmanager, PagerDuty rules)** — requires external infrastructure and a separate rule language when SPARQL already queries the full platform state.
+- **Threshold-only alerting** — simple thresholds cannot express complex conditions that span multiple resource types, which SPARQL handles naturally.
+
 **Consequences:**
 - The inference engine must efficiently diff produced triples between evaluations to detect assertions and retractions
 - Alert storms (rapid fire/resolve cycles) should be dampened — a minimum 60-second hold-off before re-firing the same alert on the same resource
@@ -2094,6 +2206,10 @@ When running multiple tenants, each cluster is fully independent — separate ev
 - The dual boundary provides defence in depth: human-readable discrimination via domain, cryptographic enforcement via cluster CA
 - Defaulting to `picloud.local` means zero configuration for the common single-tenant home lab case
 - The cluster identity is established at `cluster init` and never changes — it is permanent for the lifetime of the cluster
+
+**Rejected alternatives:**
+- **Domain-only identity** — domains can change (DNS migration), breaking all IRIs and certificates if the identity is domain-bound.
+- **UUID-only identity** — UUIDs are not human-readable and cannot serve as the base for the IRI hierarchy or TLS certificates.
 
 **Consequences:**
 - `ClusterIdentity` must be the first thing written to Raft state on `cluster init` — before any other operation
@@ -2199,6 +2315,10 @@ When a config entry changes, the platform emits `ConfigChanged`. Workloads subsc
 - Live reload via events is consistent with the platform's event-driven model — no polling, no restart
 - Tags on config entries enable SPARQL queries across config — e.g. "all config entries tagged `environment:production`"
 - Typed values let the SDK deserialise correctly without the workload parsing strings manually
+
+**Rejected alternatives:**
+- **Environment variables only** — no versioning, no event-driven updates, and no integration with the RDF graph; changes require container restarts.
+- **External config service (Consul KV, etcd)** — adds an external dependency when the platform already has an event log and RDF graph for state management.
 
 **Consequences:**
 - `config` is a new Product-scoped resource type
@@ -2341,6 +2461,10 @@ When a flag changes (`enabled` toggled, version expression updated), the platfor
 - On/off MVP is the right starting point — variant flags add complexity that is not needed for Phase 1
 - `FeatureFlagChanged` as an event means monitoring products can observe flag lifecycle across the cluster
 
+**Rejected alternatives:**
+- **External feature flag service (LaunchDarkly, Unleash)** — adds an external dependency; flag state would live outside the platform's event log and RDF graph.
+- **Code-level flags only** — requires redeployment to change flag state, losing the runtime toggle capability that feature flags provide.
+
 **Consequences:**
 - `feature-flag` is a new Product-scoped resource type
 - `FeatureFlagChanged` is a new platform event
@@ -2465,6 +2589,10 @@ otel-export 'grafana' = {
 - Injecting OTel config as environment variables means workloads need zero platform-specific code to be observable
 - W3C trace context propagation is standard — no custom headers, any OTel SDK handles it
 - Unifying hardware metrics (ADR-040) and product metrics at the `MetricRecorded` event level means one alert rule syntax for all metric types
+
+**Rejected alternatives:**
+- **Proprietary observability format** — fragments tooling ecosystem; developers would need platform-specific instrumentation instead of standard OpenTelemetry SDKs.
+- **No structured observability** — workload developers would have no standard way to emit or query traces and metrics, making debugging distributed products impossible.
 
 **Consequences:**
 - `picloud-http` must serve an OTLP endpoint at `https://picloud.local/otel` — workloads export here
@@ -2618,6 +2746,10 @@ Delta Lake is built on Parquet and adds ACID transactions, schema evolution, and
 - Hourly partitioning means retention cleanup is O(1) — delete a directory, no compaction needed
 - Parquet is self-describing and portable — files can be analysed off-node with any Arrow-compatible tool
 - Natural upgrade path to Delta Lake when a Rust-native implementation is available
+
+**Rejected alternatives:**
+- **InfluxDB or TimescaleDB** — adds a JVM or PostgreSQL dependency; neither integrates with the platform's RDF and event log data model.
+- **RDF-only for time-series** — Oxigraph is optimised for graph queries, not columnar scans over millions of time-series data points.
 
 **Consequences:**
 - `picloud-storage` gains a `TelemetryStore` implementation backed by Parquet
@@ -2809,6 +2941,10 @@ inference-rule 'backup-failed-alert' = {
 - Backup failures emit events and fire alert rules — operators are notified before they discover data loss the hard way
 - Secrets for NAS and S3 credentials follow the existing secret injection model (ADR-009) — no new credential management needed
 
+**Rejected alternatives:**
+- **External backup tools (Restic, Velero)** — adds external dependencies and operates outside the platform's event log, making backup state unauditable.
+- **No built-in backup** — unacceptable for a platform that promises durability; operators would need to build backup infrastructure from scratch.
+
 **Consequences:**
 - `picloud-storage` gains NFS/SMB mount capability for snapshot storage
 - `picloud-storage` gains an S3-compatible client (`aws-sdk-s3` or `opendal` crate) for offsite backup
@@ -2988,6 +3124,10 @@ picloud-http/src/
 - Internal port isolation via `internal: true` solves the metrics/health/debug port exposure problem without firewall rules
 - hyper and rustls are already in the dependency stack — zero new dependencies required
 - ~500 lines is a well-understood, testable surface area — not a framework, just a router
+
+**Rejected alternatives:**
+- **External reverse proxy (Nginx, Traefik, HAProxy)** — adds an external dependency, requires separate configuration, and cannot leverage the RDF graph for dynamic routing.
+- **No ingress (direct container access)** — exposes internal container addresses, prevents IRI-based routing, and eliminates the platform's ability to enforce IAM at the edge.
 
 **Consequences:**
 - `picloud-http` gains `router.rs`, `proxy.rs`, `tls.rs`, `ingress.rs`
@@ -3271,6 +3411,10 @@ picloud-compiler/
 - Offline validation means CI/CD pipelines can validate without cluster access
 - Both `.picloud` and `.ttl` accepted means power users and LLMs can write Turtle directly when appropriate
 
+**Rejected alternatives:**
+- **YAML or JSON as IaC format** — neither is natively RDF-compatible; translating between YAML and the RDF graph requires a custom mapping layer that Turtle eliminates.
+- **Bicep-only (no Turtle)** — the Bicep-inspired DSL is a convenience; Turtle is the canonical form because it is the same language as the RDF graph, enabling round-trip fidelity.
+
 **Consequences:**
 - `picloud-compiler` is a new crate added to the workspace (depends only on `picloud-domain`)
 - ADR-007 is partially superseded — the `.picloud` syntax remains but is now a compiler input, not the platform's native format
@@ -3346,6 +3490,10 @@ picloud new container --product photo-app --name api-server --overwrite
 - Overwrite protection prevents accidental data loss on hand-edited files
 - Flag names matching property names means one mental model for CLI and file format
 - Generated files are plain `.picloud` text — developers can open and edit them immediately
+
+**Rejected alternatives:**
+- **Template-based scaffolding** — templates are static and cannot adapt to the platform's current state or validate against the live ontology.
+- **Manual file creation only** — error-prone; operators must know the exact resource schema, which the builder pattern discovers interactively.
 
 **Consequences:**
 - `picloud new` is implemented in `picloud-cli` using the `picloud-compiler` crate for generation and validation
@@ -3589,6 +3737,10 @@ Role inheritance is `rdfs:subClassOf` — the OWL inference engine materialises 
 - Static custom claims cover 90% of real use cases without the token issuance latency of dynamic SPARQL claims (dynamic claims are Phase 3)
 - Custom scopes give API consumers a standard OAuth surface for requesting specific access
 
+**Rejected alternatives:**
+- **Platform IAM only (no product-level IAM)** — products cannot define application-specific roles or scopes, forcing all access control to be platform-global.
+- **External IAM per product** — each product running its own IdP fragments the identity model and breaks single sign-on.
+
 **Consequences:**
 - `role`, `scope`, and `m2m-permission` are new product-scoped resource types
 - Token issuance in `picloud-iam` must query the inferred RDF graph for the full permission closure
@@ -3767,6 +3919,10 @@ No other Pi-hole configuration needed. Pi-hole continues to handle all external 
 - Event-driven cache invalidation means workload reschedules are visible to clients within seconds without requiring zero-TTL records
 - `hickory-dns` is the only pure Rust DNS library with authoritative server support — consistent with ADR-001
 - Every node runs DNS independently — no single point of failure, no leader election needed for DNS
+
+**Rejected alternatives:**
+- **External DNS server (CoreDNS, BIND)** — adds an external dependency; DNS records would not be automatically derived from the RDF graph.
+- **hosts file management** — does not scale, cannot serve dynamic records, and requires manual updates on every client machine.
 
 **Consequences:**
 - `picloud-network` gains a `dns/` module
@@ -3995,6 +4151,10 @@ picloud cluster init \
 - All enrollment events in the platform log — `NodeEnrolled`, `NodeEnrollmentRejected` — mean the cluster always knows who joined and when
 - `rcgen` and `x509-parser` are already in the workspace — zero new dependencies
 - Auto-renewal via inference rules and event subscriptions means certificate expiry is handled the same way as any other platform alert — consistently and observably
+
+**Rejected alternatives:**
+- **Manual certificate distribution** — operators would need to generate and distribute certificates to every node, contradicting the zero-configuration enrollment model.
+- **External PKI enrollment (SCEP, EST)** — adds an external dependency when the platform already has a built-in CA (ADR-030).
 
 **Consequences:**
 - `picloud-network` gains a `ca/` module

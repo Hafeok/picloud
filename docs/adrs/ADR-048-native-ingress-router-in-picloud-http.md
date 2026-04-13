@@ -2,7 +2,7 @@
 id: ADR-048
 title: Native Ingress Router in picloud-http
 status: accepted
-features: []
+features: [FT-006]
 supersedes: []
 superseded-by: []
 domains: []
@@ -162,6 +162,10 @@ picloud-http/src/
 - Internal port isolation via `internal: true` solves the metrics/health/debug port exposure problem without firewall rules
 - hyper and rustls are already in the dependency stack — zero new dependencies required
 - ~500 lines is a well-understood, testable surface area — not a framework, just a router
+
+**Rejected alternatives:**
+- **External reverse proxy (Nginx, Traefik, HAProxy)** — adds an external dependency, requires separate configuration, and cannot leverage the RDF graph for dynamic routing.
+- **No ingress (direct container access)** — exposes internal container addresses, prevents IRI-based routing, and eliminates the platform's ability to enforce IAM at the edge.
 
 **Consequences:**
 - `picloud-http` gains `router.rs`, `proxy.rs`, `tls.rs`, `ingress.rs`

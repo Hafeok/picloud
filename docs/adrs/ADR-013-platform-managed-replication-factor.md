@@ -2,7 +2,7 @@
 id: ADR-013
 title: Platform-Managed Replication Factor
 status: accepted
-features: []
+features: [FT-004, FT-018]
 supersedes: []
 superseded-by: []
 domains: []
@@ -20,5 +20,9 @@ scope: domain
 - Consistent with the abstraction model — operators declare intent, platform decides implementation
 - On a 5-node Pi cluster, full-replication is feasible and NVMe bandwidth is sufficient
 - Full-replication in MVP simplifies the storage implementation significantly
+
+**Rejected alternatives:**
+- **Operator-specified replication factor** — introduces a class of operator error (under-replicated volumes, inconsistent replication across the cluster) without meaningful benefit on a small Pi cluster.
+- **No replication** — unacceptable for a platform that promises durability; a single node failure would mean data loss.
 
 **Future:** Additional durability tiers (quorum, local) will be added in Phase 4 as the storage implementation matures.

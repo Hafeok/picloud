@@ -2,7 +2,7 @@
 id: ADR-043
 title: Product Configuration Store
 status: accepted
-features: []
+features: [FT-009, FT-038]
 supersedes: []
 superseded-by: []
 domains: []
@@ -88,6 +88,10 @@ When a config entry changes, the platform emits `ConfigChanged`. Workloads subsc
 - Live reload via events is consistent with the platform's event-driven model — no polling, no restart
 - Tags on config entries enable SPARQL queries across config — e.g. "all config entries tagged `environment:production`"
 - Typed values let the SDK deserialise correctly without the workload parsing strings manually
+
+**Rejected alternatives:**
+- **Environment variables only** — no versioning, no event-driven updates, and no integration with the RDF graph; changes require container restarts.
+- **External config service (Consul KV, etcd)** — adds an external dependency when the platform already has an event log and RDF graph for state management.
 
 **Consequences:**
 - `config` is a new Product-scoped resource type

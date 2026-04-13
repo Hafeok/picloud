@@ -2,7 +2,7 @@
 id: ADR-018
 title: Product Event Bus as Only Inter-Product Interface
 status: accepted
-features: []
+features: [FT-008, FT-032, FT-084]
 supersedes: []
 superseded-by: []
 domains: []
@@ -20,6 +20,10 @@ scope: domain
 - All inter-product dependencies are visible in resource files — the dependency graph is auditable
 - Event-driven communication enables temporal decoupling — the subscribing Product does not need to be running when the event is emitted
 - Consistent with the event-sourcing foundation of the platform
+
+**Rejected alternatives:**
+- **Direct HTTP between products** — creates tight coupling, makes the dependency graph opaque, and prevents temporal decoupling between products.
+- **Shared database between products** — violates product isolation, creates hidden data dependencies, and makes independent deployment impossible.
 
 **Consequences:**
 - Synchronous request-response between Products is not possible by design

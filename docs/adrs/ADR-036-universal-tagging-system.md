@@ -2,7 +2,7 @@
 id: ADR-036
 title: Universal Tagging System
 status: accepted
-features: []
+features: [FT-009, FT-055]
 supersedes: []
 superseded-by: []
 domains: []
@@ -54,6 +54,10 @@ picloud tag find environment=production          # all resources with this tag
 - RDF representation makes tags immediately queryable via SPARQL across all resource types
 - Event-driven — `TagAdded`/`TagRemoved` trigger inference rule evaluation instantly (ADR-037, ADR-038)
 - Key:value pairs are the simplest model that supports meaningful inference patterns
+
+**Rejected alternatives:**
+- **Labels as metadata only (not events)** — tag changes would not trigger inference rule evaluation, breaking the SPARQL CONSTRUCT membership model (ADR-037).
+- **Hierarchical taxonomy** — rigid hierarchies are harder to evolve and do not support the flexible, cross-cutting labelling patterns that inference rules require.
 
 **Consequences:**
 - `Tag` becomes a domain type in `picloud-domain` used by all resource types

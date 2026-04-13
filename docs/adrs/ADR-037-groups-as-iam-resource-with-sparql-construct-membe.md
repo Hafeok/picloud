@@ -2,7 +2,7 @@
 id: ADR-037
 title: Groups as IAM Resource with SPARQL CONSTRUCT Membership Rules
 status: accepted
-features: []
+features: [FT-009, FT-056, FT-058]
 supersedes: []
 superseded-by: []
 domains: []
@@ -75,6 +75,10 @@ inference-rule 'backend-group-membership' = {
 - Event-driven evaluation gives immediate effect — a tag change cascades to group membership to token permissions within one event cycle
 - 10-minute reconciliation catches any drift between events
 - The graph is always the source of truth — no separate membership database
+
+**Rejected alternatives:**
+- **Manual group membership only** — does not scale; every new user requires manual role assignment across all relevant groups.
+- **Attribute-based access control (ABAC) without groups** — evaluating policies at every access check is expensive; groups materialise permissions once and serve them at read time.
 
 **Consequences:**
 - Token issuance in `picloud-iam` must read group memberships from the RDF graph before assembling claims

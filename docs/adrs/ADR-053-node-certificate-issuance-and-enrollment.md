@@ -2,7 +2,7 @@
 id: ADR-053
 title: Node Certificate Issuance and Enrollment
 status: accepted
-features: []
+features: [FT-006, FT-023]
 supersedes: []
 superseded-by: []
 domains: []
@@ -206,6 +206,10 @@ picloud cluster init \
 - All enrollment events in the platform log — `NodeEnrolled`, `NodeEnrollmentRejected` — mean the cluster always knows who joined and when
 - `rcgen` and `x509-parser` are already in the workspace — zero new dependencies
 - Auto-renewal via inference rules and event subscriptions means certificate expiry is handled the same way as any other platform alert — consistently and observably
+
+**Rejected alternatives:**
+- **Manual certificate distribution** — operators would need to generate and distribute certificates to every node, contradicting the zero-configuration enrollment model.
+- **External PKI enrollment (SCEP, EST)** — adds an external dependency when the platform already has a built-in CA (ADR-030).
 
 **Consequences:**
 - `picloud-network` gains a `ca/` module

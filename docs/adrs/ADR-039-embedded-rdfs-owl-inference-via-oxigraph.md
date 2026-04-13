@@ -2,7 +2,7 @@
 id: ADR-039
 title: Embedded RDFS/OWL Inference via Oxigraph
 status: accepted
-features: []
+features: [FT-009, FT-054]
 supersedes: []
 superseded-by: []
 domains: []
@@ -42,6 +42,10 @@ Any permission check for `picloud:OperatorRole` automatically applies to admins.
 - Ontology files already deployed with products (ADR-023) — RDFS/OWL axioms are declared there
 - Structural inference is always live — no schedule, no trigger, no rule to maintain
 - Complements ADR-038 — RDFS/OWL handles structural facts, CONSTRUCT handles operational rules
+
+**Rejected alternatives:**
+- **External reasoner (Pellet, HermiT)** — adds a JVM dependency and network hop for inference, contradicting the single-binary zero-dependency model.
+- **No inference** — loses subclass hierarchies and property inheritance that make the RDF graph navigable and self-describing.
 
 **Consequences:**
 - Product ontology authors must understand RDFS/OWL 2 RL — this is documented in the SDK

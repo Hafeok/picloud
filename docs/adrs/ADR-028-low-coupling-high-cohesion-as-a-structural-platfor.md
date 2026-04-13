@@ -2,7 +2,7 @@
 id: ADR-028
 title: Low Coupling, High Cohesion as a Structural Platform Constraint
 status: accepted
-features: []
+features: [FT-006, FT-074]
 supersedes: []
 superseded-by: []
 domains: []
@@ -33,3 +33,7 @@ scope: domain
 - The decoupling between the event bus (platform-routed) and SPARQL (direct mTLS) is a direct expression of this principle — different communication patterns have different coupling characteristics and are handled differently
 
 **This principle is the architectural north star for PiCloud.** When a new feature or capability is being designed, the first question is: does this increase coupling between Products, or does it preserve their independence? If it increases coupling, the design should be reconsidered.
+
+**Rejected alternatives:**
+- **Coupling by convention** — relying on developer discipline rather than platform enforcement means coupling will inevitably appear as the number of products grows.
+- **Shared service layer between products** — a shared service creates a coupling point that defeats the independence of the product model.

@@ -2,7 +2,7 @@
 id: ADR-052
 title: Integrated DNS Server — Authoritative for Tenant Domain
 status: accepted
-features: []
+features: [FT-006, FT-021]
 supersedes: []
 superseded-by: []
 domains: []
@@ -158,6 +158,10 @@ No other Pi-hole configuration needed. Pi-hole continues to handle all external 
 - Event-driven cache invalidation means workload reschedules are visible to clients within seconds without requiring zero-TTL records
 - `hickory-dns` is the only pure Rust DNS library with authoritative server support — consistent with ADR-001
 - Every node runs DNS independently — no single point of failure, no leader election needed for DNS
+
+**Rejected alternatives:**
+- **External DNS server (CoreDNS, BIND)** — adds an external dependency; DNS records would not be automatically derived from the RDF graph.
+- **hosts file management** — does not scale, cannot serve dynamic records, and requires manual updates on every client machine.
 
 **Consequences:**
 - `picloud-network` gains a `dns/` module

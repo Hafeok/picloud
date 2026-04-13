@@ -2,7 +2,7 @@
 id: ADR-014
 title: Service Discovery and Internal DNS in MVP
 status: accepted
-features: []
+features: [FT-006, FT-021]
 supersedes: []
 superseded-by: []
 domains: []
@@ -19,3 +19,7 @@ scope: domain
 - Without service discovery, containers cannot find each other — the platform is not useful
 - Internal DNS is a small implementation surface relative to its impact
 - Automatic registration means operators never configure DNS manually
+
+**Rejected alternatives:**
+- **Deferred to Phase 2** — without service discovery, containers cannot find each other, making the platform unusable for any multi-container product in Phase 1.
+- **Manual DNS configuration** — operators configuring DNS entries for every container contradicts the platform's automation-first principle.

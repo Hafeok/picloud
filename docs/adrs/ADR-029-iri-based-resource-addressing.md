@@ -2,7 +2,7 @@
 id: ADR-029
 title: IRI-Based Resource Addressing
 status: accepted
-features: []
+features: [FT-001]
 supersedes: []
 superseded-by: []
 domains: []
@@ -46,6 +46,10 @@ Accept: text/html              → Human-readable view (future portal)
 - DNS and HTTP are the lowest common denominator for interoperability — any client that speaks HTTP can interact with the platform
 - IRI stability (resources keep their IRI when rescheduled) means RDF triples in external systems remain valid
 - Content negotiation means the same IRI serves both machine consumers (Turtle, JSON-LD) and future human interfaces (HTML)
+
+**Rejected alternatives:**
+- **Opaque internal IDs (UUIDs)** — breaks RDF Linked Data navigation; external tools and LLMs cannot follow links to explore the cluster.
+- **Subdomain-based addressing** — requires wildcard TLS certificates, does not convey resource hierarchy, and does not align with Linked Data conventions.
 
 **Consequences:**
 - The platform must run an HTTP server on every node serving the canonical IRI space

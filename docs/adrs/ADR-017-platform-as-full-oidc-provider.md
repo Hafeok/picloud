@@ -2,7 +2,7 @@
 id: ADR-017
 title: Platform as Full OIDC Provider
 status: accepted
-features: []
+features: [FT-003, FT-026, FT-027]
 supersedes: []
 superseded-by: []
 domains: []
@@ -19,6 +19,10 @@ scope: domain
 - Applications get SSO for free — no Keycloak, no Authentik, no Auth0 required
 - The identity model is unified — the same identity a user uses for `picloud` CLI is the identity they use for applications
 - Product-scoped tokens mean a user's permissions within an application are distinct from their platform permissions
+
+**Rejected alternatives:**
+- **External IdP only (Keycloak, Auth0)** — adds an external dependency to a platform designed for zero external dependencies; breaks the single-binary model.
+- **Simple token-based auth without OIDC** — non-standard, requires every application to implement custom auth logic, and prevents interoperability with standard OIDC clients.
 
 **Security requirements:**
 - Token signing keys are stored in the platform's encrypted secret store

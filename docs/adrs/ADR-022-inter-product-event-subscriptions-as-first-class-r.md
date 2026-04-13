@@ -2,7 +2,7 @@
 id: ADR-022
 title: Inter-Product Event Subscriptions as First-Class Resources
 status: accepted
-features: []
+features: [FT-005, FT-083, FT-084]
 supersedes: []
 superseded-by: []
 domains: []
@@ -19,3 +19,7 @@ scope: domain
 - All inter-product dependencies are visible in resource files — the dependency graph is auditable and version-controlled
 - The platform can enforce that a subscription's source Product and event type exist before provisioning
 - Consistent with the IaC-as-only-interface principle — everything exists in a file
+
+**Rejected alternatives:**
+- **Runtime subscriptions without resource declaration** — inter-product dependencies become invisible, unauditable, and impossible to validate at deploy time.
+- **Implicit subscription by convention** — relies on naming conventions rather than explicit declarations, creating fragile and undiscoverable dependencies.

@@ -2,7 +2,7 @@
 id: ADR-040
 title: Platform Metrics Agent — Hardware Telemetry as Events
 status: accepted
-features: []
+features: [FT-009, FT-046, FT-075, FT-094]
 supersedes: []
 superseded-by: []
 domains: []
@@ -64,6 +64,10 @@ Workloads emit domain metrics (request count, error rate, latency) as events to 
 - Latest-value-only projection keeps the graph lean — historical analysis uses event log replay
 - 15-second default interval is sufficient for alert rules while not flooding the event log
 - `MetricRecorded` events trigger inference rule evaluation (ADR-038) — alert rules fire within seconds of a threshold breach
+
+**Rejected alternatives:**
+- **External monitoring (Prometheus, Grafana Agent)** — adds external dependencies; metrics would live outside the event log and RDF graph, breaking the unified data model.
+- **No built-in metrics** — operators would have no visibility into node health, making scheduling and capacity decisions impossible.
 
 **Consequences:**
 - At 15-second intervals across 5 nodes, `MetricRecorded` generates ~20 events/minute — well within Raft throughput

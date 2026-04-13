@@ -2,7 +2,7 @@
 id: ADR-020
 title: Cluster Graph as Semantic Service Registry
 status: accepted
-features: []
+features: [FT-005, FT-085]
 supersedes: []
 superseded-by: []
 domains: []
@@ -20,3 +20,7 @@ scope: domain
 - LLMs can query the cluster graph to understand the deployed system before generating code
 - New Products can discover existing Products' interfaces through graph queries
 - Consistent with RDF as the universal data model for the platform
+
+**Rejected alternatives:**
+- **Separate service catalog (Consul-style)** — introduces a separate system with its own data model when the RDF graph already contains all the necessary information.
+- **No service registry** — operators would need to read source files or configuration to discover deployed products and their interfaces.

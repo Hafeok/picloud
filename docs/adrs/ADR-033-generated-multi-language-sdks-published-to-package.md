@@ -2,7 +2,7 @@
 id: ADR-033
 title: Generated Multi-Language SDKs Published to Package Registries
 status: accepted
-features: []
+features: [FT-010, FT-086, FT-087, FT-088, FT-089]
 supersedes: []
 superseded-by: []
 domains: []
@@ -48,6 +48,10 @@ The .NET SDK ships a companion `PiCloud.Sdk.Aspire` package. PiCloud resources a
 - Three language targets cover the primary developer audiences: systems developers (Rust), web/Node developers (TypeScript), and enterprise developers (C#/.NET)
 - On-demand generation via `picloud sdk publish` means custom forks and internal extensions get SDK support without waiting for upstream releases
 - .NET Aspire integration reflects the primary developer's workflow and makes PiCloud a first-class Aspire resource
+
+**Rejected alternatives:**
+- **Handwritten SDKs** — unsustainable for three languages; SDK drift from the API is inevitable as the platform evolves.
+- **OpenAPI-based generation** — the platform's source of truth is an RDF ontology, not an OpenAPI spec; generating from OpenAPI would require maintaining a redundant schema definition.
 
 **Consequences:**
 - The SDK generator is a significant piece of platform tooling — it must handle three target languages from one ontology source

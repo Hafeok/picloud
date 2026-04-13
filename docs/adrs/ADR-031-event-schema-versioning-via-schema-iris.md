@@ -2,7 +2,7 @@
 id: ADR-031
 title: Event Schema Versioning via Schema IRIs
 status: accepted
-features: []
+features: [FT-002, FT-079]
 supersedes: []
 superseded-by: []
 domains: []
@@ -48,6 +48,10 @@ Each schema IRI returns a JSON Schema or SHACL document describing the event pay
 - Schema versioning is explicit in the event log — every event permanently records which schema it was written under
 - Old schema IRIs resolve forever — the log remains fully interpretable at any point in the future without consulting external documentation
 - An LLM building a new projector can fetch the schema IRI directly and generate a correct handler without needing the platform source code
+
+**Rejected alternatives:**
+- **Embedded schema version number** — not dereferenceable; projectors and LLMs cannot fetch the schema definition without out-of-band documentation.
+- **Schema registry (Confluent-style)** — adds an external dependency and a separate data model when the platform's IRI space already provides schema resolution.
 
 **Consequences:**
 - The platform must serve schema IRIs as part of its HTTP layer from Phase 1 — schema IRIs appear in the first events emitted

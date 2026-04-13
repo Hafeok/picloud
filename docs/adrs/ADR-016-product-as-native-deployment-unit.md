@@ -2,7 +2,7 @@
 id: ADR-016
 title: Product as Native Deployment Unit
 status: accepted
-features: []
+features: [FT-001, FT-024, FT-031]
 supersedes: []
 superseded-by: []
 domains: []
@@ -21,3 +21,7 @@ scope: domain
 - IAM scoping per Product means access control is at the application level, not the resource level
 - Cascading deletion prevents orphaned resources
 - One active version per Product prevents version sprawl and simplifies the operational model
+
+**Rejected alternatives:**
+- **Flat resource model (no grouping)** — operators would manage individual resources with no lifecycle boundary, making deployment, IAM scoping, and cascading deletion impossible.
+- **Namespace-based grouping (Kubernetes model)** — namespaces are a weak boundary with no versioning, no cascading lifecycle, and no built-in IAM scoping.

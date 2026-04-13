@@ -2,7 +2,7 @@
 id: ADR-011
 title: Block Storage Before RDF Application Storage
 status: accepted
-features: []
+features: [FT-004, FT-018]
 supersedes: []
 superseded-by: []
 domains: []
@@ -20,3 +20,7 @@ scope: domain
 - Block storage is needed for containers in Phase 1 regardless
 - Phasing reduces the surface area of Phase 1 to the minimum needed for a working cluster
 - RDF application storage builds on the same block storage primitives — no rework required
+
+**Rejected alternatives:**
+- **Parallel implementation** — implementing both simultaneously increases Phase 1 surface area and risks delays in the core block storage path that other capabilities depend on.
+- **RDF storage first** — RDF storage depends on block storage for persistence; reversing the order would require temporary in-memory-only storage that is later replaced.

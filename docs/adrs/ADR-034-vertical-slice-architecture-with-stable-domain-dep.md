@@ -2,7 +2,7 @@
 id: ADR-034
 title: Vertical Slice Architecture with Stable Domain Dependency
 status: accepted
-features: []
+features: [FT-001]
 supersedes: []
 superseded-by: []
 domains: []
@@ -52,6 +52,10 @@ Slices never import each other. Runtime communication between slices happens exc
 
 **Enforcing the rule:**
 The dependency rule is enforced by `Cargo.toml` — slices literally cannot import each other because they are not listed as dependencies. Any attempt to add a cross-slice dependency should be treated as an architectural violation and resolved by either moving the shared concept to `picloud-domain` or routing through the event log.
+
+**Rejected alternatives:**
+- **Layered architecture** — slices would share horizontal layers (data access, business logic), creating coupling where a change in one capability breaks another.
+- **Monolithic single crate** — an LLM working on storage would need to understand the entire codebase, and a change anywhere could break anything.
 
 **Consequences:**
 - New shared types must go in `picloud-domain` — this is the right place for them

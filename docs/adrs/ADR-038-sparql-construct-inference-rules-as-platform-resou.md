@@ -2,7 +2,7 @@
 id: ADR-038
 title: SPARQL CONSTRUCT Inference Rules as Platform Resources
 status: accepted
-features: []
+features: [FT-009, FT-057, FT-058]
 supersedes: []
 superseded-by: []
 domains: []
@@ -67,6 +67,10 @@ Every 10 minutes, all rules with `reconciliation: true` are evaluated regardless
 - 10-minute reconciliation is the safety net — eventual consistency with a bounded staleness window
 - Scoping means products can define their own inference rules without platform operator involvement
 - Alert lifecycle (fired/resolved) as events means any product can subscribe and build notification workflows
+
+**Rejected alternatives:**
+- **Hardcoded inference logic** — new inference patterns would require platform code changes and releases rather than declarative resource definitions.
+- **External rules engine (Drools, OPA)** — adds an external dependency with its own data model when the platform already has SPARQL and RDF as native capabilities.
 
 **Consequences:**
 - The inference engine needs to track which triples were produced by which rule to detect retractions

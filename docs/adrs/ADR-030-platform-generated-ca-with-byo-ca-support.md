@@ -2,7 +2,7 @@
 id: ADR-030
 title: Platform-Generated CA with BYO-CA Support
 status: accepted
-features: []
+features: [FT-006, FT-023]
 supersedes: []
 superseded-by: []
 domains: []
@@ -29,6 +29,10 @@ scope: domain
 - Zero-configuration default — the platform is fully operational without any external PKI
 - BYO-CA means operators with existing trust infrastructure (Smallstep, internal CA) don't need to manage two PKIs or distribute a new CA certificate to all their devices
 - All certificate lifecycle is platform-managed regardless of CA source — operators never manually issue or rotate certificates
+
+**Rejected alternatives:**
+- **External CA required** — adds a mandatory external dependency for TLS, breaking the zero-dependency single-binary model.
+- **Self-signed certificates per node** — prevents mutual authentication; nodes cannot verify each other's identity without a shared trust root.
 
 **Consequences:**
 - External clients (operator laptops, browsers, RDF tools) must trust the platform CA to connect to `picloud.local` over HTTPS — one-time operation via `picloud ca export`

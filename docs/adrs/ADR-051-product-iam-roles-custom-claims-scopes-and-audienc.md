@@ -2,7 +2,7 @@
 id: ADR-051
 title: Product IAM — Roles, Custom Claims, Scopes, and Audience
 status: accepted
-features: []
+features: [FT-003, FT-025, FT-027]
 supersedes: []
 superseded-by: []
 domains: []
@@ -228,6 +228,10 @@ Role inheritance is `rdfs:subClassOf` — the OWL inference engine materialises 
 - M2M permission declarations are resources in the target product — consistent with ADR-022, target product controls who can access it
 - Static custom claims cover 90% of real use cases without the token issuance latency of dynamic SPARQL claims (dynamic claims are Phase 3)
 - Custom scopes give API consumers a standard OAuth surface for requesting specific access
+
+**Rejected alternatives:**
+- **Platform IAM only (no product-level IAM)** — products cannot define application-specific roles or scopes, forcing all access control to be platform-global.
+- **External IAM per product** — each product running its own IdP fragments the identity model and breaks single sign-on.
 
 **Consequences:**
 - `role`, `scope`, and `m2m-permission` are new product-scoped resource types
