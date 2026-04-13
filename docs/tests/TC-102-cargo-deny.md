@@ -9,6 +9,6 @@ validates:
   - ADR-034
 phase: 1
 runner: picloud-test
-runner-args: "per-slice-build"
+runner-args: run --scenario per-slice-build
+last-run: 2026-04-13T20:35:13.782523150+00:00
 ---
-

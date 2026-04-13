@@ -2,7 +2,7 @@
 id: FT-012
 title: Single binary compiles to ARM64
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

@@ -9,7 +9,8 @@ validates:
   - ADR-001
 phase: 1
 runner: picloud-test
-runner-args: "no_runtime_panics"
+runner-args: run --scenario no_runtime_panics
+last-run: 2026-04-13T20:35:13.782523150+00:00
 ---
 
 the full scenario harness runs to completion. Any Rust `panic!` in the binary is captured by the test runner and counted as a test failure.

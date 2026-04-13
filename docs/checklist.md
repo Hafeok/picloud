@@ -190,9 +190,9 @@
 - [x] TC-170: auto_validation_failure (scenario) — passing
 - [x] TC-235: IaC and CLI exit criteria — resource apply and status round-trip (exit-criteria) — passing
 
-### FT-012 — Single binary compiles to ARM64 [ ]
+### FT-012 — Single binary compiles to ARM64 [x]
 
-- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-001: binary_compiles (scenario) — passing
 - [x] TC-002: no_runtime_panics (scenario) — passing
 - [x] TC-003: cargo build --release (scenario) — passing
@@ -208,7 +208,7 @@
 
 ### FT-014 — Raft consensus and leader election (openraft) [ ]
 
-- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
 - [x] TC-005: raft_leader_election (scenario) — passing
 - [x] TC-006: raft_leader_failover (scenario) — passing
@@ -232,16 +232,16 @@
 
 ### FT-018 — Block storage pool: NVMe contribution, volume allocation, full-replication durability [ ]
 
-- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
 
 ### FT-019 — Mounted volume support [ ]
 
-- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 
 ### FT-020 — OCI container scheduling (youki) [ ]
 
-- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 
 ### FT-021 — Internal DNS and service discovery [ ]
 
