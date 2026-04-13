@@ -240,7 +240,7 @@
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 
-### FT-020 — OCI container scheduling (youki) [ ]
+### FT-020 — OCI container scheduling (youki) [x]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 

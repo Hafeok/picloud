@@ -2,7 +2,7 @@
 id: FT-020
 title: OCI container scheduling (youki)
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
