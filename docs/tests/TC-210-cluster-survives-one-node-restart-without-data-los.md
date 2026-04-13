@@ -2,13 +2,16 @@
 id: TC-210
 title: Cluster survives one node restart without data loss
 type: exit-criteria
-status: failing
+status: passing
 validates:
-  features: []
-  adrs: []
+  features:
+  - FT-002
+  adrs:
+  - ADR-004
+  - ADR-002
 phase: 1
-runner: picloud-test
-runner-args: "cluster-survives-one-node-restart-without-data-loss"
+runner: cargo-test
+runner-args: "tc210_cluster_survives_node_restart"
 ---
 
 ## Description

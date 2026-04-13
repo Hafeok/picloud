@@ -25,3 +25,8 @@ rocksdb = ["oxigraph/rocksdb"]
 [dev-dependencies]
 uuid = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }
+picloud-events = { workspace = true }
+tempfile = "3"
+futures = { workspace = true }

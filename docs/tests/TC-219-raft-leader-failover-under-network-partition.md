@@ -2,13 +2,16 @@
 id: TC-219
 title: Raft leader failover under network partition
 type: chaos
-status: failing
+status: passing
 validates:
-  features: []
-  adrs: []
+  features:
+  - FT-002
+  adrs:
+  - ADR-002
+  - ADR-004
 phase: 1
-runner: picloud-test
-runner-args: "raft-leader-failover-under-network-partition"
+runner: cargo-test
+runner-args: "tc219_raft_leader_failover_event_consistency"
 ---
 
 ⟦Σ:Types⟧{

@@ -2,13 +2,16 @@
 id: TC-223
 title: Split brain scenario — exactly one leader invariant
 type: chaos
-status: failing
+status: passing
 validates:
-  features: []
-  adrs: []
+  features:
+  - FT-002
+  adrs:
+  - ADR-002
+  - ADR-004
 phase: 1
-runner: picloud-test
-runner-args: "split-brain-scenario--exactly-one-leader-invariant"
+runner: cargo-test
+runner-args: "tc223_split_brain_one_leader_invariant"
 ---
 
 ⟦Σ:Types⟧{

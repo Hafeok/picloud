@@ -331,7 +331,7 @@ impl OxigraphProjector {
     }
 
     /// Execute a SPARQL SELECT and convert results to JSON bindings.
-    fn execute_query(&self, sparql: &str) -> Result<QueryResult> {
+    pub fn execute_query(&self, sparql: &str) -> Result<QueryResult> {
         let results = self
             .store
             .query(sparql)
@@ -379,7 +379,7 @@ impl OxigraphProjector {
     /// Execute a SPARQL CONSTRUCT/DESCRIBE and serialize the result as Turtle.
     ///
     /// Returns the Turtle string, or an error if the query is not a graph query.
-    fn execute_query_to_turtle(&self, sparql: &str) -> Result<String> {
+    pub fn execute_query_to_turtle(&self, sparql: &str) -> Result<String> {
         let results = self
             .store
             .query(sparql)
@@ -781,6 +781,26 @@ impl OxigraphProjector {
         }
 
         debug!(resource_iri = resource_iri_str, "projected ResourceDeclared");
+        Ok(())
+    }
+
+    fn project_resource_provisioning(&self, event: &EventEnvelope) -> Result<()> {
+        let resource_iri_str = event.payload["resource_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+
+        self.update_status(resource_iri_str, "provisioning", event.product.as_deref())?;
+
+        // Add provisioning message if present
+        if let Some(message) = event.payload["message"].as_str() {
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}provisioningMessage"),
+                Literal::new_simple_literal(message).into(),
+            )?;
+        }
+
+        debug!(resource_iri = resource_iri_str, "projected ResourceProvisioning");
         Ok(())
     }
 
@@ -2710,6 +2730,7 @@ impl StateProjector for OxigraphProjector {
             "NodeLeft" => self.project_node_left(event),
             "LeaderElected" => self.project_leader_elected(event),
             "ResourceDeclared" => self.project_resource_declared(event),
+            "ResourceProvisioning" => self.project_resource_provisioning(event),
             "ResourceReady" => self.project_resource_ready(event),
             "ResourceFailed" => self.project_resource_failed(event),
             "ResourceDeleted" => self.project_resource_deleted(event),

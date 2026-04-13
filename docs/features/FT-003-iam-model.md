@@ -2,7 +2,7 @@
 id: FT-003
 title: IAM Model
 phase: 1
-status: in-progress
+status: complete
 depends-on:
 - FT-002
 adrs:

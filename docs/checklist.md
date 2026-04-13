@@ -5,7 +5,7 @@
 
 ## Phase 1
 
-### FT-001 — Resource Model [~]
+### FT-001 — Resource Model [x]
 
 - [x] ADR-007: Bicep-Inspired Declarative Resource Syntax (accepted)
 - [x] ADR-015: Imperative API with Idempotent Execution (accepted)
@@ -13,18 +13,18 @@
 - [x] ADR-001: Rust as Implementation Language (accepted)
 - [x] ADR-029: IRI-Based Resource Addressing (accepted)
 - [x] ADR-034: Vertical Slice Architecture with Stable Domain Dependency (accepted)
-- [!] TC-022: picloud_syntax_parse (scenario) — failing
-- [!] TC-023: invalid_syntax_rejection (scenario) — failing
-- [!] TC-024: symbolic_reference_resolution (scenario) — failing
-- [!] TC-042: idempotent_apply (scenario) — failing
-- [!] TC-043: partial_failure_reapply (scenario) — failing
-- [!] TC-044: idempotency_key_uniqueness (scenario) — failing
-- [!] TC-045: product_full_lifecycle (scenario) — failing
-- [!] TC-046: cascading_delete (scenario) — failing
-- [!] TC-047: orphan_prevention (scenario) — failing
-- [!] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — failing
+- [x] TC-022: picloud_syntax_parse (scenario) — passing
+- [x] TC-023: invalid_syntax_rejection (scenario) — passing
+- [x] TC-024: symbolic_reference_resolution (scenario) — passing
+- [x] TC-042: idempotent_apply (scenario) — passing
+- [x] TC-043: partial_failure_reapply (scenario) — passing
+- [x] TC-044: idempotency_key_uniqueness (scenario) — passing
+- [x] TC-045: product_full_lifecycle (scenario) — passing
+- [x] TC-046: cascading_delete (scenario) — passing
+- [x] TC-047: orphan_prevention (scenario) — passing
+- [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
 
-### FT-002 — Event & State Model [~]
+### FT-002 — Event & State Model [x]
 
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] ADR-005: RDF Graph as Event Projection and Read Model (accepted)
@@ -33,51 +33,30 @@
 - [x] ADR-031: Event Schema Versioning via Schema IRIs (accepted)
 - [x] ADR-035: Event Replay as First-Class Platform and Product Capability (accepted)
 - [x] ADR-002: openraft for Cluster Consensus (accepted)
-- [!] TC-013: event_log_replay (scenario) — failing
-- [!] TC-014: projection_consistency (scenario) — failing
-- [!] TC-015: event_ordering (scenario) — failing
-- [!] TC-016: rdf_projection_roundtrip (scenario) — failing
-- [!] TC-017: sparql_query_types (scenario) — failing
-- [!] TC-018: graph_isolation (scenario) — failing
-- [!] TC-019: oxigraph_sparql_compliance (scenario) — failing
-- [!] TC-020: named_graph_isolation (scenario) — failing
-- [!] TC-021: oxigraph_persistence (scenario) — failing
-- [!] TC-025: command_correlation (scenario) — failing
-- [!] TC-026: progress_streaming (scenario) — failing
-- [!] TC-027: concurrent_commands (scenario) — failing
-- [!] TC-090: schema_iri_resolution (scenario) — failing
-- [!] TC-091: schema_evolution (scenario) — failing
-- [!] TC-092: schema_iri_permanence (scenario) — failing
-- [!] TC-103: platform_replay_full (scenario) — failing
-- [!] TC-104: shadow_swap_live_traffic (scenario) — failing
-- [!] TC-105: replay_marked_flag (scenario) — failing
-- [!] TC-106: aggregate_replay (scenario) — failing
-- [!] TC-210: Cluster survives one node restart without data loss (exit-criteria) — failing
-- [!] TC-219: Raft leader failover under network partition (chaos) — failing
-- [!] TC-223: Split brain scenario — exactly one leader invariant (chaos) — failing
+- [x] TC-013: event_log_replay (scenario) — passing
+- [x] TC-014: projection_consistency (scenario) — passing
+- [x] TC-015: event_ordering (scenario) — passing
+- [x] TC-016: rdf_projection_roundtrip (scenario) — passing
+- [x] TC-017: sparql_query_types (scenario) — passing
+- [x] TC-018: graph_isolation (scenario) — passing
+- [x] TC-019: oxigraph_sparql_compliance (scenario) — passing
+- [x] TC-020: named_graph_isolation (scenario) — passing
+- [x] TC-021: oxigraph_persistence (scenario) — passing
+- [x] TC-025: command_correlation (scenario) — passing
+- [x] TC-026: progress_streaming (scenario) — passing
+- [x] TC-027: concurrent_commands (scenario) — passing
+- [x] TC-090: schema_iri_resolution (scenario) — passing
+- [x] TC-091: schema_evolution (scenario) — passing
+- [x] TC-092: schema_iri_permanence (scenario) — passing
+- [x] TC-103: platform_replay_full (scenario) — passing
+- [x] TC-104: shadow_swap_live_traffic (scenario) — passing
+- [x] TC-105: replay_marked_flag (scenario) — passing
+- [x] TC-106: aggregate_replay (scenario) — passing
+- [x] TC-210: Cluster survives one node restart without data loss (exit-criteria) — passing
+- [x] TC-219: Raft leader failover under network partition (chaos) — passing
+- [x] TC-223: Split brain scenario — exactly one leader invariant (chaos) — passing
 
-### FT-007 — IaC & CLI Design [~]
-
-- [x] ADR-015: Imperative API with Idempotent Execution (accepted)
-- [x] ADR-042: Tenant Identity — Domain and Cluster ID as Dual Boundary (accepted)
-- [x] ADR-049: .picloud Format as Compiler Target — Turtle as Canonical IaC (accepted)
-- [x] ADR-050: Builder Pattern CLI for Resource Generation (accepted)
-- [!] TC-042: idempotent_apply (scenario) — failing
-- [!] TC-043: partial_failure_reapply (scenario) — failing
-- [!] TC-044: idempotency_key_uniqueness (scenario) — failing
-- [!] TC-133: dual_cluster_mDNS_isolation (scenario) — failing
-- [!] TC-134: cross_cluster_join_rejection (scenario) — failing
-- [!] TC-135: iri_namespace_uniqueness (scenario) — failing
-- [!] TC-163: compiler_roundtrip (scenario) — failing
-- [!] TC-164: iri_determinism (scenario) — failing
-- [!] TC-165: shacl_validation_errors (scenario) — failing
-- [!] TC-166: offline_validation (scenario) — failing
-- [!] TC-167: new_resource_flags (scenario) — failing
-- [!] TC-168: new_resource_partial (scenario) — failing
-- [!] TC-169: overwrite_protection (scenario) — failing
-- [!] TC-170: auto_validation_failure (scenario) — failing
-
-### FT-003 — IAM Model [~]
+### FT-003 — IAM Model [x]
 
 - [x] ADR-009: Standalone IAM — Users and Workload Identities (accepted)
 - [x] ADR-017: Platform as Full OIDC Provider (accepted)
@@ -85,28 +64,28 @@
 - [x] ADR-026: Bootstrap Token Exchange and Three-Tier Passkey Recovery (accepted)
 - [x] ADR-027: mTLS for Workload-to-Platform and Direct Workload-to-SPARQL Communication (accepted)
 - [x] ADR-051: Product IAM — Roles, Custom Claims, Scopes, and Audience (accepted)
-- [!] TC-028: human_identity_lifecycle (scenario) — failing
-- [!] TC-029: workload_identity_injection (scenario) — failing
-- [!] TC-030: token_expiry_enforcement (scenario) — failing
-- [!] TC-048: oidc_authorization_code (scenario) — failing
-- [!] TC-049: oidc_client_credentials (scenario) — failing
-- [!] TC-050: jwks_key_rotation (scenario) — failing
-- [!] TC-051: GET /.well-known/openid-configuration (scenario) — failing
-- [!] TC-071: passkey_registration (scenario) — failing
-- [!] TC-072: fido2_cli_auth (scenario) — failing
-- [!] TC-073: webauthn_challenge_replay_rejection (scenario) — failing
-- [!] TC-074: bootstrap_token_single_use (scenario) — failing
-- [!] TC-075: bootstrap_token_expiry (scenario) — failing
-- [!] TC-076: tier1_admin_reset (scenario) — failing
-- [!] TC-077: tier3_physical_recovery (scenario) — failing
-- [!] TC-078: mtls_enforcement (scenario) — failing
-- [!] TC-079: workload_cert_injection (scenario) — failing
-- [!] TC-080: sparql_direct_mtls (scenario) — failing
-- [!] TC-171: role_inheritance_claims (scenario) — failing
-- [!] TC-172: audience_enforcement (scenario) — failing
-- [!] TC-173: token_exchange_on_behalf_of (scenario) — failing
-- [!] TC-174: m2m_permission_required (scenario) — failing
-- [!] TC-212: User authenticates against Product-hosted application via OIDC (exit-criteria) — failing
+- [x] TC-028: human_identity_lifecycle (scenario) — passing
+- [x] TC-029: workload_identity_injection (scenario) — passing
+- [x] TC-030: token_expiry_enforcement (scenario) — passing
+- [x] TC-048: oidc_authorization_code (scenario) — passing
+- [x] TC-049: oidc_client_credentials (scenario) — passing
+- [x] TC-050: jwks_key_rotation (scenario) — passing
+- [x] TC-051: GET /.well-known/openid-configuration (scenario) — passing
+- [x] TC-071: passkey_registration (scenario) — passing
+- [x] TC-072: fido2_cli_auth (scenario) — passing
+- [x] TC-073: webauthn_challenge_replay_rejection (scenario) — passing
+- [x] TC-074: bootstrap_token_single_use (scenario) — passing
+- [x] TC-075: bootstrap_token_expiry (scenario) — passing
+- [x] TC-076: tier1_admin_reset (scenario) — passing
+- [x] TC-077: tier3_physical_recovery (scenario) — passing
+- [x] TC-078: mtls_enforcement (scenario) — passing
+- [x] TC-079: workload_cert_injection (scenario) — passing
+- [x] TC-080: sparql_direct_mtls (scenario) — passing
+- [x] TC-171: role_inheritance_claims (scenario) — passing
+- [x] TC-172: audience_enforcement (scenario) — passing
+- [x] TC-173: token_exchange_on_behalf_of (scenario) — passing
+- [x] TC-174: m2m_permission_required (scenario) — passing
+- [x] TC-212: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
 ### FT-004 — Storage Model [~]
 
@@ -130,9 +109,25 @@
 - [!] TC-156: offsite_backup_complete (scenario) — failing
 - [!] TC-157: backup_failure_alert (scenario) — failing
 - [!] TC-158: BackupFailed (scenario) — failing
-- [!] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — failing
+- [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
 - [!] TC-220: Node crash during volume write — no data corruption (chaos) — failing
 - [!] TC-221: Node restart during replication — eventual consistency restored (chaos) — failing
+
+### FT-005 — Workload Model [~]
+
+- [x] ADR-010: OCI Containers and Raw Binaries as Workload Primitives (accepted)
+- [x] ADR-020: Cluster Graph as Semantic Service Registry (accepted)
+- [x] ADR-022: Inter-Product Event Subscriptions as First-Class Resources (accepted)
+- [!] TC-031: container_schedule (scenario) — failing
+- [!] TC-032: binary_workload (scenario) — failing
+- [!] TC-033: workload_identity_injection (scenario) — failing
+- [!] TC-058: cluster_registry_discovery (scenario) — failing
+- [!] TC-059: registry_version_binding (scenario) — failing
+- [!] TC-063: event_subscription_provisioning (scenario) — failing
+- [!] TC-064: undeclared_subscription_rejection (scenario) — failing
+- [!] TC-065: subscription_lifecycle (scenario) — failing
+- [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
+- [!] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — failing
 
 ### FT-006 — Networking Model [~]
 
@@ -171,22 +166,97 @@
 - [!] TC-183: cert_revocation (scenario) — failing
 - [!] TC-184: csr_wildcard_rejection (scenario) — failing
 - [!] TC-222: DNS server failure — fallback to mDNS (chaos) — failing
+- [ ] TC-234: Networking model exit criteria — DNS resolution and HTTP IRI dereferencing functional (exit-criteria) — unimplemented
 
-### FT-005 — Workload Model [~]
+### FT-007 — IaC & CLI Design [~]
 
-- [x] ADR-010: OCI Containers and Raw Binaries as Workload Primitives (accepted)
-- [x] ADR-020: Cluster Graph as Semantic Service Registry (accepted)
-- [x] ADR-022: Inter-Product Event Subscriptions as First-Class Resources (accepted)
-- [!] TC-031: container_schedule (scenario) — failing
-- [!] TC-032: binary_workload (scenario) — failing
-- [!] TC-033: workload_identity_injection (scenario) — failing
-- [!] TC-058: cluster_registry_discovery (scenario) — failing
-- [!] TC-059: registry_version_binding (scenario) — failing
-- [!] TC-063: event_subscription_provisioning (scenario) — failing
-- [!] TC-064: undeclared_subscription_rejection (scenario) — failing
-- [!] TC-065: subscription_lifecycle (scenario) — failing
-- [!] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — failing
-- [!] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — failing
+- [x] ADR-015: Imperative API with Idempotent Execution (accepted)
+- [x] ADR-042: Tenant Identity — Domain and Cluster ID as Dual Boundary (accepted)
+- [x] ADR-049: .picloud Format as Compiler Target — Turtle as Canonical IaC (accepted)
+- [x] ADR-050: Builder Pattern CLI for Resource Generation (accepted)
+- [x] TC-042: idempotent_apply (scenario) — passing
+- [x] TC-043: partial_failure_reapply (scenario) — passing
+- [x] TC-044: idempotency_key_uniqueness (scenario) — passing
+- [!] TC-133: dual_cluster_mDNS_isolation (scenario) — failing
+- [!] TC-134: cross_cluster_join_rejection (scenario) — failing
+- [!] TC-135: iri_namespace_uniqueness (scenario) — failing
+- [!] TC-163: compiler_roundtrip (scenario) — failing
+- [!] TC-164: iri_determinism (scenario) — failing
+- [!] TC-165: shacl_validation_errors (scenario) — failing
+- [!] TC-166: offline_validation (scenario) — failing
+- [!] TC-167: new_resource_flags (scenario) — failing
+- [!] TC-168: new_resource_partial (scenario) — failing
+- [!] TC-169: overwrite_protection (scenario) — failing
+- [!] TC-170: auto_validation_failure (scenario) — failing
+- [ ] TC-235: IaC and CLI exit criteria — resource apply and status round-trip (exit-criteria) — unimplemented
+
+### FT-012 — Single binary compiles to ARM64 [ ]
+
+- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [x] TC-001: binary_compiles (scenario) — passing
+- [x] TC-002: no_runtime_panics (scenario) — passing
+- [x] TC-003: cargo build --release (scenario) — passing
+- [x] TC-004: ldd (scenario) — passing
+- [x] TC-100: per_slice_build (scenario) — passing
+- [x] TC-101: composition_root_only (scenario) — passing
+- [x] TC-102: cargo deny (scenario) — passing
+
+### FT-013 — mDNS node discovery [ ]
+
+- [ ] TC-237: mDNS peer discovery finds all LAN nodes within 5 seconds (scenario) — unimplemented
+- [ ] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — unimplemented
+
+### FT-014 — Raft consensus and leader election (openraft) [ ]
+
+- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
+- [x] TC-005: raft_leader_election (scenario) — passing
+- [x] TC-006: raft_leader_failover (scenario) — passing
+- [x] TC-007: raft_learner_join (scenario) — passing
+
+### FT-015 — Append-only event log with Raft replication [ ]
+
+- [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
+
+### FT-016 — Oxigraph RDF projection of cluster state [ ]
+
+- [x] TC-087: iri_dereferencing (scenario) — passing
+- [x] TC-088: content_negotiation (scenario) — passing
+- [x] TC-089: iri_stability (scenario) — passing
+- [ ] TC-294: RDF projection exit — SPARQL query returns projected cluster state (exit-criteria) — unimplemented
+
+### FT-017 — Basic IAM: human identities, workload identities, RBAC, token issuance [ ]
+
+- [ ] TC-238: IAM token issued after passkey authentication grants RBAC-scoped access (scenario) — unimplemented
+- [ ] TC-295: IAM exit — passkey login, token issuance, RBAC enforcement functional (exit-criteria) — unimplemented
+
+### FT-018 — Block storage pool: NVMe contribution, volume allocation, full-replication durability [ ]
+
+- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+- [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
+
+### FT-019 — Mounted volume support [ ]
+
+- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+
+### FT-020 — OCI container scheduling (youki) [ ]
+
+- [ ] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — unimplemented
+
+### FT-021 — Internal DNS and service discovery [ ]
+
+- [ ] TC-239: Internal DNS resolves product and container FQDNs from any node (scenario) — unimplemented
+- [ ] TC-296: DNS exit — internal DNS resolves all product and service FQDNs (exit-criteria) — unimplemented
+
+### FT-022 — CLI: cluster init, resource apply, resource status, identity create [ ]
+
+- [ ] TC-240: CLI cluster init and resource apply create resources end-to-end (scenario) — unimplemented
+- [ ] TC-297: CLI exit — cluster init, resource apply, resource status complete (exit-criteria) — unimplemented
+
+### FT-023 — mTLS node-to-node communication with platform-issued certificates [ ]
+
+- [ ] TC-241: mTLS rejects connections without platform-issued certificates (scenario) — unimplemented
+- [ ] TC-298: mTLS exit — all node communication encrypted with platform certificates (exit-criteria) — unimplemented
 
 ## Phase 2
 
@@ -302,18 +372,361 @@
 - [!] TC-216: Data product declared, projection rebuilt, second product queries it (exit-criteria) — failing
 - [!] TC-217: Capability declared and fulfilled by implementing product (exit-criteria) — failing
 
+### FT-024 — Product resource type with versioning [ ]
+
+- [ ] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — unimplemented
+
+### FT-025 — Product-scoped IAM and role assignment [ ]
+
+- [ ] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — unimplemented
+- [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+
+### FT-026 — Platform as OIDC provider — authorization endpoint, token endpoint, JWKS [ ]
+
+- [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+
+### FT-027 — Product as App Registration — OIDC client credentials [ ]
+
+- [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+
+### FT-028 — Raw binary workload support [ ]
+
+- [ ] TC-242: Raw binary workload starts and is health-checked by platform (scenario) — unimplemented
+- [ ] TC-299: Binary workload exit — raw binary scheduled, started, and monitored (exit-criteria) — unimplemented
+
+### FT-029 — Raw block device support [ ]
+
+- [ ] TC-243: Raw block device attached to workload is readable and writable (scenario) — unimplemented
+- [ ] TC-300: Block device exit — raw block device provisioned and accessible (exit-criteria) — unimplemented
+
+### FT-030 — Secret management — encrypted at rest, workload injection [ ]
+
+- [ ] TC-244: Secret encrypted at rest and injected into workload environment (scenario) — unimplemented
+- [ ] TC-301: Secret management exit — secrets encrypted at rest and injected (exit-criteria) — unimplemented
+
+### FT-031 — Cascading deletion — delete Product cascades to all child resources [ ]
+
+- [ ] TC-245: Delete Product cascades to all child containers, volumes, and identities (scenario) — unimplemented
+- [ ] TC-302: Cascading delete exit — product deletion removes all child resources (exit-criteria) — unimplemented
+
+### FT-032 — Per-product event bus [ ]
+
+- [ ] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — unimplemented
+
+### FT-033 — Volume snapshots — NAS storage, configurable schedule and retention [ ]
+
+- [ ] TC-246: Volume snapshot created on schedule and restorable to new volume (scenario) — unimplemented
+- [ ] TC-303: Volume snapshots exit — snapshot created, listed, and restored (exit-criteria) — unimplemented
+
+### FT-034 — Offsite backup — S3-compatible, client-side encryption, incremental deduplication [ ]
+
+- [ ] TC-247: Offsite backup uploads encrypted incremental snapshot to S3 endpoint (scenario) — unimplemented
+- [ ] TC-304: Offsite backup exit — backup uploaded encrypted to S3 endpoint (exit-criteria) — unimplemented
+
+### FT-035 — Snapshot and backup lifecycle events [ ]
+
+- [ ] TC-248: Snapshot and backup lifecycle events emitted to event log (scenario) — unimplemented
+- [ ] TC-305: Backup events exit — snapshot and backup lifecycle events emitted (exit-criteria) — unimplemented
+
+### FT-036 — Backup failure alert rules (built-in) [ ]
+
+- [ ] TC-249: Backup failure emits alert event within configured threshold (scenario) — unimplemented
+- [ ] TC-306: Backup alerts exit — failure alert triggered within threshold (exit-criteria) — unimplemented
+
+### FT-037 — CLI: volume snapshots, volume restore, volume backup [ ]
+
+- [ ] TC-250: CLI volume snapshot create and volume restore round-trip (scenario) — unimplemented
+- [ ] TC-307: CLI backup exit — volume snapshot and restore commands work (exit-criteria) — unimplemented
+
+### FT-038 — Product configuration store — typed key-value with tags, workload override, live reload [ ]
+
+- [ ] TC-251: Config store typed key-value set and live-reloaded by workload (scenario) — unimplemented
+- [ ] TC-308: Config store exit — typed values stored, retrieved, and live-reloaded (exit-criteria) — unimplemented
+
+### FT-039 — Feature flags — version-bound on/off, SDK evaluation, event invalidation [ ]
+
+- [ ] TC-252: Feature flag toggled and SDK evaluation reflects new state (scenario) — unimplemented
+- [ ] TC-309: Feature flags exit — flag toggled and SDK evaluation updated (exit-criteria) — unimplemented
+
+### FT-040 — PICLOUD_PRODUCT_VERSION injected into all workloads at startup [ ]
+
+- [ ] TC-253: PICLOUD_PRODUCT_VERSION env var present in workload container (scenario) — unimplemented
+- [ ] TC-310: Version injection exit — PICLOUD_PRODUCT_VERSION present in workload (exit-criteria) — unimplemented
+
+### FT-041 — OTel environment variables injected into all workloads at startup [ ]
+
+- [ ] TC-254: OTel environment variables present in workload container (scenario) — unimplemented
+- [ ] TC-311: OTel injection exit — OTel env vars present in workload (exit-criteria) — unimplemented
+
+### FT-042 — OTLP endpoint at picloud.local/otel [ ]
+
+- [ ] TC-255: OTLP endpoint accepts traces and metrics at picloud.local/otel (scenario) — unimplemented
+- [ ] TC-312: OTLP endpoint exit — traces and metrics accepted at /otel (exit-criteria) — unimplemented
+
+### FT-043 — OTel event stream — in-process pub/sub for traces, metrics, logs [ ]
+
+- [ ] TC-256: OTel event stream delivers traces to in-process subscriber (scenario) — unimplemented
+- [ ] TC-313: OTel stream exit — traces delivered to in-process subscriber (exit-criteria) — unimplemented
+
+### FT-044 — Parquet time-series store — traces, metrics, logs with hourly partitioning [ ]
+
+- [ ] TC-257: Parquet time-series store writes hourly partitioned trace files (scenario) — unimplemented
+- [ ] TC-314: Parquet store exit — hourly partitioned trace files written (exit-criteria) — unimplemented
+
+### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [ ]
+
+- [ ] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — unimplemented
+- [ ] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — unimplemented
+
+### FT-046 — Metric aggregator — OTel stream to MetricRecorded events every 15s [ ]
+
+- [ ] TC-259: Metric aggregator emits MetricRecorded events every 15 seconds (scenario) — unimplemented
+- [ ] TC-316: Metric aggregator exit — MetricRecorded events emitted on schedule (exit-criteria) — unimplemented
+
+### FT-047 — CLI traces — every command produces an OTel trace [ ]
+
+- [ ] TC-260: CLI command produces OTel trace with correct span hierarchy (scenario) — unimplemented
+- [ ] TC-317: CLI traces exit — CLI commands produce OTel traces (exit-criteria) — unimplemented
+
+### FT-048 — W3C trace context propagation — platform to workload correlation [ ]
+
+- [ ] TC-261: W3C traceparent header propagated from platform to workload (scenario) — unimplemented
+- [ ] TC-318: Trace propagation exit — traceparent header flows to workloads (exit-criteria) — unimplemented
+
+### FT-049 — Telemetry retention policy — configurable per signal type [ ]
+
+- [ ] TC-262: Telemetry retention policy deletes data older than configured TTL (scenario) — unimplemented
+- [ ] TC-319: Retention policy exit — expired telemetry data deleted (exit-criteria) — unimplemented
+
+### FT-050 — CLI: events stream, graph query, identity token, telemetry query [ ]
+
+- [ ] TC-263: CLI events stream and graph query return expected results (scenario) — unimplemented
+- [ ] TC-320: CLI events exit — events stream and graph query functional (exit-criteria) — unimplemented
+
 ## Phase 3
 
 ### FT-010 — SDK Model [~]
 
 - [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
+- [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
+- [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
 - [!] TC-097: sdk_generation (scenario) — failing
 - [!] TC-098: sdk_publish (scenario) — failing
 - [!] TC-099: sdk_ontology_sync (scenario) — failing
 - [!] TC-218: SDKs published to package registries (exit-criteria) — failing
 
+### FT-051 — rdf-store resource type — managed Oxigraph per Product [ ]
+
+- [ ] TC-264: Per-product Oxigraph instance created and serves SPARQL (scenario) — unimplemented
+- [ ] TC-321: RDF store exit — per-product Oxigraph created and serves SPARQL (exit-criteria) — unimplemented
+
+### FT-052 — IAM-gated SPARQL endpoint per Product [ ]
+
+- [ ] TC-265: SPARQL endpoint rejects unauthenticated and unauthorized requests (scenario) — unimplemented
+- [ ] TC-322: SPARQL auth exit — unauthenticated requests rejected with 401 (exit-criteria) — unimplemented
+
+### FT-053 — Ontology resource type — .ttl and .shacl files bound to Product version [ ]
+
+- [ ] TC-266: Ontology .ttl and .shacl files bound to product version and queryable (scenario) — unimplemented
+- [ ] TC-323: Ontology exit — .ttl and .shacl bound to version and queryable (exit-criteria) — unimplemented
+
+### FT-054 — RDFS/OWL inference enabled on platform and product graphs [ ]
+
+- [ ] TC-267: RDFS/OWL inference derives transitive triples in product graph (scenario) — unimplemented
+- [ ] TC-324: Inference exit — RDFS/OWL transitive triples derived (exit-criteria) — unimplemented
+
+### FT-055 — Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources [ ]
+
+- [ ] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — unimplemented
+
+### FT-056 — group resource type — roles assignable to groups, users inherit [ ]
+
+- [ ] TC-268: Group with assigned role grants inherited permissions to member users (scenario) — unimplemented
+- [ ] TC-325: Groups exit — group role assignment grants inherited permissions (exit-criteria) — unimplemented
+
+### FT-057 — inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation [ ]
+
+- [ ] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — unimplemented
+
+### FT-058 — Group membership rules via inference engine [ ]
+
+- [ ] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — unimplemented
+
+### FT-059 — capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types [ ]
+
+- [ ] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+
+### FT-060 — implements field on product — structural SHACL conformance validated at resource apply time [ ]
+
+- [ ] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+
+### FT-061 — capabilities field on product — resolution validated at resource apply time [ ]
+
+- [ ] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+
+### FT-062 — Capability lifecycle events [ ]
+
+- [ ] TC-269: Capability lifecycle events emitted on declare, implement, consume (scenario) — unimplemented
+- [ ] TC-326: Capability events exit — declare, implement, consume events emitted (exit-criteria) — unimplemented
+
+### FT-063 — Capability-aware event routing — platform resolves implementing Product at dispatch time [ ]
+
+- [ ] TC-270: Event routed to implementing product resolved by capability IRI (scenario) — unimplemented
+- [ ] TC-327: Capability routing exit — events routed to implementing product (exit-criteria) — unimplemented
+
+### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [ ]
+
+- [ ] TC-271: picloud capability list shows all capabilities with fulfilment status (scenario) — unimplemented
+- [ ] TC-328: Capability list exit — all capabilities shown with fulfilment status (exit-criteria) — unimplemented
+
+### FT-065 — data-domain resource type — cluster-scoped governance boundary [ ]
+
+- [ ] TC-272: Data domain created as cluster-scoped governance boundary (scenario) — unimplemented
+- [ ] TC-329: Data domain exit — cluster-scoped governance boundary created (exit-criteria) — unimplemented
+
+### FT-066 — data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection [ ]
+
+- [ ] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — unimplemented
+
+### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [ ]
+
+- [ ] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — unimplemented
+
+### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [ ]
+
+- [ ] TC-273: Freshness monitor emits DataProductStale when maxAge exceeded (scenario) — unimplemented
+- [ ] TC-330: Freshness exit — DataProductStale emitted when maxAge breached (exit-criteria) — unimplemented
+
+### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [ ]
+
+- [ ] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — unimplemented
+
+### FT-070 — Data product lifecycle events [ ]
+
+- [ ] TC-274: Data product lifecycle events emitted on create, update, delete (scenario) — unimplemented
+- [ ] TC-331: Data product events exit — create, update, delete events emitted (exit-criteria) — unimplemented
+
+### FT-071 — Data domain lifecycle events [ ]
+
+- [ ] TC-275: Data domain lifecycle events emitted on create, update, delete (scenario) — unimplemented
+- [ ] TC-332: Data domain events exit — create, update, delete events emitted (exit-criteria) — unimplemented
+
+### FT-072 — DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness [ ]
+
+- [ ] TC-276: DataProductProjector reflects data products and domains in RDF graph (scenario) — unimplemented
+- [ ] TC-333: Data projector exit — RDF graph reflects data products and domains (exit-criteria) — unimplemented
+
+### FT-073 — picloud data-product list and picloud data-domain list [ ]
+
+- [ ] TC-277: picloud data-product list and data-domain list return expected entries (scenario) — unimplemented
+- [ ] TC-334: Data CLI exit — data-product list and data-domain list work (exit-criteria) — unimplemented
+
+### FT-074 — Cross-product internal graph access blocked at HTTP layer — 403 for non-owner non-admin [ ]
+
+- [ ] TC-278: Cross-product graph access returns 403 for non-owner non-admin (scenario) — unimplemented
+- [ ] TC-335: Graph isolation exit — cross-product access returns 403 (exit-criteria) — unimplemented
+
+### FT-075 — Platform metrics agent — MetricRecorded events at 15s interval per node [ ]
+
+- [ ] TC-229: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
+
+### FT-076 — Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure) [ ]
+
+- [ ] TC-229: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
+
+### FT-077 — AlertFired / AlertResolved events [ ]
+
+- [ ] TC-229: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
+
+### FT-078 — event-store resource type — managed event log + aggregate streams per Product [ ]
+
+- [ ] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — unimplemented
+
+### FT-079 — Product event schema IRIs served from platform HTTP layer [ ]
+
+- [ ] TC-279: Event schema IRI returns schema document via HTTP GET (scenario) — unimplemented
+- [ ] TC-336: Schema IRI exit — event schema served via HTTP GET (exit-criteria) — unimplemented
+
+### FT-080 — Automatic RDF projection of Product aggregate events into Product graph [ ]
+
+- [ ] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — unimplemented
+
+### FT-081 — Event replay — shadow projection, atomic swap, marked replay events [ ]
+
+- [ ] TC-280: Event replay creates shadow projection and swaps atomically (scenario) — unimplemented
+- [ ] TC-337: Event replay exit — shadow projection created and swapped atomically (exit-criteria) — unimplemented
+
+### FT-082 — Aggregate-scoped replay (single and batch up to 1000) [ ]
+
+- [ ] TC-281: Aggregate-scoped replay replays events for single aggregate (scenario) — unimplemented
+- [ ] TC-338: Scoped replay exit — single aggregate replay completes (exit-criteria) — unimplemented
+
+### FT-083 — event-subscription resource type [ ]
+
+- [ ] TC-282: Event subscription resource type receives filtered events (scenario) — unimplemented
+- [ ] TC-339: Event subscription exit — subscription receives filtered events (exit-criteria) — unimplemented
+
+### FT-084 — Platform-managed event routing between Products [ ]
+
+- [ ] TC-283: Platform routes events between products via subscription (scenario) — unimplemented
+- [ ] TC-340: Event routing exit — platform routes events between products (exit-criteria) — unimplemented
+
+### FT-085 — Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products [ ]
+
+- [ ] TC-284: Cluster SPARQL query returns all products, events, ontologies (scenario) — unimplemented
+- [ ] TC-341: Discoverability exit — SPARQL returns all products and ontologies (exit-criteria) — unimplemented
+
+### FT-086 — SDK generator — Rust, TypeScript, .NET generated from platform ontology [ ]
+
+- [ ] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — unimplemented
+
+### FT-087 — SDK publication — crates.io, npm, NuGet via platform CI [ ]
+
+- [ ] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — unimplemented
+
+### FT-088 — picloud sdk publish command [ ]
+
+- [ ] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — unimplemented
+
+### FT-089 — .NET Aspire integration package [ ]
+
+- [ ] TC-285: .NET Aspire integration package connects to PiCloud cluster (scenario) — unimplemented
+- [ ] TC-342: Aspire exit — .NET integration package connects to cluster (exit-criteria) — unimplemented
+
 ## Phase 4
 
 ### FT-011 — Operational Maturity [ ]
 
+- [ ] TC-236: Node drain completes and workloads reschedule within timeout (scenario) — unimplemented
+- [ ] TC-292: Operational maturity exit — node drain, log compaction, self-monitoring pass (exit-criteria) — unimplemented
+
+### FT-090 — Additional storage intent tiers (quorum, local, archive, fast) [ ]
+
+- [ ] TC-286: Storage intent tier quorum replicates to majority of nodes (scenario) — unimplemented
+- [ ] TC-343: Storage tiers exit — quorum tier replicates to majority (exit-criteria) — unimplemented
+
+### FT-091 — Workload resource constraints (CPU/memory limits) [ ]
+
+- [ ] TC-287: Workload CPU and memory limits enforced by container runtime (scenario) — unimplemented
+- [ ] TC-344: Resource limits exit — CPU and memory limits enforced (exit-criteria) — unimplemented
+
+### FT-092 — Node drain and graceful workload migration [ ]
+
+- [ ] TC-288: Node drain migrates workloads to other nodes gracefully (scenario) — unimplemented
+- [ ] TC-345: Node drain exit — workloads migrated to other nodes (exit-criteria) — unimplemented
+
+### FT-093 — Event log compaction and snapshotting [ ]
+
+- [ ] TC-289: Event log compaction reduces log size while preserving snapshots (scenario) — unimplemented
+- [ ] TC-346: Log compaction exit — log size reduced, snapshots preserved (exit-criteria) — unimplemented
+
+### FT-094 — Platform self-monitoring via its own RDF graph [ ]
+
+- [ ] TC-290: Platform self-monitoring graph contains node health and workload state (scenario) — unimplemented
+- [ ] TC-347: Self-monitoring exit — platform graph contains health data (exit-criteria) — unimplemented
+
+### FT-095 — Multi-node Raft voter configuration tuning [ ]
+
+- [ ] TC-291: Multi-node Raft voter configuration change completes without downtime (scenario) — unimplemented
+- [ ] TC-348: Voter config exit — Raft voter change completes without downtime (exit-criteria) — unimplemented
 

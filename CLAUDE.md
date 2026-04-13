@@ -250,6 +250,51 @@ When the MCP server is available, prefer using MCP tools over shell commands for
 - **Run `product gap` before starting implementation** to verify coverage.
 - **Run `product preflight <FT-ID>` before implementing a feature** to check domain and cross-cutting readiness.
 
+### Implementation Workflow
+
+Use the Product CLI (or MCP tools) to stay in sync with the knowledge graph.
+
+**If using `product implement FT-XXX`** — the pipeline assembles the context bundle and passes it to the spawned agent automatically. Do **not** also run `product context` — that would duplicate the context.
+
+**If implementing manually** (without `product implement`):
+
+1. **Get context** — run `product context FT-XXX --depth 2` to get the full bundle (linked ADRs + test criteria)
+2. **Check decisions** — run `product impact ADR-XXX` to understand what a change affects before modifying behavior
+
+**Always, regardless of path:**
+
+1. **Configure TC runners** — before verifying, ensure every TC linked to the feature has `runner: cargo-test` and `runner-args: "tc_XXX_snake_case_name"` in its front-matter (see "TC Runner Configuration" below). Without these fields, `product verify` silently skips the TC.
+2. **Verify work** — run `product verify FT-XXX` after implementation to execute TC runners and update test status in front-matter
+3. **Mark done** — when all TCs pass, `product verify` auto-updates feature status to `complete` and regenerates `CHECKLIST.md`
+4. **Check health** — run `product gap check` and `product drift check` to catch specification issues before committing
+
+**Do not manually edit feature status or `CHECKLIST.md`** — let the CLI manage that through `verify` and `checklist generate`.
+
+### TC Runner Configuration
+
+Every test criterion file (`docs/tests/TC-*.md`) must have runner metadata in its YAML front-matter for `product verify` to execute it:
+
+```yaml
+---
+id: TC-013
+title: event_log_replay
+type: scenario
+status: failing
+runner: cargo-test
+runner-args: "tc013_event_log_replay"
+validates:
+  features: [FT-002]
+  adrs: [ADR-004, ADR-035]
+phase: 1
+---
+```
+
+**Runner types:**
+- `cargo-test` — runs `cargo test --workspace --test '*' -- tc_name` (most common for unit/integration tests)
+- `scripts/run-tc.sh` — runs the E2E test harness via `picloud-test` binary (for cluster-level scenarios)
+
+**Convention:** test function names use the pattern `tc{ID}_{snake_case_title}` (e.g., `tc013_event_log_replay`). The `runner-args` field must match the Rust test function name exactly.
+
 ---
 
 ## Build and Test

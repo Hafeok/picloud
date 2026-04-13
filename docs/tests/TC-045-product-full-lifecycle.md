@@ -2,14 +2,14 @@
 id: TC-045
 title: product_full_lifecycle
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-001
   adrs:
   - ADR-016
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "product-full-lifecycle"
 ---
 

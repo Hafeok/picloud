@@ -2,14 +2,14 @@
 id: TC-046
 title: cascading_delete
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-001
   adrs:
   - ADR-016
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "cascading-delete"
 ---
 

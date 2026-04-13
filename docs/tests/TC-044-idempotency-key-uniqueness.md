@@ -2,7 +2,7 @@
 id: TC-044
 title: idempotency_key_uniqueness
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-001
@@ -10,7 +10,7 @@ validates:
   adrs:
   - ADR-015
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "idempotency-key-uniqueness"
 ---
 

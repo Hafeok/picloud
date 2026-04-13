@@ -2,14 +2,14 @@
 id: TC-023
 title: invalid_syntax_rejection
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-001
   adrs:
   - ADR-007
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "invalid_syntax_rejection"
 ---
 

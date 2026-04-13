@@ -2,14 +2,14 @@
 id: TC-047
 title: orphan_prevention
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-001
   adrs:
   - ADR-016
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "orphan-prevention"
 ---
 
