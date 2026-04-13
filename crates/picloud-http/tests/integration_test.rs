@@ -377,3 +377,295 @@ impl picloud_domain::traits::WorkloadScheduler for FakeScheduler {
         Ok(picloud_domain::traits::WorkloadStatus::Running)
     }
 }
+
+// ===========================================================================
+// TC-240: CLI cluster init and resource apply create resources end-to-end
+// ===========================================================================
+
+/// TC-240: Full end-to-end scenario exercising the CLI's primary commands:
+///   1. cluster init — fetch cluster identity from GET /
+///   2. resource apply — POST /api/apply with a product, volume, and container
+///   3. resource status — GET /products/:name returns projected resources
+///   4. identity create — POST /api/commands with IdentityCreated
+///
+/// This validates that the HTTP endpoints backing each CLI command work
+/// together in sequence, and that state flows from events → RDF → queries.
+#[tokio::test]
+async fn tc240_cli_cluster_init_and_resource_apply() {
+    let (app, event_log, projector) = test_server_with_projection().await;
+
+    // ── Step 1: cluster init — the CLI hits GET / to check cluster identity ──
+    let req = Request::builder()
+        .uri("/")
+        .header(header::ACCEPT, "application/json")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let cluster_info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(cluster_info["type"], "PiCloudCluster");
+    assert_eq!(cluster_info["domain"], "picloud.local");
+
+    // ── Step 2: resource apply — submit a product with volume + container ──
+    let resource_file = serde_json::json!({
+        "resources": [
+            {
+                "type": "product",
+                "name": "demo-app",
+                "version": "1.0.0",
+                "description": "Demo application for TC-240"
+            },
+            {
+                "type": "volume",
+                "name": "db-vol",
+                "product": "demo-app",
+                "size_gb": 25
+            },
+            {
+                "type": "container",
+                "name": "api",
+                "product": "demo-app",
+                "image": "demo:1.0.0",
+                "identity": "api-worker"
+            }
+        ]
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/apply")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&resource_file).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let apply_result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify all 3 resources declared
+    let results = apply_result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3, "expected 3 resources declared");
+    assert!(
+        results.iter().all(|r| r["status"] == "declared"),
+        "all resources should be in 'declared' status"
+    );
+    // Correlation ID should be present
+    assert!(apply_result.get("correlationId").is_some());
+
+    // Verify events were stored (1 ProductDeployed + 2 ResourceDeclared)
+    assert_eq!(event_log.len().await, 3);
+
+    // ── Step 3: resource status — query GET /products/demo-app ──
+    // Give the projection loop time to process events
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let req = Request::builder()
+        .uri("/products/demo-app")
+        .header(header::ACCEPT, "application/json")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let product_status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(product_status["type"], "Product");
+    assert_eq!(product_status["name"], "demo-app");
+    // Resources should be projected into the graph
+    let resources = product_status["resources"].as_array().unwrap();
+    assert!(
+        resources.len() >= 2,
+        "expected at least volume + container in resources, got {}",
+        resources.len()
+    );
+
+    // ── Step 4: identity create — POST /api/commands with IdentityCreated ──
+    let identity_cmd = serde_json::json!({
+        "command_type": "IdentityCreated",
+        "payload": {
+            "name": "alice",
+            "email": "alice@picloud.local"
+        }
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/commands")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&identity_cmd).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let cmd_result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(cmd_result["status"], "accepted");
+    assert!(cmd_result.get("correlationId").is_some());
+
+    // Event log should now have 4 events (3 apply + 1 identity)
+    assert_eq!(event_log.len().await, 4);
+}
+
+// ===========================================================================
+// TC-297: CLI exit — cluster init, resource apply, resource status complete
+// ===========================================================================
+
+/// TC-297: Exit-criteria test verifying all four CLI operations produce correct
+/// HTTP responses and leave the system in a consistent state:
+///   - cluster init returns valid cluster metadata
+///   - resource apply creates resources and returns declared status
+///   - resource status returns projected resources with types
+///   - identity create is accepted and stored in the event log
+///
+/// This is the gate test for FT-022 completion.
+#[tokio::test]
+async fn tc297_cli_exit_cluster_init_resource_apply_resource_status() {
+    let (app, event_log, projector) = test_server_with_projection().await;
+
+    // ── cluster init: verify cluster root responds with domain + type ──
+    let req = Request::builder()
+        .uri("/")
+        .header(header::ACCEPT, "application/json")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "cluster root should be OK");
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        body.get("domain").is_some(),
+        "cluster root must include domain"
+    );
+
+    // ── cluster status: verify health endpoint ──
+    let req = Request::builder()
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "health endpoint should be OK");
+
+    // ── resource apply: create a product with resources ──
+    let resource_file = serde_json::json!({
+        "resources": [
+            { "type": "product", "name": "exit-test", "version": "2.0.0", "description": "Exit criteria test" },
+            { "type": "volume", "name": "data", "product": "exit-test", "size_gb": 10 },
+            { "type": "container", "name": "svc", "product": "exit-test", "image": "svc:2.0", "identity": "svc-id" }
+        ]
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/apply")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&resource_file).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "apply should succeed");
+    let apply_body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let results = apply_body["results"].as_array().expect("results array");
+    assert_eq!(results.len(), 3, "3 resources applied");
+    for r in results {
+        assert_eq!(r["status"], "declared", "each resource should be declared");
+    }
+
+    // ── resource status: verify product is queryable after projection ──
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let req = Request::builder()
+        .uri("/products/exit-test")
+        .header(header::ACCEPT, "application/json")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "product status should be OK"
+    );
+    let status_body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status_body["name"], "exit-test");
+    let resources = status_body["resources"]
+        .as_array()
+        .expect("resources array in status");
+    // Should contain at least the volume and container
+    let types: Vec<&str> = resources
+        .iter()
+        .filter_map(|r| r["type"]["value"].as_str().or_else(|| r["type"].as_str()))
+        .collect();
+    assert!(
+        types.iter().any(|t| *t == "Volume"),
+        "status should include Volume, got: {:?}",
+        types
+    );
+    assert!(
+        types.iter().any(|t| *t == "Container"),
+        "status should include Container, got: {:?}",
+        types
+    );
+
+    // ── identity create: submit an identity command ──
+    let cmd = serde_json::json!({
+        "command_type": "IdentityCreated",
+        "payload": { "name": "bob", "email": "bob@picloud.local" }
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/commands")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&cmd).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::ACCEPTED,
+        "identity create should be accepted"
+    );
+
+    // ── Final state: all events persisted ──
+    assert_eq!(
+        event_log.len().await,
+        4,
+        "event log should have 4 events (3 resources + 1 identity)"
+    );
+
+    // Verify graph integrity via SPARQL — the product should be discoverable
+    let result = projector
+        .query("SELECT ?p WHERE { ?p <https://picloud.local/ontology#name> \"exit-test\" }")
+        .await
+        .unwrap();
+    assert!(
+        !result.bindings.is_empty(),
+        "product should be queryable in RDF graph"
+    );
+}

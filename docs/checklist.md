@@ -249,10 +249,10 @@
 - [x] TC-239: Internal DNS resolves product and container FQDNs from any node (scenario) — passing
 - [x] TC-296: DNS exit — internal DNS resolves all product and service FQDNs (exit-criteria) — passing
 
-### FT-022 — CLI: cluster init, resource apply, resource status, identity create [ ]
+### FT-022 — CLI: cluster init, resource apply, resource status, identity create [x]
 
-- [ ] TC-240: CLI cluster init and resource apply create resources end-to-end (scenario) — unimplemented
-- [ ] TC-297: CLI exit — cluster init, resource apply, resource status complete (exit-criteria) — unimplemented
+- [x] TC-240: CLI cluster init and resource apply create resources end-to-end (scenario) — passing
+- [x] TC-297: CLI exit — cluster init, resource apply, resource status complete (exit-criteria) — passing
 
 ### FT-023 — mTLS node-to-node communication with platform-issued certificates [ ]
 

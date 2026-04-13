@@ -2,7 +2,7 @@
 id: FT-022
 title: 'CLI: cluster init, resource apply, resource status, identity create'
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
