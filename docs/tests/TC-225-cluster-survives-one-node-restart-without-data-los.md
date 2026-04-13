@@ -6,12 +6,13 @@ status: passing
 validates:
   features:
   - FT-014
+  - FT-015
   adrs:
   - ADR-002
 phase: 1
 runner: cargo-test
 runner-args: "tc225_cluster_survives_one_node_restart_without_data_loss"
-last-run: 2026-04-13T20:49:54.762542035+00:00
+last-run: 2026-04-13T20:53:04.196373624+00:00
 ---
 
 ## Description

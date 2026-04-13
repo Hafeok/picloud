@@ -2,9 +2,10 @@
 id: FT-015
 title: Append-only event log with Raft replication
 phase: 1
-status: planned
+status: complete
 depends-on: []
-adrs: []
+adrs:
+- ADR-002
 tests:
 - TC-225
 domains: []

@@ -214,8 +214,9 @@
 - [x] TC-006: raft_leader_failover (scenario) — passing
 - [x] TC-007: raft_learner_join (scenario) — passing
 
-### FT-015 — Append-only event log with Raft replication [ ]
+### FT-015 — Append-only event log with Raft replication [x]
 
+- [x] ADR-002: openraft for Cluster Consensus (accepted)
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 
 ### FT-016 — Oxigraph RDF projection of cluster state [ ]
