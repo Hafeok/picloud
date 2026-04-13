@@ -219,12 +219,12 @@
 - [x] ADR-002: openraft for Cluster Consensus (accepted)
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 
-### FT-016 — Oxigraph RDF projection of cluster state [ ]
+### FT-016 — Oxigraph RDF projection of cluster state [x]
 
 - [x] TC-087: iri_dereferencing (scenario) — passing
 - [x] TC-088: content_negotiation (scenario) — passing
 - [x] TC-089: iri_stability (scenario) — passing
-- [ ] TC-294: RDF projection exit — SPARQL query returns projected cluster state (exit-criteria) — unimplemented
+- [x] TC-294: RDF projection exit — SPARQL query returns projected cluster state (exit-criteria) — passing
 
 ### FT-017 — Basic IAM: human identities, workload identities, RBAC, token issuance [ ]
 

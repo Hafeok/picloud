@@ -2,7 +2,7 @@
 id: FT-016
 title: Oxigraph RDF projection of cluster state
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
