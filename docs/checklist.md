@@ -386,7 +386,7 @@
 
 - [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
-### FT-027 — Product as App Registration — OIDC client credentials [ ]
+### FT-027 — Product as App Registration — OIDC client credentials [x]
 
 - [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 

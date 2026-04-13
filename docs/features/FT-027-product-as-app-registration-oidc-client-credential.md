@@ -2,7 +2,7 @@
 id: FT-027
 title: Product as App Registration — OIDC client credentials
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
