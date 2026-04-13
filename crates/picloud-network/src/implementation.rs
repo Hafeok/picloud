@@ -391,6 +391,135 @@ impl PlatformCa {
         Ok(config)
     }
 
+    /// Create a `rustls::ServerConfig` for **mutual TLS** on this node.
+    ///
+    /// The server presents a certificate signed by the platform CA and
+    /// **requires** connecting clients to also present a certificate signed
+    /// by the same CA.  Connections without a valid platform-issued client
+    /// certificate are rejected during the TLS handshake (ADR-053).
+    pub fn mtls_server_config(&self, node_name: &str) -> Result<rustls::ServerConfig> {
+        let node_cert = self.issue_node_certificate(node_name)?;
+
+        // --- server certificate chain ---
+        let cert_chain: Vec<CertificateDer<'static>> = {
+            let mut reader = BufReader::new(node_cert.certificate_pem.as_bytes());
+            rustls_pemfile::certs(&mut reader)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse server certificate PEM: {e}"),
+                })?
+        };
+
+        // --- private key ---
+        let private_key: PrivateKeyDer<'static> = {
+            let mut reader = BufReader::new(node_cert.private_key_pem.as_bytes());
+            rustls_pemfile::private_key(&mut reader)
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse private key PEM: {e}"),
+                })?
+                .ok_or_else(|| PiCloudError::TlsCertificateError {
+                    reason: "no private key found in PEM data".to_string(),
+                })?
+        };
+
+        // --- client certificate verifier (platform CA as trust anchor) ---
+        let ca_cert_der: CertificateDer<'static> = {
+            let mut reader = BufReader::new(self.ca_cert_pem.as_bytes());
+            let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse CA certificate PEM: {e}"),
+                })?;
+            certs.into_iter().next().ok_or_else(|| PiCloudError::TlsCertificateError {
+                reason: "CA PEM contains no certificate".to_string(),
+            })?
+        };
+
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add(ca_cert_der).map_err(|e| PiCloudError::TlsCertificateError {
+            reason: format!("failed to add CA cert to root store: {e}"),
+        })?;
+
+        let client_verifier = rustls::server::WebPkiClientVerifier::builder(
+            std::sync::Arc::new(root_store),
+        )
+        .build()
+        .map_err(|e| PiCloudError::TlsCertificateError {
+            reason: format!("failed to build client cert verifier: {e}"),
+        })?;
+
+        let config = rustls::ServerConfig::builder()
+            .with_client_cert_verifier(client_verifier)
+            .with_single_cert(cert_chain, private_key)
+            .map_err(|e| PiCloudError::TlsCertificateError {
+                reason: format!("failed to build mTLS server config: {e}"),
+            })?;
+
+        info!(node = %node_name, "mTLS server config created (client auth required)");
+
+        Ok(config)
+    }
+
+    /// Create a `rustls::ClientConfig` for **mutual TLS** connections from
+    /// this node to other cluster nodes.
+    ///
+    /// The client presents its own platform-issued certificate and only
+    /// trusts servers whose certificate was signed by the same platform CA.
+    pub fn mtls_client_config(&self, node_name: &str) -> Result<rustls::ClientConfig> {
+        let node_cert = self.issue_node_certificate(node_name)?;
+
+        // --- client certificate chain ---
+        let cert_chain: Vec<CertificateDer<'static>> = {
+            let mut reader = BufReader::new(node_cert.certificate_pem.as_bytes());
+            rustls_pemfile::certs(&mut reader)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse client certificate PEM: {e}"),
+                })?
+        };
+
+        // --- private key ---
+        let private_key: PrivateKeyDer<'static> = {
+            let mut reader = BufReader::new(node_cert.private_key_pem.as_bytes());
+            rustls_pemfile::private_key(&mut reader)
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse private key PEM: {e}"),
+                })?
+                .ok_or_else(|| PiCloudError::TlsCertificateError {
+                    reason: "no private key found in PEM data".to_string(),
+                })?
+        };
+
+        // --- trust store (platform CA only) ---
+        let ca_cert_der: CertificateDer<'static> = {
+            let mut reader = BufReader::new(self.ca_cert_pem.as_bytes());
+            let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::TlsCertificateError {
+                    reason: format!("failed to parse CA certificate PEM: {e}"),
+                })?;
+            certs.into_iter().next().ok_or_else(|| PiCloudError::TlsCertificateError {
+                reason: "CA PEM contains no certificate".to_string(),
+            })?
+        };
+
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add(ca_cert_der).map_err(|e| PiCloudError::TlsCertificateError {
+            reason: format!("failed to add CA cert to root store: {e}"),
+        })?;
+
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_client_auth_cert(cert_chain, private_key)
+            .map_err(|e| PiCloudError::TlsCertificateError {
+                reason: format!("failed to build mTLS client config: {e}"),
+            })?;
+
+        info!(node = %node_name, "mTLS client config created");
+
+        Ok(config)
+    }
+
     /// Issue a TLS certificate for a service, signed by the platform CA.
     pub fn issue_service_certificate(
         &self,

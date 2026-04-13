@@ -2,7 +2,7 @@
 id: FT-023
 title: mTLS node-to-node communication with platform-issued certificates
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

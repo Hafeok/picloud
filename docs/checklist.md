@@ -254,10 +254,10 @@
 - [x] TC-240: CLI cluster init and resource apply create resources end-to-end (scenario) — passing
 - [x] TC-297: CLI exit — cluster init, resource apply, resource status complete (exit-criteria) — passing
 
-### FT-023 — mTLS node-to-node communication with platform-issued certificates [ ]
+### FT-023 — mTLS node-to-node communication with platform-issued certificates [x]
 
-- [ ] TC-241: mTLS rejects connections without platform-issued certificates (scenario) — unimplemented
-- [ ] TC-298: mTLS exit — all node communication encrypted with platform certificates (exit-criteria) — unimplemented
+- [x] TC-241: mTLS rejects connections without platform-issued certificates (scenario) — passing
+- [x] TC-298: mTLS exit — all node communication encrypted with platform certificates (exit-criteria) — passing
 
 ## Phase 2
 
