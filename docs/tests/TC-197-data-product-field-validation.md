@@ -1,0 +1,14 @@
+---
+id: TC-197
+title: data_product_field_validation
+type: scenario
+status: unimplemented
+validates:
+  features:
+  - FT-009
+  adrs:
+  - ADR-056
+phase: 1
+---
+
+attempt to declare a `data-product` missing each mandatory field in turn (`triggers`, `maxAge`, `domain`, `shapes`/`ontology`). Assert each attempt is rejected at `resource apply` with a specific validation error. Assert no partial resource state is created in the cluster graph.

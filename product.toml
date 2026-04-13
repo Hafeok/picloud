@@ -1,0 +1,45 @@
+name = "picloud"
+version = "0.1"
+schema-version = "1"
+
+[paths]
+features = "docs/features"
+adrs = "docs/adrs"
+tests = "docs/tests"
+graph = "docs/graph"
+checklist = "docs/checklist.md"
+
+[phases]
+1 = "Cluster Foundation (MVP)"
+2 = "Products and IAM Completeness"
+3 = "RDF, Event Store, Inference, Metrics & Alerts"
+4 = "Operational Maturity"
+
+[prefixes]
+feature = "FT"
+adr = "ADR"
+test = "TC"
+
+[domains]
+security        = "Authentication, authorisation, secrets, trust boundaries, passkeys"
+storage         = "Block storage, volumes, durability, replication, snapshots, backup"
+consensus       = "Raft, leader election, log replication, cluster membership"
+networking      = "mDNS, mTLS, DNS, service discovery, ingress, port allocation"
+error-handling  = "Error types, PiCloudError, Result, diagnostics"
+observability   = "OTel, metrics, tracing, logging, telemetry, alerts"
+iam             = "Identity, OIDC, tokens, RBAC, workload identity, passkeys"
+scheduling      = "Workload placement, containers, binaries, resource limits"
+api             = "CLI surface, HTTP endpoints, event schema, resource language"
+data-model      = "RDF, SPARQL, Oxigraph, ontology, event sourcing, projections"
+products        = "Product lifecycle, isolation, event bus, per-product SPARQL"
+sdk             = "SDK generation, Rust/TypeScript/.NET, package registries"
+certificates    = "Platform CA, node enrollment, mTLS, cert issuance"
+
+[metrics.thresholds]
+spec_coverage = { min = 0.90, severity = "error" }
+test_coverage = { min = 0.80, severity = "error" }
+exit_criteria_coverage = { min = 0.50, severity = "warning" }
+phi = { min = 0.30, severity = "warning" }
+
+[mcp]
+write = true

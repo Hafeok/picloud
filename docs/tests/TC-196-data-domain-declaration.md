@@ -1,0 +1,14 @@
+---
+id: TC-196
+title: data_domain_declaration
+type: scenario
+status: unimplemented
+validates:
+  features:
+  - FT-009
+  adrs:
+  - ADR-056
+phase: 1
+---
+
+declare a `data-domain` resource. Assert `DataDomainDeclared` event emitted. Assert the domain appears in the cluster graph with correct `pc:steward`, `pc:sensitivity`, and `pc:description` triples.

@@ -1,0 +1,13 @@
+---
+id: TC-194
+title: resource apply
+type: scenario
+status: unimplemented
+validates:
+  features:
+  - FT-009
+  adrs:
+  - ADR-055
+phase: 1
+---
+

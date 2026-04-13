@@ -1,0 +1,21 @@
+---
+id: ADR-022
+title: Inter-Product Event Subscriptions as First-Class Resources
+status: accepted
+features: []
+supersedes: []
+superseded-by: []
+domains: []
+scope: domain
+---
+
+**Status:** Accepted
+
+**Context:** A Product that subscribes to another Product's events needs to declare that dependency somewhere. It could be implicit (subscribe at runtime) or explicit (declared as a resource).
+
+**Decision:** Event subscriptions are declared as `event-subscription` resources in `.picloud` files. The platform provisions and manages the subscription lifecycle. Runtime subscriptions without a resource declaration are not permitted.
+
+**Rationale:**
+- All inter-product dependencies are visible in resource files — the dependency graph is auditable and version-controlled
+- The platform can enforce that a subscription's source Product and event type exist before provisioning
+- Consistent with the IaC-as-only-interface principle — everything exists in a file

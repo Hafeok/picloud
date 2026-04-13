@@ -1,0 +1,14 @@
+---
+id: TC-115
+title: group_role_inheritance
+type: scenario
+status: unimplemented
+validates:
+  features:
+  - FT-009
+  adrs:
+  - ADR-037
+phase: 1
+---
+
+assign a group to a role, assert all group members receive the role's permissions in their tokens.
