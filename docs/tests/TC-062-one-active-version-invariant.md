@@ -2,15 +2,16 @@
 id: TC-062
 title: one_active_version_invariant
 type: invariant
-status: failing
+status: passing
 validates:
   features:
   - FT-008
   adrs:
   - ADR-021
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "one-active-version-invariant"
+last-run: 2026-04-13T21:37:33.242635225+00:00
 ---
 
 ⟦Σ:Types⟧{

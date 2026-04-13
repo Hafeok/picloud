@@ -261,28 +261,28 @@
 
 ## Phase 2
 
-### FT-008 — Product Event Store [~]
+### FT-008 — Product Event Store [x]
 
 - [x] ADR-018: Product Event Bus as Only Inter-Product Interface (accepted)
 - [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
 - [x] ADR-021: One Active Version Per Product (accepted)
 - [x] ADR-023: Ontology Files Bound to Product Version (accepted)
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
-- [!] TC-052: inter_product_event_delivery (scenario) — failing
-- [!] TC-053: direct_network_blocked (scenario) — failing
-- [!] TC-054: event_bus_burst (scenario) — failing
-- [!] TC-055: product_sparql_endpoint (scenario) — failing
-- [!] TC-056: sparql_iam_enforcement (scenario) — failing
-- [!] TC-057: ontology_served (scenario) — failing
-- [!] TC-060: atomic_version_cutover (scenario) — failing
-- [!] TC-061: failed_upgrade_rollback (scenario) — failing
-- [!] TC-062: one_active_version_invariant (invariant) — failing
-- [!] TC-066: ontology_version_binding (scenario) — failing
-- [!] TC-067: ontology_shacl_validation (scenario) — failing
-- [!] TC-093: event_store_append_read (scenario) — failing
-- [!] TC-094: event_store_rdf_projection (scenario) — failing
-- [!] TC-095: event_store_replay (scenario) — failing
-- [!] TC-096: event_store_survivor (scenario) — failing
+- [x] TC-052: inter_product_event_delivery (scenario) — passing
+- [x] TC-053: direct_network_blocked (scenario) — passing
+- [x] TC-054: event_bus_burst (scenario) — passing
+- [x] TC-055: product_sparql_endpoint (scenario) — passing
+- [x] TC-056: sparql_iam_enforcement (scenario) — passing
+- [x] TC-057: ontology_served (scenario) — passing
+- [x] TC-060: atomic_version_cutover (scenario) — passing
+- [x] TC-061: failed_upgrade_rollback (scenario) — passing
+- [x] TC-062: one_active_version_invariant (invariant) — passing
+- [x] TC-066: ontology_version_binding (scenario) — passing
+- [x] TC-067: ontology_shacl_validation (scenario) — passing
+- [x] TC-093: event_store_append_read (scenario) — passing
+- [x] TC-094: event_store_rdf_projection (scenario) — passing
+- [x] TC-095: event_store_replay (scenario) — passing
+- [x] TC-096: event_store_survivor (scenario) — passing
 - [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
 
 ### FT-009 — Inference, Metrics & Alerts [~]
