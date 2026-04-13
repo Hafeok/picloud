@@ -206,17 +206,17 @@
 - [x] TC-237: mDNS peer discovery finds all LAN nodes within 5 seconds (scenario) — passing
 - [x] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — passing
 
-### FT-014 — Raft consensus and leader election (openraft) [ ]
+### FT-014 — Raft consensus and leader election (openraft) [x]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
-- [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
+- [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 - [x] TC-005: raft_leader_election (scenario) — passing
 - [x] TC-006: raft_leader_failover (scenario) — passing
 - [x] TC-007: raft_learner_join (scenario) — passing
 
 ### FT-015 — Append-only event log with Raft replication [ ]
 
-- [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
+- [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 
 ### FT-016 — Oxigraph RDF projection of cluster state [ ]
 
@@ -233,7 +233,7 @@
 ### FT-018 — Block storage pool: NVMe contribution, volume allocation, full-replication durability [ ]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
-- [ ] TC-225: Cluster survives one node restart without data loss (exit-criteria) — unimplemented
+- [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 
 ### FT-019 — Mounted volume support [ ]
 
