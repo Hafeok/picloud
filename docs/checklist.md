@@ -201,10 +201,10 @@
 - [x] TC-101: composition_root_only (scenario) — passing
 - [x] TC-102: cargo deny (scenario) — passing
 
-### FT-013 — mDNS node discovery [ ]
+### FT-013 — mDNS node discovery [x]
 
-- [ ] TC-237: mDNS peer discovery finds all LAN nodes within 5 seconds (scenario) — unimplemented
-- [ ] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — unimplemented
+- [x] TC-237: mDNS peer discovery finds all LAN nodes within 5 seconds (scenario) — passing
+- [x] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — passing
 
 ### FT-014 — Raft consensus and leader election (openraft) [ ]
 

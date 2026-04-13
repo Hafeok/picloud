@@ -2,7 +2,7 @@
 id: FT-013
 title: mDNS node discovery
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

@@ -213,7 +213,11 @@ impl MdnsDiscovery {
         Ok(handle)
     }
 
-    fn handle_event(peers: &PeerList, local_node_id: Uuid, event: ServiceEvent) {
+    /// Process an mDNS service event, updating the peer list accordingly.
+    ///
+    /// Public so integration tests can simulate mDNS events without requiring
+    /// actual multicast networking.
+    pub fn handle_event(peers: &PeerList, local_node_id: Uuid, event: ServiceEvent) {
         match event {
             ServiceEvent::ServiceResolved(info) => {
                 let Some(node_id) = Self::extract_node_id(&info) else {
@@ -277,7 +281,8 @@ impl MdnsDiscovery {
         }
     }
 
-    fn extract_node_id(info: &ServiceInfo) -> Option<Uuid> {
+    /// Extract node_id from mDNS service properties.
+    pub fn extract_node_id(info: &ServiceInfo) -> Option<Uuid> {
         info.get_property_val_str(PROP_NODE_ID)
             .and_then(|s| s.parse::<Uuid>().ok())
     }
