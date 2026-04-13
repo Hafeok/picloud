@@ -14,7 +14,6 @@ members = [
     "crates/picloud-compiler",
     "crates/picloud-registry",
     "crates/picloud-test",
-    "crates/product",
     "src",
 ]
 resolver = "2"
