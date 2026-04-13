@@ -377,18 +377,18 @@
 
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 
-### FT-025 — Product-scoped IAM and role assignment [ ]
+### FT-025 — Product-scoped IAM and role assignment [x]
 
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
-- [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+- [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
 ### FT-026 — Platform as OIDC provider — authorization endpoint, token endpoint, JWKS [ ]
 
-- [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+- [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
 ### FT-027 — Product as App Registration — OIDC client credentials [ ]
 
-- [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+- [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
 ### FT-028 — Raw binary workload support [ ]
 

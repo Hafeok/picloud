@@ -2,7 +2,7 @@
 id: FT-025
 title: Product-scoped IAM and role assignment
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
