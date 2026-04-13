@@ -2,7 +2,7 @@
 id: ADR-001
 title: Rust as Implementation Language
 status: accepted
-features: []
+features: [FT-001, FT-012]
 supersedes: []
 superseded-by: []
 domains: []

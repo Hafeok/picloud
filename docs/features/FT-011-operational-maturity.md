@@ -8,7 +8,9 @@ depends-on:
 - FT-002
 - FT-005
 adrs: []
-tests: []
+tests:
+- TC-236
+- TC-292
 domains:
 - storage
 - consensus

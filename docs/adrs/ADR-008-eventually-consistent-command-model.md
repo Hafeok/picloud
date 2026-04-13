@@ -2,7 +2,7 @@
 id: ADR-008
 title: Eventually Consistent Command Model
 status: accepted
-features: []
+features: [FT-002]
 supersedes: []
 superseded-by: []
 domains: []

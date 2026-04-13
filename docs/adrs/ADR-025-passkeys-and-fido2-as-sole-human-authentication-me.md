@@ -2,7 +2,7 @@
 id: ADR-025
 title: Passkeys and FIDO2 as Sole Human Authentication Mechanism
 status: accepted
-features: []
+features: [FT-003]
 supersedes: []
 superseded-by: []
 domains: []

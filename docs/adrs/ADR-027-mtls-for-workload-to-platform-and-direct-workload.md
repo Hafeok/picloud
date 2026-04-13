@@ -2,7 +2,7 @@
 id: ADR-027
 title: mTLS for Workload-to-Platform and Direct Workload-to-SPARQL Communication
 status: accepted
-features: []
+features: [FT-003, FT-023, FT-052]
 supersedes: []
 superseded-by: []
 domains: []

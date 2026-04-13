@@ -2,7 +2,7 @@
 id: ADR-054
 title: Test-Augmented ADR Template
 status: accepted
-features: []
+features: [FT-009]
 supersedes: []
 superseded-by: []
 domains: []

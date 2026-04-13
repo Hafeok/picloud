@@ -2,7 +2,7 @@
 id: ADR-002
 title: openraft for Cluster Consensus
 status: accepted
-features: []
+features: [FT-002, FT-014, FT-092, FT-095]
 supersedes: []
 superseded-by: []
 domains: []

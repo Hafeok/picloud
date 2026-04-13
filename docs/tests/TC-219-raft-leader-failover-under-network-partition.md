@@ -11,6 +11,21 @@ runner: picloud-test
 runner-args: "raft-leader-failover-under-network-partition"
 ---
 
-## Description
+⟦Σ:Types⟧{
+  Node≜IRI
+  Role≜Leader|Follower|Learner
+  ClusterState≜⟨nodes:Node+, roles:Node→Role⟩
+}
 
-[Describe the test criterion here.]
+⟦Γ:Invariants⟧{
+  ∀s:ClusterState: |{n∈s.nodes | s.roles(n)=Leader}| ≤ 1
+}
+
+⟦Λ:Scenario⟧{
+  given≜cluster_init(nodes:3) ∧ ∃leader∈nodes: roles(leader)=Leader
+  when≜network_partition(leader, majority)
+  then≜within(15s): ∃n∈majority: roles(n)=Leader
+       ∧ commands_accepted(n)=true
+}
+
+⟦Ε⟧⟨δ≜0.85;φ≜70;τ≜◊?⟩

@@ -25,6 +25,7 @@ tests:
 - TC-168
 - TC-169
 - TC-170
+- TC-235
 domains:
 - api
 domains-acknowledged: {}

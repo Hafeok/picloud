@@ -42,6 +42,7 @@ tests:
 - TC-183
 - TC-184
 - TC-222
+- TC-234
 domains:
 - networking
 - certificates

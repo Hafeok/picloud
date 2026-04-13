@@ -11,6 +11,21 @@ runner: picloud-test
 runner-args: "node-restart-during-replication--eventual-consistency-restored"
 ---
 
-## Description
+⟦Σ:Types⟧{
+  Node≜IRI
+  EventLog≜⟨entries:Event*⟩
+  ReplicationState≜⟨node:Node, log:EventLog, committed_index:u64⟩
+}
 
-[Describe the test criterion here.]
+⟦Γ:Invariants⟧{
+  ∀n:Node: after(restart(n), 30s) → n.committed_index = leader.committed_index
+}
+
+⟦Λ:Scenario⟧{
+  given≜cluster_init(nodes:3) ∧ append_events(count:100)
+  when≜restart(follower) during replication
+  then≜within(30s): follower.committed_index = leader.committed_index
+       ∧ sparql_result(follower) = sparql_result(leader)
+}
+
+⟦Ε⟧⟨δ≜0.85;φ≜65;τ≜◊?⟩

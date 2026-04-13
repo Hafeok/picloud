@@ -188,6 +188,70 @@ Products are hermetically sealed (ADR-016, ADR-018, ADR-028):
 
 ---
 
+## Product CLI — The Single Source of Truth for Project Artifacts
+
+All features, ADRs, and test criteria are managed through the **Product CLI** (`product`), available at [github.com/Hafeok/product-cli](https://github.com/Hafeok/product-cli). **Never create or edit feature files, ADR files, or test criterion files by hand — always use the CLI or MCP server.**
+
+### Why
+
+The CLI maintains a knowledge graph (`docs/graph/index.ttl`) that tracks relationships between features, ADRs, and test criteria. Hand-editing files will cause the graph to drift out of sync.
+
+### CLI Usage
+
+```bash
+# Features
+product feature list                    # list all features
+product feature show FT-012             # show feature details
+product feature new                     # create a new feature (interactive)
+product feature status FT-012 building  # update feature status
+product feature link FT-012 --adr ADR-005  # link feature to ADR
+product feature adrs FT-012             # list ADRs linked to a feature
+product feature tests FT-012            # list test criteria for a feature
+product feature next                    # next feature to implement (topo order)
+
+# ADRs
+product adr list                        # list all ADRs
+product adr show ADR-005                # show ADR details
+product adr new                         # create a new ADR
+product adr status ADR-005 accepted     # update ADR status
+
+# Test Criteria
+product test list                       # list all test criteria
+product test show TC-001                # show test criterion details
+product test new                        # create a new test criterion
+product test untested                   # find features with no tests
+
+# Planning & Analysis
+product status                          # project-wide status summary
+product gap                             # gap analysis (ADRs ↔ features ↔ tests)
+product impact FT-012                   # impact analysis for a feature
+product checklist                       # generate implementation checklist
+product context FT-012                  # assemble LLM context bundle for a feature
+product preflight FT-012                # pre-flight checks before implementing
+```
+
+### MCP Server Mode
+
+The Product CLI can run as an MCP server, exposing all graph operations as tools for Claude Code:
+
+```bash
+product mcp                             # stdio transport (for Claude Code)
+product mcp --http --port 7777          # HTTP transport
+product mcp --write                     # enable write operations
+```
+
+When the MCP server is available, prefer using MCP tools over shell commands for managing features, ADRs, and test criteria.
+
+### Rules
+
+- **Always use `product feature new` / `product adr new` / `product test new`** to create artifacts — never create markdown files manually in `docs/features/` or `docs/adrs/`.
+- **Always use `product feature link`** to establish relationships — never add links by editing frontmatter directly.
+- **Always use `product feature status` / `product adr status` / `product test status`** to update statuses.
+- **Run `product gap` before starting implementation** to verify coverage.
+- **Run `product preflight <FT-ID>` before implementing a feature** to check domain and cross-cutting readiness.
+
+---
+
 ## Build and Test
 
 ### Local (x86_64)

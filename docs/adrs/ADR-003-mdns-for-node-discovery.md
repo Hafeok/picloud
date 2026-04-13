@@ -2,7 +2,7 @@
 id: ADR-003
 title: mDNS for Node Discovery
 status: accepted
-features: []
+features: [FT-006, FT-013]
 supersedes: []
 superseded-by: []
 domains: []

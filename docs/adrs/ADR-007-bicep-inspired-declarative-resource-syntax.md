@@ -2,9 +2,9 @@
 id: ADR-007
 title: Bicep-Inspired Declarative Resource Syntax
 status: accepted
-features: []
+features: [FT-001]
 supersedes: []
-superseded-by: []
+superseded-by: [ADR-049]
 domains: []
 scope: domain
 ---
