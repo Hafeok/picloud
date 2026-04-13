@@ -236,7 +236,7 @@
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 
-### FT-019 — Mounted volume support [ ]
+### FT-019 — Mounted volume support [x]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 

@@ -2,7 +2,7 @@
 id: FT-019
 title: Mounted volume support
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
