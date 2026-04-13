@@ -2,7 +2,7 @@
 id: FT-017
 title: 'Basic IAM: human identities, workload identities, RBAC, token issuance'
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

@@ -226,10 +226,10 @@
 - [x] TC-089: iri_stability (scenario) — passing
 - [x] TC-294: RDF projection exit — SPARQL query returns projected cluster state (exit-criteria) — passing
 
-### FT-017 — Basic IAM: human identities, workload identities, RBAC, token issuance [ ]
+### FT-017 — Basic IAM: human identities, workload identities, RBAC, token issuance [x]
 
-- [ ] TC-238: IAM token issued after passkey authentication grants RBAC-scoped access (scenario) — unimplemented
-- [ ] TC-295: IAM exit — passkey login, token issuance, RBAC enforcement functional (exit-criteria) — unimplemented
+- [x] TC-238: IAM token issued after passkey authentication grants RBAC-scoped access (scenario) — passing
+- [x] TC-295: IAM exit — passkey login, token issuance, RBAC enforcement functional (exit-criteria) — passing
 
 ### FT-018 — Block storage pool: NVMe contribution, volume allocation, full-replication durability [ ]
 
