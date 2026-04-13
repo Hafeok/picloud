@@ -2,7 +2,7 @@
 id: TC-036
 title: raw_block_device
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

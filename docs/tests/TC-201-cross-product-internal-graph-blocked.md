@@ -2,7 +2,7 @@
 id: TC-201
 title: cross_product_internal_graph_blocked
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

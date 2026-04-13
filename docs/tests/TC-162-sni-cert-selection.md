@@ -2,7 +2,7 @@
 id: TC-162
 title: sni_cert_selection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

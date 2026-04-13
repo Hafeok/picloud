@@ -2,7 +2,7 @@
 id: TC-109
 title: tag_remove
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-169
 title: overwrite_protection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

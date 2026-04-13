@@ -2,7 +2,7 @@
 id: TC-080
 title: sparql_direct_mtls
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

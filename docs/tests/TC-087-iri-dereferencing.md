@@ -2,7 +2,7 @@
 id: TC-087
 title: iri_dereferencing
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

@@ -2,7 +2,7 @@
 id: TC-112
 title: group_membership_via_inference
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

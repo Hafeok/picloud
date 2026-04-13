@@ -2,7 +2,7 @@
 id: TC-146
 title: otlp_trace_ingestion
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

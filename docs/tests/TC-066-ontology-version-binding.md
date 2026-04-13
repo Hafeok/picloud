@@ -2,7 +2,7 @@
 id: TC-066
 title: ontology_version_binding
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

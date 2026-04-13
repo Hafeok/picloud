@@ -2,7 +2,7 @@
 id: TC-153
 title: snapshot_create_verify
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

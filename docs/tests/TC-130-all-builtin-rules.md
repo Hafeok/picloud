@@ -2,7 +2,7 @@
 id: TC-130
 title: all_builtin_rules
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

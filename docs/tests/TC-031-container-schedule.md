@@ -2,7 +2,7 @@
 id: TC-031
 title: container_schedule
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

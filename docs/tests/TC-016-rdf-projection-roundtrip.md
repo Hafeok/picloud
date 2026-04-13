@@ -2,7 +2,7 @@
 id: TC-016
 title: rdf_projection_roundtrip
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

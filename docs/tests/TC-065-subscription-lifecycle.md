@@ -2,7 +2,7 @@
 id: TC-065
 title: subscription_lifecycle
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

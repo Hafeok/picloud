@@ -2,7 +2,7 @@
 id: TC-188
 title: capability_implements_shacl_validation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

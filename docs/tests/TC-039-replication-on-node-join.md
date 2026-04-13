@@ -2,7 +2,7 @@
 id: TC-039
 title: replication_on_node_join
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

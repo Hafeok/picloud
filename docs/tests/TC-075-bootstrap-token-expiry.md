@@ -2,7 +2,7 @@
 id: TC-075
 title: bootstrap_token_expiry
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

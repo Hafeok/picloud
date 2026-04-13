@@ -2,7 +2,7 @@
 id: TC-045
 title: product_full_lifecycle
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

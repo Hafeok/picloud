@@ -2,7 +2,7 @@
 id: FT-006
 title: Networking Model
 phase: 1
-status: planned
+status: in-progress
 depends-on:
 - FT-002
 adrs:

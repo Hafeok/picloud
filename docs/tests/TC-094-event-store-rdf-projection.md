@@ -2,7 +2,7 @@
 id: TC-094
 title: event_store_rdf_projection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

@@ -2,7 +2,7 @@
 id: TC-004
 title: ldd
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

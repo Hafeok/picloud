@@ -2,7 +2,7 @@
 id: TC-059
 title: registry_version_binding
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

@@ -2,7 +2,7 @@
 id: TC-132
 title: AlertResolved
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

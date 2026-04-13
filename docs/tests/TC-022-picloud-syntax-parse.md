@@ -2,7 +2,7 @@
 id: TC-022
 title: picloud_syntax_parse
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

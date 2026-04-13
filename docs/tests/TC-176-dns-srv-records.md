@@ -2,7 +2,7 @@
 id: TC-176
 title: dns_srv_records
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

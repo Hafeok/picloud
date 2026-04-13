@@ -2,7 +2,7 @@
 id: TC-197
 title: data_product_field_validation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

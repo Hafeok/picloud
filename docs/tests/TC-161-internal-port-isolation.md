@@ -2,7 +2,7 @@
 id: TC-161
 title: internal_port_isolation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

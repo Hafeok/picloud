@@ -2,7 +2,7 @@
 id: TC-010
 title: product_fqdn_dns
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

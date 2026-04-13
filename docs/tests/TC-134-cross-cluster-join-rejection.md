@@ -2,7 +2,7 @@
 id: TC-134
 title: cross_cluster_join_rejection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

@@ -2,7 +2,7 @@
 id: TC-125
 title: metrics_upsert
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

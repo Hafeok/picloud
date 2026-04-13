@@ -2,7 +2,7 @@
 id: TC-155
 title: snapshot_retention
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

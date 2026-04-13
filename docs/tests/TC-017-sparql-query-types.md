@@ -2,7 +2,7 @@
 id: TC-017
 title: sparql_query_types
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

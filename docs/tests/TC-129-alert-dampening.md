@@ -2,7 +2,7 @@
 id: TC-129
 title: alert_dampening
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

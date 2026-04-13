@@ -2,7 +2,7 @@
 id: TC-068
 title: storage_intent_full_replication
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

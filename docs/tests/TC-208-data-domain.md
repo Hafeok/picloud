@@ -2,7 +2,7 @@
 id: TC-208
 title: data-domain
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

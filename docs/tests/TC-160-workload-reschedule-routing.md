@@ -2,7 +2,7 @@
 id: TC-160
 title: workload_reschedule_routing
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

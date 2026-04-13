@@ -2,7 +2,7 @@
 id: TC-023
 title: invalid_syntax_rejection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

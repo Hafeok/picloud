@@ -2,7 +2,7 @@
 id: TC-104
 title: shadow_swap_live_traffic
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

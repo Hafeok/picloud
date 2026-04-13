@@ -2,7 +2,7 @@
 id: TC-139
 title: config_secret_separation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

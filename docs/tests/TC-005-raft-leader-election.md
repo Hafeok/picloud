@@ -2,7 +2,7 @@
 id: TC-005
 title: raft_leader_election
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

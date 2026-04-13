@@ -2,7 +2,7 @@
 id: TC-014
 title: projection_consistency
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

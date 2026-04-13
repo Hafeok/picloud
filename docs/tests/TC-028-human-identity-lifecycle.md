@@ -2,7 +2,7 @@
 id: TC-028
 title: human_identity_lifecycle
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

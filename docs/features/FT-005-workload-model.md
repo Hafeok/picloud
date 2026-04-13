@@ -2,7 +2,7 @@
 id: FT-005
 title: Workload Model
 phase: 1
-status: planned
+status: in-progress
 depends-on:
 - FT-004
 - FT-003

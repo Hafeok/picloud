@@ -2,7 +2,7 @@
 id: FT-007
 title: IaC & CLI Design
 phase: 1
-status: planned
+status: complete
 depends-on:
 - FT-001
 adrs:

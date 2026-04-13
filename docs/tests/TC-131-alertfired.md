@@ -2,7 +2,7 @@
 id: TC-131
 title: AlertFired
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

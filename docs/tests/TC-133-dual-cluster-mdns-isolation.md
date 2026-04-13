@@ -2,7 +2,7 @@
 id: TC-133
 title: dual_cluster_mDNS_isolation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

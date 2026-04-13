@@ -2,7 +2,7 @@
 id: TC-210
 title: Cluster survives one node restart without data loss
 type: exit-criteria
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs: []

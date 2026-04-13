@@ -2,7 +2,7 @@
 id: FT-010
 title: SDK Model
 phase: 1
-status: planned
+status: in-progress
 depends-on:
 - FT-008
 adrs:

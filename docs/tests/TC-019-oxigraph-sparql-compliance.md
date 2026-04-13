@@ -2,7 +2,7 @@
 id: TC-019
 title: oxigraph_sparql_compliance
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

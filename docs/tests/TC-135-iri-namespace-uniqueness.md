@@ -2,7 +2,7 @@
 id: TC-135
 title: iri_namespace_uniqueness
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

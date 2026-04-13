@@ -2,7 +2,7 @@
 id: TC-061
 title: failed_upgrade_rollback
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

@@ -2,7 +2,7 @@
 id: TC-117
 title: inference_retraction
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

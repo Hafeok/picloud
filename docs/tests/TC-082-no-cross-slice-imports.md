@@ -2,7 +2,7 @@
 id: TC-082
 title: no_cross_slice_imports
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

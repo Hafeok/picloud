@@ -2,7 +2,7 @@
 id: TC-057
 title: ontology_served
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

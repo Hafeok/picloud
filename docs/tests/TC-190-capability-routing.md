@@ -2,7 +2,7 @@
 id: TC-190
 title: capability_routing
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

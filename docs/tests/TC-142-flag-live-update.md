@@ -2,7 +2,7 @@
 id: TC-142
 title: flag_live_update
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

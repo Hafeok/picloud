@@ -2,7 +2,7 @@
 id: TC-040
 title: internal_dns_resolution
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

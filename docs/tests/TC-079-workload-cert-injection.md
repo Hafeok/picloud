@@ -2,7 +2,7 @@
 id: TC-079
 title: workload_cert_injection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

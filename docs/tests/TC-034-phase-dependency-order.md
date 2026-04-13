@@ -2,7 +2,7 @@
 id: TC-034
 title: phase_dependency_order
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

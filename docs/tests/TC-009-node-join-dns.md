@@ -2,7 +2,7 @@
 id: TC-009
 title: node_join_dns
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

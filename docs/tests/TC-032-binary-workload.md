@@ -2,7 +2,7 @@
 id: TC-032
 title: binary_workload
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

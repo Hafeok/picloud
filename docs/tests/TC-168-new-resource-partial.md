@@ -2,7 +2,7 @@
 id: TC-168
 title: new_resource_partial
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

@@ -2,7 +2,7 @@
 id: TC-053
 title: direct_network_blocked
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

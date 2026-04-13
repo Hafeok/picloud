@@ -2,7 +2,7 @@
 id: TC-073
 title: webauthn_challenge_replay_rejection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

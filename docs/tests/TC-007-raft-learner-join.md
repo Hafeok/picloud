@@ -2,7 +2,7 @@
 id: TC-007
 title: raft_learner_join
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

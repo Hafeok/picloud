@@ -2,7 +2,7 @@
 id: TC-173
 title: token_exchange_on_behalf_of
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

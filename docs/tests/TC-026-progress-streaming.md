@@ -2,7 +2,7 @@
 id: TC-026
 title: progress_streaming
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

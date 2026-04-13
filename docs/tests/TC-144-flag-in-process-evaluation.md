@@ -2,7 +2,7 @@
 id: TC-144
 title: flag_in_process_evaluation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

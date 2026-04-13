@@ -2,7 +2,7 @@
 id: TC-067
 title: ontology_shacl_validation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

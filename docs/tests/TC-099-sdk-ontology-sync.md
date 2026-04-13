@@ -2,7 +2,7 @@
 id: TC-099
 title: sdk_ontology_sync
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-010

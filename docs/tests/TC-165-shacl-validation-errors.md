@@ -2,7 +2,7 @@
 id: TC-165
 title: shacl_validation_errors
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

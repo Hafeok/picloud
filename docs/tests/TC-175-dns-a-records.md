@@ -2,7 +2,7 @@
 id: TC-175
 title: dns_a_records
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

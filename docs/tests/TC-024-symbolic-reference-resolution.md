@@ -2,7 +2,7 @@
 id: TC-024
 title: symbolic_reference_resolution
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

@@ -2,7 +2,7 @@
 id: TC-037
 title: volume_mount_restart
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

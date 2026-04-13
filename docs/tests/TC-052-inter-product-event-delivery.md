@@ -2,7 +2,7 @@
 id: TC-052
 title: inter_product_event_delivery
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

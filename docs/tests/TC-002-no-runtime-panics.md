@@ -2,7 +2,7 @@
 id: TC-002
 title: no_runtime_panics
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

@@ -2,7 +2,7 @@
 id: TC-018
 title: graph_isolation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

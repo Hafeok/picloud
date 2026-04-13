@@ -2,7 +2,7 @@
 id: TC-140
 title: ConfigChanged
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

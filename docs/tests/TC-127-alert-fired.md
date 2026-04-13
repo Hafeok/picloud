@@ -2,7 +2,7 @@
 id: TC-127
 title: alert_fired
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-097
 title: sdk_generation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-010

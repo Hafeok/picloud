@@ -2,7 +2,7 @@
 id: TC-172
 title: audience_enforcement
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

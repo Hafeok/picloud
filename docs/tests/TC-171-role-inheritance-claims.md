@@ -2,7 +2,7 @@
 id: TC-171
 title: role_inheritance_claims
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

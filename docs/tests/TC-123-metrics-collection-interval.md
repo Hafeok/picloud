@@ -2,7 +2,7 @@
 id: TC-123
 title: metrics_collection_interval
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

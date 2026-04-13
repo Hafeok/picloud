@@ -2,7 +2,7 @@
 id: TC-008
 title: dns_resolution
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

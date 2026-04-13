@@ -2,7 +2,7 @@
 id: TC-025
 title: command_correlation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

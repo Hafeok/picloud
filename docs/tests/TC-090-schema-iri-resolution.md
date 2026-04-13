@@ -2,7 +2,7 @@
 id: TC-090
 title: schema_iri_resolution
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

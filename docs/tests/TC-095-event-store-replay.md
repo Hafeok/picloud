@@ -2,7 +2,7 @@
 id: TC-095
 title: event_store_replay
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

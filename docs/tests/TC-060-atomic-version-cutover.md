@@ -2,7 +2,7 @@
 id: TC-060
 title: atomic_version_cutover
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

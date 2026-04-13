@@ -2,7 +2,7 @@
 id: TC-148
 title: otel_does_not_starve_raft
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

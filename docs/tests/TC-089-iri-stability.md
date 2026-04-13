@@ -2,7 +2,7 @@
 id: TC-089
 title: iri_stability
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

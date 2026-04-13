@@ -2,7 +2,7 @@
 id: TC-084
 title: platform_ca_export
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

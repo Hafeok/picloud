@@ -2,7 +2,7 @@
 id: TC-078
 title: mtls_enforcement
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

@@ -2,7 +2,7 @@
 id: TC-184
 title: csr_wildcard_rejection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

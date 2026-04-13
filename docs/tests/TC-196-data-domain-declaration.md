@@ -2,7 +2,7 @@
 id: TC-196
 title: data_domain_declaration
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

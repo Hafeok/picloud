@@ -2,7 +2,7 @@
 id: TC-202
 title: data_product_consumer_blocked_without_product
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

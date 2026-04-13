@@ -2,7 +2,7 @@
 id: TC-108
 title: tag_rdf_projection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

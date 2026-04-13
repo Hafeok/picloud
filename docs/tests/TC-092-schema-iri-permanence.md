@@ -2,7 +2,7 @@
 id: TC-092
 title: schema_iri_permanence
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

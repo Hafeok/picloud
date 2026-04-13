@@ -2,7 +2,7 @@
 id: TC-021
 title: oxigraph_persistence
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

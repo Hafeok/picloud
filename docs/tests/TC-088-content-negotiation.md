@@ -2,7 +2,7 @@
 id: TC-088
 title: content_negotiation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

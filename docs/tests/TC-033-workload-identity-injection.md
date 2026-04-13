@@ -2,7 +2,7 @@
 id: TC-033
 title: workload_identity_injection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

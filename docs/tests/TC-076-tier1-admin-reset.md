@@ -2,7 +2,7 @@
 id: TC-076
 title: tier1_admin_reset
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

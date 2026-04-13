@@ -2,7 +2,7 @@
 id: TC-096
 title: event_store_survivor
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

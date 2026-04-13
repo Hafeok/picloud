@@ -2,7 +2,7 @@
 id: TC-043
 title: partial_failure_reapply
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

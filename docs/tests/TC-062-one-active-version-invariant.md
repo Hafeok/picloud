@@ -2,7 +2,7 @@
 id: TC-062
 title: one_active_version_invariant
 type: invariant
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

@@ -2,7 +2,7 @@
 id: TC-163
 title: compiler_roundtrip
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

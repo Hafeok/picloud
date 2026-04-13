@@ -2,7 +2,7 @@
 id: TC-128
 title: alert_resolved
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

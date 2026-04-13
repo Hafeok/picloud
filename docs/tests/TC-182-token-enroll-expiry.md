@@ -2,7 +2,7 @@
 id: TC-182
 title: token_enroll_expiry
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

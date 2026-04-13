@@ -2,7 +2,7 @@
 id: TC-001
 title: binary_compiles
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

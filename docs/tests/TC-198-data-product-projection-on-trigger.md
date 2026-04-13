@@ -2,7 +2,7 @@
 id: TC-198
 title: data_product_projection_on_trigger
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

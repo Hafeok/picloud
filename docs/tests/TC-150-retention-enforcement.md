@@ -2,7 +2,7 @@
 id: TC-150
 title: retention_enforcement
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-047
 title: orphan_prevention
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

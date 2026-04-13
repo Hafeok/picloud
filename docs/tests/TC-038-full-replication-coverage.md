@@ -2,7 +2,7 @@
 id: TC-038
 title: full_replication_coverage
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

@@ -2,7 +2,7 @@
 id: TC-186
 title: scenario_catalogue_sync
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

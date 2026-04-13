@@ -2,7 +2,7 @@
 id: TC-179
 title: dns_nxdomain
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

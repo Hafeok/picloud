@@ -2,7 +2,7 @@
 id: TC-041
 title: cross_product_isolation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

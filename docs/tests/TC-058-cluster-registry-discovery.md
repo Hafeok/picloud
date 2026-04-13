@@ -2,7 +2,7 @@
 id: TC-058
 title: cluster_registry_discovery
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

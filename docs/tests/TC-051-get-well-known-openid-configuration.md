@@ -2,7 +2,7 @@
 id: TC-051
 title: GET /.well-known/openid-configuration
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

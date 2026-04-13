@@ -2,7 +2,7 @@
 id: TC-106
 title: aggregate_replay
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

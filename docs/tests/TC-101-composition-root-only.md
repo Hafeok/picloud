@@ -2,7 +2,7 @@
 id: TC-101
 title: composition_root_only
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

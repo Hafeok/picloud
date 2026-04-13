@@ -2,7 +2,7 @@
 id: TC-156
 title: offsite_backup_complete
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

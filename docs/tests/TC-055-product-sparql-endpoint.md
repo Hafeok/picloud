@@ -2,7 +2,7 @@
 id: TC-055
 title: product_sparql_endpoint
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

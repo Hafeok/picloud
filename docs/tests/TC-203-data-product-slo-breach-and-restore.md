@@ -2,7 +2,7 @@
 id: TC-203
 title: data_product_slo_breach_and_restore
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

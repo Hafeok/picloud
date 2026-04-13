@@ -2,7 +2,7 @@
 id: TC-081
 title: slice_dependency_enforcement
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

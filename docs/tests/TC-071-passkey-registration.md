@@ -2,7 +2,7 @@
 id: TC-071
 title: passkey_registration
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

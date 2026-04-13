@@ -2,7 +2,7 @@
 id: FT-009
 title: Inference, Metrics & Alerts
 phase: 1
-status: planned
+status: in-progress
 depends-on:
 - FT-008
 adrs:

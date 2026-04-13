@@ -2,7 +2,7 @@
 id: TC-116
 title: inference_rule_lifecycle
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

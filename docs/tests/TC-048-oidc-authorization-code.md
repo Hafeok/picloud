@@ -2,7 +2,7 @@
 id: TC-048
 title: oidc_authorization_code
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

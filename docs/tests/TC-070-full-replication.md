@@ -2,7 +2,7 @@
 id: TC-070
 title: full-replication
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

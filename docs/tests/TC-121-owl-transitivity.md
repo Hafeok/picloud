@@ -2,7 +2,7 @@
 id: TC-121
 title: owl_transitivity
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

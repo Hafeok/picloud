@@ -2,7 +2,7 @@
 id: TC-195
 title: CapabilityUnfulfilled
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

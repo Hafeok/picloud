@@ -2,7 +2,7 @@
 id: TC-064
 title: undeclared_subscription_rejection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

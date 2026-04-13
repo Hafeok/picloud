@@ -2,7 +2,7 @@
 id: TC-103
 title: platform_replay_full
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

@@ -2,7 +2,7 @@
 id: TC-003
 title: cargo build --release
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

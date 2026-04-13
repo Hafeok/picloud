@@ -2,7 +2,7 @@
 id: TC-006
 title: raft_leader_failover
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

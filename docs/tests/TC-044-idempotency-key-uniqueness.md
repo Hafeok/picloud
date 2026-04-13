@@ -2,7 +2,7 @@
 id: TC-044
 title: idempotency_key_uniqueness
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

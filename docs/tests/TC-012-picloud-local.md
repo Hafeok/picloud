@@ -2,7 +2,7 @@
 id: TC-012
 title: picloud.local
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

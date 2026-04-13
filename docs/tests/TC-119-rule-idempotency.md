@@ -2,7 +2,7 @@
 id: TC-119
 title: rule_idempotency
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

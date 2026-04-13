@@ -2,7 +2,7 @@
 id: TC-085
 title: byo_ca
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

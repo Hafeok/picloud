@@ -2,7 +2,7 @@
 id: TC-093
 title: event_store_append_read
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

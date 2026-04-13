@@ -2,7 +2,7 @@
 id: TC-027
 title: concurrent_commands
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

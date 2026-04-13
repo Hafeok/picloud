@@ -2,7 +2,7 @@
 id: TC-181
 title: token_enroll_single_use
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

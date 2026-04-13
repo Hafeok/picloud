@@ -2,7 +2,7 @@
 id: TC-046
 title: cascading_delete
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

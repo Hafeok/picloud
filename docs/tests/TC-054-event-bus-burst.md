@@ -2,7 +2,7 @@
 id: TC-054
 title: event_bus_burst
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

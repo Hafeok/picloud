@@ -2,7 +2,7 @@
 id: TC-056
 title: sparql_iam_enforcement
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-008

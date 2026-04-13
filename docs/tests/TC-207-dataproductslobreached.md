@@ -2,7 +2,7 @@
 id: TC-207
 title: DataProductSLOBreached
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

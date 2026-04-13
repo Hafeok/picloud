@@ -2,7 +2,7 @@
 id: TC-098
 title: sdk_publish
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-010

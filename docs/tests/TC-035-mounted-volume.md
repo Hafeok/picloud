@@ -2,7 +2,7 @@
 id: TC-035
 title: mounted_volume
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

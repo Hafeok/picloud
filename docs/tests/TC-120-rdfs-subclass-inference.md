@@ -2,7 +2,7 @@
 id: TC-120
 title: rdfs_subclass_inference
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

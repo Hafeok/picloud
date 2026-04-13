@@ -2,7 +2,7 @@
 id: TC-091
 title: schema_evolution
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

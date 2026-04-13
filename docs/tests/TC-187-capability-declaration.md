@@ -2,7 +2,7 @@
 id: TC-187
 title: capability_declaration
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

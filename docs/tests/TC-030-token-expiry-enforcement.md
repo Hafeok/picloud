@@ -2,7 +2,7 @@
 id: TC-030
 title: token_expiry_enforcement
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

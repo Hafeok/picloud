@@ -2,7 +2,7 @@
 id: TC-206
 title: capability_triggers_data_product
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

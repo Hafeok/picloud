@@ -2,7 +2,7 @@
 id: TC-158
 title: BackupFailed
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

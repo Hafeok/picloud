@@ -2,7 +2,7 @@
 id: FT-002
 title: Event & State Model
 phase: 1
-status: planned
+status: complete
 depends-on:
 - FT-001
 adrs:

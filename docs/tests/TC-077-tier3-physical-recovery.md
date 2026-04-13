@@ -2,7 +2,7 @@
 id: TC-077
 title: tier3_physical_recovery
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

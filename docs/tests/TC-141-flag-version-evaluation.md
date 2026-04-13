@@ -2,7 +2,7 @@
 id: TC-141
 title: flag_version_evaluation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

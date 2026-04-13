@@ -2,7 +2,7 @@
 id: TC-174
 title: m2m_permission_required
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

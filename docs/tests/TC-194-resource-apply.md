@@ -2,7 +2,7 @@
 id: TC-194
 title: resource apply
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

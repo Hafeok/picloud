@@ -2,7 +2,7 @@
 id: TC-189
 title: capability_consumer_blocked_without_implementor
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

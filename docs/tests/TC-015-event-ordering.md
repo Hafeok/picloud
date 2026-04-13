@@ -2,7 +2,7 @@
 id: TC-015
 title: event_ordering
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

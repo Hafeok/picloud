@@ -2,7 +2,7 @@
 id: TC-205
 title: data_domain_deletion_guard
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-167
 title: new_resource_flags
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

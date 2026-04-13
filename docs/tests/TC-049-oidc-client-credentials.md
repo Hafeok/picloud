@@ -2,7 +2,7 @@
 id: TC-049
 title: oidc_client_credentials
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

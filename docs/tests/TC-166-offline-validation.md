@@ -2,7 +2,7 @@
 id: TC-166
 title: offline_validation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

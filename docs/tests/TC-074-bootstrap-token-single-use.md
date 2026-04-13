@@ -2,7 +2,7 @@
 id: TC-074
 title: bootstrap_token_single_use
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

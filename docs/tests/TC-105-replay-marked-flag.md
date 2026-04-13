@@ -2,7 +2,7 @@
 id: TC-105
 title: replay_marked_flag
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

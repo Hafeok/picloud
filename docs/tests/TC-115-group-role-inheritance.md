@@ -2,7 +2,7 @@
 id: TC-115
 title: group_role_inheritance
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

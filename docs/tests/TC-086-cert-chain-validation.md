@@ -2,7 +2,7 @@
 id: TC-086
 title: cert_chain_validation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

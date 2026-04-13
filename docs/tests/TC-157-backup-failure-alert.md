@@ -2,7 +2,7 @@
 id: TC-157
 title: backup_failure_alert
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

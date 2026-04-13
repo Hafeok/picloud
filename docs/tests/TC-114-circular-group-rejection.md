@@ -2,7 +2,7 @@
 id: TC-114
 title: circular_group_rejection
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-180
 title: auto_enroll_mode
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

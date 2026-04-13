@@ -2,7 +2,7 @@
 id: TC-170
 title: auto_validation_failure
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

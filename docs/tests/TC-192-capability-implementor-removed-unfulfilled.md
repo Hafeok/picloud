@@ -2,7 +2,7 @@
 id: TC-192
 title: capability_implementor_removed_unfulfilled
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

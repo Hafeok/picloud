@@ -2,7 +2,7 @@
 id: TC-200
 title: data_product_atomic_swap
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

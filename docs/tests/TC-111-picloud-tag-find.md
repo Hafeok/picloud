@@ -2,7 +2,7 @@
 id: TC-111
 title: picloud tag find
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

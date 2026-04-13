@@ -2,7 +2,7 @@
 id: TC-199
 title: data_product_named_graph_separation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

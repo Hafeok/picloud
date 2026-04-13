@@ -2,7 +2,7 @@
 id: TC-185
 title: adr_test_coverage_completeness
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

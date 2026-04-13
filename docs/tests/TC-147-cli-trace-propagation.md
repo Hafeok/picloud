@@ -2,7 +2,7 @@
 id: TC-147
 title: cli_trace_propagation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

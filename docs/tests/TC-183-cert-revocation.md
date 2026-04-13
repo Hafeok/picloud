@@ -2,7 +2,7 @@
 id: TC-183
 title: cert_revocation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

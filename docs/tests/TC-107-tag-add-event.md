@@ -2,7 +2,7 @@
 id: TC-107
 title: tag_add_event
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

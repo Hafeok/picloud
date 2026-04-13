@@ -2,7 +2,7 @@
 id: TC-069
 title: intent_translated_to_implementation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004

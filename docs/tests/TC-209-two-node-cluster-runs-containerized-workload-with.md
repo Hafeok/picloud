@@ -2,7 +2,7 @@
 id: TC-209
 title: Two-node cluster runs containerized workload with replicated volume
 type: exit-criteria
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs: []

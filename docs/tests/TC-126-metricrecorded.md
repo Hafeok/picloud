@@ -2,7 +2,7 @@
 id: TC-126
 title: MetricRecorded
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-063
 title: event_subscription_provisioning
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-005

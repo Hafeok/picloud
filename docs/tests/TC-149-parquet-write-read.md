@@ -2,7 +2,7 @@
 id: TC-149
 title: parquet_write_read
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

@@ -2,7 +2,7 @@
 id: TC-072
 title: fido2_cli_auth
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

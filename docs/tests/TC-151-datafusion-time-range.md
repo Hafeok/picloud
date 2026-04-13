@@ -2,7 +2,7 @@
 id: TC-151
 title: datafusion_time_range
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

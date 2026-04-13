@@ -2,7 +2,7 @@
 id: TC-013
 title: event_log_replay
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-002

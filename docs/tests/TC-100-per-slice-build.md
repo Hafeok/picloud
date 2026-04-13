@@ -2,7 +2,7 @@
 id: TC-100
 title: per_slice_build
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

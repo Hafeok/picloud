@@ -2,7 +2,7 @@
 id: TC-050
 title: jwks_key_rotation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-003

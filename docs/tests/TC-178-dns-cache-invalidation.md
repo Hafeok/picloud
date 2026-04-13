@@ -2,7 +2,7 @@
 id: TC-178
 title: dns_cache_invalidation
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

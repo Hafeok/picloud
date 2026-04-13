@@ -2,7 +2,7 @@
 id: TC-164
 title: iri_determinism
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-007

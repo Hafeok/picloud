@@ -2,7 +2,7 @@
 id: TC-102
 title: cargo deny
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features: []
   adrs:

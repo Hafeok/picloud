@@ -2,7 +2,7 @@
 id: TC-110
 title: tag_sparql_queryable
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

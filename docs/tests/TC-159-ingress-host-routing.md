@@ -2,7 +2,7 @@
 id: TC-159
 title: ingress_host_routing
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-006

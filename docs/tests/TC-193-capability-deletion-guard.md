@@ -2,7 +2,7 @@
 id: TC-193
 title: capability_deletion_guard
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-009

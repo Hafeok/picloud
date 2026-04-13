@@ -2,7 +2,7 @@
 id: TC-042
 title: idempotent_apply
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-001

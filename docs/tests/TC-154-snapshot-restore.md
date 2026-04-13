@@ -2,7 +2,7 @@
 id: TC-154
 title: snapshot_restore
 type: scenario
-status: unimplemented
+status: passing
 validates:
   features:
   - FT-004
