@@ -12,6 +12,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "idempotency-key-uniqueness"
+last-run: 2026-04-13T20:16:42.071455645+00:00
 ---
 
 assert that two different apply operations (different files) produce distinct idempotency keys and are not deduplicated.

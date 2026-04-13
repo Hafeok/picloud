@@ -2,11 +2,21 @@
 id: TC-235
 title: IaC and CLI exit criteria — resource apply and status round-trip
 type: exit-criteria
-status: unimplemented
+status: passing
 validates:
-  features: []
-  adrs: []
+  features:
+  - FT-007
+  adrs:
+  - ADR-007
+  - ADR-015
+  - ADR-029
+  - ADR-042
+  - ADR-049
+  - ADR-050
 phase: 1
+runner: scripts/run-tc.sh
+runner-args: "iac-cli-exit-criteria"
+last-run: 2026-04-13T20:16:42.071455645+00:00
 ---
 
 ⟦Λ:ExitCriteria⟧{

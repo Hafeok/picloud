@@ -248,6 +248,8 @@ mod version_matches_cluster;
 // ADR-058
 mod no_internal_imports;
 mod test_crate_builds_independently;
+// FT-007 (exit criteria)
+mod iac_cli_exit_criteria;
 
 use crate::harness::runner::Scenario;
 
@@ -501,5 +503,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         // ADR-058
         Box::new(no_internal_imports::NoInternalImports),
         Box::new(test_crate_builds_independently::TestCrateBuildsIndependently),
+        // FT-007 (exit criteria)
+        Box::new(iac_cli_exit_criteria::IacCliExitCriteria),
     ]
 }

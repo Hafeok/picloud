@@ -168,7 +168,7 @@
 - [x] TC-222: DNS server failure — fallback to mDNS (chaos) — passing
 - [x] TC-234: Networking model exit criteria — DNS resolution and HTTP IRI dereferencing functional (exit-criteria) — passing
 
-### FT-007 — IaC & CLI Design [~]
+### FT-007 — IaC & CLI Design [x]
 
 - [x] ADR-015: Imperative API with Idempotent Execution (accepted)
 - [x] ADR-042: Tenant Identity — Domain and Cluster ID as Dual Boundary (accepted)
@@ -177,18 +177,18 @@
 - [x] TC-042: idempotent_apply (scenario) — passing
 - [x] TC-043: partial_failure_reapply (scenario) — passing
 - [x] TC-044: idempotency_key_uniqueness (scenario) — passing
-- [!] TC-133: dual_cluster_mDNS_isolation (scenario) — failing
-- [!] TC-134: cross_cluster_join_rejection (scenario) — failing
-- [!] TC-135: iri_namespace_uniqueness (scenario) — failing
-- [!] TC-163: compiler_roundtrip (scenario) — failing
-- [!] TC-164: iri_determinism (scenario) — failing
-- [!] TC-165: shacl_validation_errors (scenario) — failing
-- [!] TC-166: offline_validation (scenario) — failing
-- [!] TC-167: new_resource_flags (scenario) — failing
-- [!] TC-168: new_resource_partial (scenario) — failing
-- [!] TC-169: overwrite_protection (scenario) — failing
-- [!] TC-170: auto_validation_failure (scenario) — failing
-- [ ] TC-235: IaC and CLI exit criteria — resource apply and status round-trip (exit-criteria) — unimplemented
+- [x] TC-133: dual_cluster_mDNS_isolation (scenario) — passing
+- [x] TC-134: cross_cluster_join_rejection (scenario) — passing
+- [x] TC-135: iri_namespace_uniqueness (scenario) — passing
+- [x] TC-163: compiler_roundtrip (scenario) — passing
+- [x] TC-164: iri_determinism (scenario) — passing
+- [x] TC-165: shacl_validation_errors (scenario) — passing
+- [x] TC-166: offline_validation (scenario) — passing
+- [x] TC-167: new_resource_flags (scenario) — passing
+- [x] TC-168: new_resource_partial (scenario) — passing
+- [x] TC-169: overwrite_protection (scenario) — passing
+- [x] TC-170: auto_validation_failure (scenario) — passing
+- [x] TC-235: IaC and CLI exit criteria — resource apply and status round-trip (exit-criteria) — passing
 
 ### FT-012 — Single binary compiles to ARM64 [ ]
 
