@@ -9,7 +9,7 @@ validates:
 phase: 1
 runner: picloud-test
 runner-args: run --scenario two-node-cluster-exit-criteria
-last-run: 2026-04-13T20:49:54.762542035+00:00
+last-run: 2026-04-13T21:05:30.706453738+00:00
 ---
 
 ## Description

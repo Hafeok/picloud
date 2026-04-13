@@ -2,7 +2,7 @@
 id: FT-018
 title: 'Block storage pool: NVMe contribution, volume allocation, full-replication durability'
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

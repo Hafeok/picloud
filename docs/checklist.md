@@ -231,7 +231,7 @@
 - [x] TC-238: IAM token issued after passkey authentication grants RBAC-scoped access (scenario) — passing
 - [x] TC-295: IAM exit — passkey login, token issuance, RBAC enforcement functional (exit-criteria) — passing
 
-### FT-018 — Block storage pool: NVMe contribution, volume allocation, full-replication durability [ ]
+### FT-018 — Block storage pool: NVMe contribution, volume allocation, full-replication durability [x]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
