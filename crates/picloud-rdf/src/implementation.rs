@@ -524,7 +524,7 @@ impl OxigraphProjector {
         self.insert_triple(
             resource_iri_str,
             &format!("{PICLOUD_NS}status"),
-            Literal::new_simple_literal("declared").into(),
+            picloud_term("Declared").into(),
         )?;
 
         // If product-scoped, link to product in default graph and also insert into named graph.
@@ -552,7 +552,7 @@ impl OxigraphProjector {
             self.insert_triple_in_graph(
                 resource_iri_str,
                 &format!("{PICLOUD_NS}status"),
-                Literal::new_simple_literal("declared").into(),
+                picloud_term("Declared").into(),
                 graph_iri.as_str(),
             )?;
         }
@@ -589,7 +589,7 @@ impl OxigraphProjector {
             }
         }
 
-        // Project volume-specific triples (ADR-012)
+        // Project volume-specific triples (ADR-012, ADR-024, ADR-013)
         if resource_type == "Volume" || resource_type == "volume" {
             self.insert_triple(
                 resource_iri_str,
@@ -610,6 +610,74 @@ impl OxigraphProjector {
                 resource_iri_str,
                 &format!("{PICLOUD_NS}blockDevice"),
                 Literal::new_simple_literal(&block_device).into(),
+            )?;
+
+            // Storage intent: durability tier (ADR-024)
+            // The payload may have "FullReplication" (Debug format) or "full-replication" (serde)
+            let durability_raw = event.payload["durability"].as_str().unwrap_or("FullReplication");
+            let durability_normalized = match durability_raw {
+                "FullReplication" | "full-replication" | "full_replication" => "full-replication",
+                "Quorum" | "quorum" => "quorum",
+                "Local" | "local" => "local",
+                "None" | "none" => "none",
+                other => other,
+            };
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}durability"),
+                Literal::new_simple_literal(durability_normalized).into(),
+            )?;
+
+            // Performance tier (ADR-024)
+            let performance_raw = event.payload["performance"].as_str().unwrap_or("Standard");
+            let performance_normalized = match performance_raw {
+                "Standard" | "standard" => "standard",
+                "Fast" | "fast" => "fast",
+                "Archive" | "archive" => "archive",
+                other => other,
+            };
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}performance"),
+                Literal::new_simple_literal(performance_normalized).into(),
+            )?;
+
+            // Replication factor and count (ADR-013)
+            // For full-replication, factor = node count. We read it from the payload
+            // or default to cluster size. The provisioner will update these when it
+            // knows actual node count, but we set sensible defaults here.
+            let replication_factor = event.payload["replication_factor"]
+                .as_u64()
+                .unwrap_or_else(|| {
+                    // Default: for full-replication use node_count from payload,
+                    // otherwise 1
+                    if durability_normalized == "full-replication" {
+                        event.payload["node_count"].as_u64().unwrap_or(1)
+                    } else {
+                        1
+                    }
+                });
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}replicationFactor"),
+                Literal::new_simple_literal(replication_factor.to_string()).into(),
+            )?;
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}replicationCount"),
+                Literal::new_simple_literal(replication_factor.to_string()).into(),
+            )?;
+
+            // Snapshot and backup status placeholders (ADR-047)
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}lastSnapshotStatus"),
+                Literal::new_simple_literal("none").into(),
+            )?;
+            self.insert_triple(
+                resource_iri_str,
+                &format!("{PICLOUD_NS}lastBackupStatus"),
+                Literal::new_simple_literal("none").into(),
             )?;
         }
 
@@ -2055,11 +2123,48 @@ impl OxigraphProjector {
             .as_str()
             .unwrap_or(&ts_fallback2);
 
-        // Update lastSnapshotAt on the volume
+        // Create a snapshot event IRI and mark it as SnapshotCreated type
+        let snapshot_iri = format!("{}/snapshots/{}", volume_iri_str, created_at);
+        self.insert_triple(
+            &snapshot_iri,
+            RDF_TYPE,
+            picloud_term("SnapshotCreated").into(),
+        )?;
+        self.insert_triple(
+            &snapshot_iri,
+            RDF_TYPE,
+            picloud_term("Snapshot").into(),
+        )?;
+        self.insert_triple(
+            &snapshot_iri,
+            &format!("{PICLOUD_NS}volume"),
+            NamedNode::new(volume_iri_str)
+                .map_err(|e| PiCloudError::Internal(format!("invalid volume IRI: {e}")))?
+                .into(),
+        )?;
+        self.insert_triple(
+            &snapshot_iri,
+            &format!("{PICLOUD_NS}createdAt"),
+            Literal::new_simple_literal(created_at).into(),
+        )?;
+        if !snapshot_path.is_empty() {
+            self.insert_triple(
+                &snapshot_iri,
+                &format!("{PICLOUD_NS}snapshotPath"),
+                Literal::new_simple_literal(snapshot_path).into(),
+            )?;
+        }
+
+        // Update lastSnapshotAt and lastSnapshotStatus on the volume
         self.insert_triple(
             volume_iri_str,
             &format!("{PICLOUD_NS}lastSnapshotAt"),
             Literal::new_simple_literal(created_at).into(),
+        )?;
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}lastSnapshotStatus"),
+            Literal::new_simple_literal("success").into(),
         )?;
         self.insert_triple(
             volume_iri_str,
@@ -2106,6 +2211,73 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    /// Project a SnapshotDeleted event — mark snapshot as deleted in the graph.
+    fn project_snapshot_deleted(&self, event: &EventEnvelope) -> Result<()> {
+        let volume_iri_str = event.payload["volume_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let ts_fallback = event.timestamp.to_rfc3339();
+        let deleted_at = event.payload["deleted_at"]
+            .as_str()
+            .unwrap_or(&ts_fallback);
+
+        // Create a deletion event IRI
+        let deletion_iri = format!("{}/snapshot-deletions/{}", volume_iri_str, deleted_at);
+        self.insert_triple(
+            &deletion_iri,
+            RDF_TYPE,
+            picloud_term("SnapshotDeleted").into(),
+        )?;
+        self.insert_triple(
+            &deletion_iri,
+            &format!("{PICLOUD_NS}volume"),
+            NamedNode::new(volume_iri_str)
+                .map_err(|e| PiCloudError::Internal(format!("invalid volume IRI: {e}")))?
+                .into(),
+        )?;
+        self.insert_triple(
+            &deletion_iri,
+            &format!("{PICLOUD_NS}deletedAt"),
+            Literal::new_simple_literal(deleted_at).into(),
+        )?;
+
+        debug!(volume = volume_iri_str, "projected SnapshotDeleted");
+        Ok(())
+    }
+
+    /// Project a RestoreCompleted event — mark restore as completed in the graph.
+    fn project_restore_completed(&self, event: &EventEnvelope) -> Result<()> {
+        let volume_iri_str = event.payload["volume_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let ts_fallback = event.timestamp.to_rfc3339();
+        let completed_at = event.payload["completed_at"]
+            .as_str()
+            .unwrap_or(&ts_fallback);
+
+        let restore_iri = format!("{}/restores/{}", volume_iri_str, completed_at);
+        self.insert_triple(
+            &restore_iri,
+            RDF_TYPE,
+            picloud_term("RestoreCompleted").into(),
+        )?;
+        self.insert_triple(
+            &restore_iri,
+            &format!("{PICLOUD_NS}volume"),
+            NamedNode::new(volume_iri_str)
+                .map_err(|e| PiCloudError::Internal(format!("invalid volume IRI: {e}")))?
+                .into(),
+        )?;
+        self.insert_triple(
+            &restore_iri,
+            &format!("{PICLOUD_NS}completedAt"),
+            Literal::new_simple_literal(completed_at).into(),
+        )?;
+
+        debug!(volume = volume_iri_str, "projected RestoreCompleted");
+        Ok(())
+    }
+
     /// Project a BackupCompleted event — update volume backup status triples.
     fn project_backup_completed(&self, event: &EventEnvelope) -> Result<()> {
         let volume_iri_str = event.payload["volume_iri"]
@@ -2116,13 +2288,85 @@ impl OxigraphProjector {
             .as_str()
             .unwrap_or(&ts_fallback);
 
+        // Create a backup event IRI
+        let backup_iri = format!("{}/backups/{}", volume_iri_str, completed_at);
+        self.insert_triple(
+            &backup_iri,
+            RDF_TYPE,
+            picloud_term("BackupCompleted").into(),
+        )?;
+        self.insert_triple(
+            &backup_iri,
+            &format!("{PICLOUD_NS}volume"),
+            NamedNode::new(volume_iri_str)
+                .map_err(|e| PiCloudError::Internal(format!("invalid volume IRI: {e}")))?
+                .into(),
+        )?;
+        self.insert_triple(
+            &backup_iri,
+            &format!("{PICLOUD_NS}completedAt"),
+            Literal::new_simple_literal(completed_at).into(),
+        )?;
+
+        // Update volume backup status
         self.insert_triple(
             volume_iri_str,
             &format!("{PICLOUD_NS}lastBackupAt"),
             Literal::new_simple_literal(completed_at).into(),
         )?;
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}lastBackupStatus"),
+            Literal::new_simple_literal("success").into(),
+        )?;
 
         debug!(volume = volume_iri_str, "projected BackupCompleted");
+        Ok(())
+    }
+
+    /// Project a BackupFailed event — update volume backup status and create alert.
+    fn project_backup_failed(&self, event: &EventEnvelope) -> Result<()> {
+        let volume_iri_str = event.payload["volume_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let reason = event.payload["reason"]
+            .as_str()
+            .unwrap_or("unknown");
+
+        // Update volume backup status
+        self.insert_triple(
+            volume_iri_str,
+            &format!("{PICLOUD_NS}lastBackupStatus"),
+            Literal::new_simple_literal("failed").into(),
+        )?;
+
+        // Create an alert for backup failure (ADR-047)
+        let alert_iri = format!("{}/alerts/backupfailed", volume_iri_str);
+        self.insert_triple(&alert_iri, RDF_TYPE, picloud_term("Alert").into())?;
+        self.insert_triple(
+            &alert_iri,
+            &format!("{PICLOUD_NS}alertType"),
+            Literal::new_simple_literal("BackupFailed").into(),
+        )?;
+        self.insert_triple(
+            &alert_iri,
+            &format!("{PICLOUD_NS}alertSeverity"),
+            Literal::new_simple_literal("critical").into(),
+        )?;
+        self.insert_triple(
+            &alert_iri,
+            &format!("{PICLOUD_NS}alertMessage"),
+            Literal::new_simple_literal(&format!("Offsite backup failed: {}", reason)).into(),
+        )?;
+        if let Ok(node) = NamedNode::new(volume_iri_str) {
+            self.insert_triple(
+                &alert_iri,
+                &format!("{PICLOUD_NS}alertResource"),
+                node.into(),
+            )?;
+        }
+
+        debug!(volume = volume_iri_str, "projected BackupFailed");
         Ok(())
     }
 
@@ -2613,8 +2857,20 @@ impl OxigraphProjector {
         })
     }
 
-    /// Replace the status literal for a resource in the default graph
+    /// Capitalize a status string for use as a named node, e.g. "ready" -> "Ready".
+    fn capitalize_status(status: &str) -> String {
+        let mut chars = status.chars();
+        match chars.next() {
+            None => String::new(),
+            Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+        }
+    }
+
+    /// Replace the status for a resource in the default graph
     /// (and optionally a product graph).
+    ///
+    /// Status is stored both as a named node (`picloud:Ready`) for SPARQL
+    /// pattern matching and as a literal (`"ready"`) for backward compatibility.
     fn update_status(
         &self,
         resource_iri: &str,
@@ -2627,7 +2883,7 @@ impl OxigraphProjector {
         let p = NamedNodeRef::new(&status_pred)
             .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
 
-        // Remove old status triples in default graph.
+        // Remove old status triples in default graph (both literal and named node forms).
         let old_quads: Vec<Quad> = self
             .store
             .quads_for_pattern(
@@ -2644,10 +2900,18 @@ impl OxigraphProjector {
                 .map_err(|e| PiCloudError::Internal(e.to_string()))?;
         }
 
-        // Insert new status.
+        // Insert new status as named node (picloud:Ready, picloud:Declared, etc.)
+        let status_capitalized = Self::capitalize_status(new_status);
         self.insert_triple(
             resource_iri,
             &status_pred,
+            picloud_term(&status_capitalized).into(),
+        )?;
+
+        // Also insert as literal for backward compatibility with queries using string matching
+        self.insert_triple(
+            resource_iri,
+            &format!("{PICLOUD_NS}statusLabel"),
             Literal::new_simple_literal(new_status).into(),
         )?;
 
@@ -2674,7 +2938,7 @@ impl OxigraphProjector {
             self.insert_triple_in_graph(
                 resource_iri,
                 &status_pred,
-                Literal::new_simple_literal(new_status).into(),
+                picloud_term(&status_capitalized).into(),
                 graph_iri.as_str(),
             )?;
         }
@@ -2755,12 +3019,19 @@ impl StateProjector for OxigraphProjector {
             }
             // Snapshot & backup events (ADR-047) — project status triples
             "SnapshotCreated" => self.project_snapshot_created(event),
-            "SnapshotDeleted" | "SnapshotFailed" => {
+            "SnapshotDeleted" => self.project_snapshot_deleted(event),
+            "SnapshotFailed" => {
                 debug!(event_type = %event.event_type, "snapshot lifecycle event — recorded");
                 Ok(())
             }
+            "RestoreCompleted" => self.project_restore_completed(event),
+            "RestoreRequested" | "RestoreFailed" => {
+                debug!(event_type = %event.event_type, "restore lifecycle event — recorded");
+                Ok(())
+            }
             "BackupCompleted" => self.project_backup_completed(event),
-            "BackupStarted" | "BackupFailed" => {
+            "BackupFailed" => self.project_backup_failed(event),
+            "BackupStarted" => {
                 debug!(event_type = %event.event_type, "backup lifecycle event — recorded");
                 Ok(())
             }
@@ -3014,7 +3285,7 @@ mod tests {
         );
         projector.project(&declared_event).await.unwrap();
 
-        // Verify declared status.
+        // Verify declared status (now stored as named node picloud:Declared).
         let result = projector
             .query(&format!(
                 "SELECT ?status WHERE {{ <{}> <{}status> ?status }}",
@@ -3026,7 +3297,7 @@ mod tests {
         assert_eq!(result.bindings.len(), 1);
         assert_eq!(
             result.bindings[0]["status"]["value"].as_str().unwrap(),
-            "declared"
+            &format!("{}Declared", PICLOUD_NS)
         );
 
         // Mark ready.
@@ -3042,7 +3313,7 @@ mod tests {
         );
         projector.project(&ready_event).await.unwrap();
 
-        // Verify updated status.
+        // Verify updated status (now stored as named node picloud:Ready).
         let result = projector
             .query(&format!(
                 "SELECT ?status WHERE {{ <{}> <{}status> ?status }}",
@@ -3054,7 +3325,7 @@ mod tests {
         assert_eq!(result.bindings.len(), 1);
         assert_eq!(
             result.bindings[0]["status"]["value"].as_str().unwrap(),
-            "ready"
+            &format!("{}Ready", PICLOUD_NS)
         );
     }
 
@@ -3102,7 +3373,7 @@ mod tests {
         assert_eq!(result.bindings.len(), 1);
         assert_eq!(
             result.bindings[0]["status"]["value"].as_str().unwrap(),
-            "failed"
+            &format!("{}Failed", PICLOUD_NS)
         );
         assert_eq!(
             result.bindings[0]["reason"]["value"].as_str().unwrap(),
@@ -4206,7 +4477,7 @@ mod tests {
         );
         projector.project(&complete_event).await.unwrap();
 
-        // Status should be "completed"
+        // Status should be picloud:Completed (named node)
         let result = projector
             .query(&format!(
                 "SELECT ?status WHERE {{ ?gc <{RDF_TYPE}> <{PICLOUD_NS}RegistryGC> . ?gc <{PICLOUD_NS}status> ?status }}"
@@ -4214,7 +4485,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.bindings.len(), 1);
-        assert_eq!(result.bindings[0]["status"]["value"].as_str().unwrap(), "completed");
+        assert_eq!(result.bindings[0]["status"]["value"].as_str().unwrap(), &format!("{PICLOUD_NS}Completed"));
 
         // Check blobs_deleted and bytes_reclaimed
         let result = projector

@@ -53,6 +53,8 @@ mod volume_mount_restart;
 // ADR-013
 mod full_replication_coverage;
 mod multi_node_replication;
+mod node_crash_during_volume_write;
+mod node_restart_during_replication;
 mod replication_on_node_join;
 // ADR-014
 mod cross_product_isolation;
@@ -303,6 +305,8 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         // ADR-013
         Box::new(full_replication_coverage::FullReplicationCoverage),
         Box::new(multi_node_replication::MultiNodeReplication),
+        Box::new(node_crash_during_volume_write::NodeCrashDuringVolumeWrite),
+        Box::new(node_restart_during_replication::NodeRestartDuringReplication),
         Box::new(replication_on_node_join::ReplicationOnNodeJoin),
         // ADR-014
         Box::new(cross_product_isolation::CrossProductIsolation),

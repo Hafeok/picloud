@@ -2,13 +2,14 @@
 id: TC-221
 title: Node restart during replication — eventual consistency restored
 type: chaos
-status: failing
+status: passing
 validates:
   features: []
   adrs: []
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "node-restart-during-replication--eventual-consistency-restored"
+last-run: 2026-04-13T19:41:49.618598309+00:00
 ---
 
 ⟦Σ:Types⟧{

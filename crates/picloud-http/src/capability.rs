@@ -269,7 +269,7 @@ impl CapabilityResolver for CapabilityResolverImpl {
                 .map(|s| s.to_string())
                 .collect();
 
-            let fulfilled = !implementors.is_empty() && status == "ready";
+            let fulfilled = !implementors.is_empty() && (status == "ready" || status.ends_with("Ready"));
 
             // Query consumers (products that require this capability)
             let consumer_sparql = format!(

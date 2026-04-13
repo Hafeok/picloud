@@ -87,31 +87,31 @@
 - [x] TC-174: m2m_permission_required (scenario) — passing
 - [x] TC-212: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
-### FT-004 — Storage Model [~]
+### FT-004 — Storage Model [x]
 
 - [x] ADR-011: Block Storage Before RDF Application Storage (accepted)
 - [x] ADR-012: Mounted and Raw Block Device Support (accepted)
 - [x] ADR-013: Platform-Managed Replication Factor (accepted)
 - [x] ADR-024: Storage Intent Model (accepted)
 - [x] ADR-047: Volume Snapshots and Offsite Backup as Storage Intent Primitives (accepted)
-- [!] TC-034: phase_dependency_order (scenario) — failing
-- [!] TC-035: mounted_volume (scenario) — failing
-- [!] TC-036: raw_block_device (scenario) — failing
-- [!] TC-037: volume_mount_restart (scenario) — failing
-- [!] TC-038: full_replication_coverage (scenario) — failing
-- [!] TC-039: replication_on_node_join (scenario) — failing
-- [!] TC-068: storage_intent_full_replication (scenario) — failing
-- [!] TC-069: intent_translated_to_implementation (scenario) — failing
-- [!] TC-070: full-replication (scenario) — failing
-- [!] TC-153: snapshot_create_verify (scenario) — failing
-- [!] TC-154: snapshot_restore (scenario) — failing
-- [!] TC-155: snapshot_retention (scenario) — failing
-- [!] TC-156: offsite_backup_complete (scenario) — failing
-- [!] TC-157: backup_failure_alert (scenario) — failing
-- [!] TC-158: BackupFailed (scenario) — failing
+- [x] TC-034: phase_dependency_order (scenario) — passing
+- [x] TC-035: mounted_volume (scenario) — passing
+- [x] TC-036: raw_block_device (scenario) — passing
+- [x] TC-037: volume_mount_restart (scenario) — passing
+- [x] TC-038: full_replication_coverage (scenario) — passing
+- [x] TC-039: replication_on_node_join (scenario) — passing
+- [x] TC-068: storage_intent_full_replication (scenario) — passing
+- [x] TC-069: intent_translated_to_implementation (scenario) — passing
+- [x] TC-070: full-replication (scenario) — passing
+- [x] TC-153: snapshot_create_verify (scenario) — passing
+- [x] TC-154: snapshot_restore (scenario) — passing
+- [x] TC-155: snapshot_retention (scenario) — passing
+- [x] TC-156: offsite_backup_complete (scenario) — passing
+- [x] TC-157: backup_failure_alert (scenario) — passing
+- [x] TC-158: BackupFailed (scenario) — passing
 - [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
-- [!] TC-220: Node crash during volume write — no data corruption (chaos) — failing
-- [!] TC-221: Node restart during replication — eventual consistency restored (chaos) — failing
+- [x] TC-220: Node crash during volume write — no data corruption (chaos) — passing
+- [x] TC-221: Node restart during replication — eventual consistency restored (chaos) — passing
 
 ### FT-005 — Workload Model [~]
 

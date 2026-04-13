@@ -185,10 +185,10 @@ async fn tc013_event_log_replay() {
         "Replayed graph should have the same number of triples as original"
     );
 
-    // Also verify specific resources exist
+    // Also verify specific resources exist (status is now a named node)
     let container_iri = ib.resource("photo-app", "container", "api-server");
     let ask = format!(
-        "ASK {{ <{}> <{PICLOUD_NS}status> \"ready\" }}",
+        "ASK {{ <{}> <{PICLOUD_NS}status> <{PICLOUD_NS}Ready> }}",
         container_iri.as_str()
     );
     let result = proj2.query(&ask).await.unwrap();
@@ -224,9 +224,9 @@ async fn tc014_projection_consistency() {
 
     let container_iri = ib.resource("photo-app", "container", "api-server");
 
-    // Assert declared status
+    // Assert declared status (now stored as named node picloud:Declared)
     let ask = format!(
-        "ASK {{ <{}> <{PICLOUD_NS}status> \"declared\" }}",
+        "ASK {{ <{}> <{PICLOUD_NS}status> <{PICLOUD_NS}Declared> }}",
         container_iri.as_str()
     );
     let result = projector.query(&ask).await.unwrap();
@@ -238,14 +238,14 @@ async fn tc014_projection_consistency() {
 
     // Assert ready status — old "declared" should be gone
     let ask = format!(
-        "ASK {{ <{}> <{PICLOUD_NS}status> \"ready\" }}",
+        "ASK {{ <{}> <{PICLOUD_NS}status> <{PICLOUD_NS}Ready> }}",
         container_iri.as_str()
     );
     let result = projector.query(&ask).await.unwrap();
     assert_eq!(result.bindings[0]["result"], true);
 
     let ask_old = format!(
-        "ASK {{ <{}> <{PICLOUD_NS}status> \"declared\" }}",
+        "ASK {{ <{}> <{PICLOUD_NS}status> <{PICLOUD_NS}Declared> }}",
         container_iri.as_str()
     );
     let result_old = projector.query(&ask_old).await.unwrap();
@@ -1055,11 +1055,11 @@ async fn tc210_cluster_survives_node_restart() {
     let after = proj2.query(&query).await.unwrap();
     assert_eq!(after.bindings.len(), 3, "Should still have 3 nodes after restart");
 
-    // Verify resource state preserved
+    // Verify resource state preserved (status is now a named node)
     let ib = iri_builder();
     let container_iri = ib.resource("photo-app", "container", "api");
     let ask = format!(
-        "ASK {{ <{}> <{PICLOUD_NS}status> \"ready\" }}",
+        "ASK {{ <{}> <{PICLOUD_NS}status> <{PICLOUD_NS}Ready> }}",
         container_iri.as_str()
     );
     let result = proj2.query(&ask).await.unwrap();
@@ -1112,7 +1112,7 @@ async fn tc219_raft_leader_failover_event_consistency() {
         let ib = iri_builder();
         let container_iri = ib.resource("photo-app", "container", "api");
         let ask = format!(
-            "ASK {{ <{}> <{PICLOUD_NS}status> \"ready\" }}",
+            "ASK {{ <{}> <{PICLOUD_NS}status> <{PICLOUD_NS}Ready> }}",
             container_iri.as_str()
         );
         let result = projectors[i].query(&ask).await.unwrap();

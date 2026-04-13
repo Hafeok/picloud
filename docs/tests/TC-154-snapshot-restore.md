@@ -2,15 +2,16 @@
 id: TC-154
 title: snapshot_restore
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-004
   adrs:
   - ADR-047
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "snapshot-restore"
+last-run: 2026-04-13T19:41:49.618598309+00:00
 ---
 
 write a known sentinel file to a volume. Take a snapshot. Overwrite the sentinel. Restore from snapshot. Assert the original sentinel is present.
