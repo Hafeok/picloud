@@ -373,13 +373,13 @@
 - [x] TC-216: Data product declared, projection rebuilt, second product queries it (exit-criteria) — passing
 - [x] TC-217: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
-### FT-024 — Product resource type with versioning [ ]
+### FT-024 — Product resource type with versioning [x]
 
-- [ ] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — unimplemented
+- [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 
 ### FT-025 — Product-scoped IAM and role assignment [ ]
 
-- [ ] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — unimplemented
+- [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 - [ ] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
 
 ### FT-026 — Platform as OIDC provider — authorization endpoint, token endpoint, JWKS [ ]
@@ -412,7 +412,7 @@
 
 ### FT-032 — Per-product event bus [ ]
 
-- [ ] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — unimplemented
+- [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 
 ### FT-033 — Volume snapshots — NAS storage, configurable schedule and retention [ ]
 
