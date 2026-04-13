@@ -244,10 +244,10 @@
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 
-### FT-021 — Internal DNS and service discovery [ ]
+### FT-021 — Internal DNS and service discovery [x]
 
-- [ ] TC-239: Internal DNS resolves product and container FQDNs from any node (scenario) — unimplemented
-- [ ] TC-296: DNS exit — internal DNS resolves all product and service FQDNs (exit-criteria) — unimplemented
+- [x] TC-239: Internal DNS resolves product and container FQDNs from any node (scenario) — passing
+- [x] TC-296: DNS exit — internal DNS resolves all product and service FQDNs (exit-criteria) — passing
 
 ### FT-022 — CLI: cluster init, resource apply, resource status, identity create [ ]
 

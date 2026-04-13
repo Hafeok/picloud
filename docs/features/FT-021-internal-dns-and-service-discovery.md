@@ -2,7 +2,7 @@
 id: FT-021
 title: Internal DNS and service discovery
 phase: 1
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
