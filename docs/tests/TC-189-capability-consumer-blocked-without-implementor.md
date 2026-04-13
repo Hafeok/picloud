@@ -9,6 +9,8 @@ validates:
   adrs:
   - ADR-055
 phase: 1
+runner: cargo-test
+runner-args: "capability_consumer_blocked_without_implementor"
 ---
 
 attempt to deploy `maps-app` with a `capabilities` dependency on `gps-to-place` when no Product implements it. Assert `resource apply` fails with a `CapabilityUnfulfilled` error. Assert `maps-app` is not deployed.

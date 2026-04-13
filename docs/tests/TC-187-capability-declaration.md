@@ -9,6 +9,8 @@ validates:
   adrs:
   - ADR-055
 phase: 1
+runner: cargo-test
+runner-args: "capability_declaration"
 ---
 
 declare a `capability` resource via `picloud resource apply`. Assert a `CapabilityDeclared` event is emitted. Assert the capability appears in the cluster RDF graph as a `pc:Capability` node with correct `pc:version`, `pc:inputEvent`, and `pc:outputEvent` triples.

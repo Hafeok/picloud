@@ -9,6 +9,8 @@ validates:
   adrs:
   - ADR-055
 phase: 1
+runner: cargo-test
+runner-args: "capability_deletion_guard"
 ---
 
 attempt `picloud resource delete capability/gps-to-place` while `maps-app` declares a dependency on it. Assert the delete is rejected with a dependency error. Assert the capability remains in the cluster graph.

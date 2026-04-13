@@ -9,6 +9,8 @@ validates:
   adrs:
   - ADR-056
 phase: 1
+runner: cargo-test
+runner-args: "data_product_deletion_guard"
 ---
 
 attempt to delete `data-product 'photo-locations'` while `maps-app` declares a `dataProducts` dependency on it. Assert the delete is rejected. Assert the data product and its named graph remain intact.

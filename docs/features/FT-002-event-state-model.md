@@ -2,7 +2,7 @@
 id: FT-002
 title: Event & State Model
 phase: 1
-status: complete
+status: in-progress
 depends-on:
 - FT-001
 adrs:
@@ -12,6 +12,7 @@ adrs:
 - ADR-008
 - ADR-031
 - ADR-035
+- ADR-002
 tests:
 - TC-013
 - TC-014

@@ -2,12 +2,13 @@
 id: TC-194
 title: resource apply
 type: scenario
-status: passing
+status: failing
 validates:
   features:
   - FT-009
   adrs:
   - ADR-055
 phase: 1
+runner: picloud-test
+runner-args: "idempotent-apply"
 ---
-

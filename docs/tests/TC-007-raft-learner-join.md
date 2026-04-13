@@ -8,6 +8,8 @@ validates:
   adrs:
   - ADR-002
 phase: 1
+runner: picloud-test
+runner-args: "raft-learner-join"
 ---
 
 add a third node as a Raft learner. Assert it appears in the RDF graph as `picloud:Learner` before being promoted to voter.

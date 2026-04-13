@@ -2,7 +2,7 @@
 id: TC-044
 title: idempotency_key_uniqueness
 type: scenario
-status: passing
+status: failing
 validates:
   features:
   - FT-001
@@ -10,6 +10,8 @@ validates:
   adrs:
   - ADR-015
 phase: 1
+runner: picloud-test
+runner-args: "idempotency-key-uniqueness"
 ---
 
 assert that two different apply operations (different files) produce distinct idempotency keys and are not deduplicated.

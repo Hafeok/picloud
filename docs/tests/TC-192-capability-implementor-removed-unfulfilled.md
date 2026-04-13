@@ -9,6 +9,8 @@ validates:
   adrs:
   - ADR-055
 phase: 1
+runner: cargo-test
+runner-args: "capability_implementor_removed_unfulfilled"
 ---
 
 remove the only implementing Product. Assert `CapabilityUnfulfilled` event is emitted within 10 seconds. Assert the event is delivered to all consumer Products' event buses.

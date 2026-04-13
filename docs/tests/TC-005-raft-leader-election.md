@@ -8,6 +8,8 @@ validates:
   adrs:
   - ADR-002
 phase: 1
+runner: picloud-test
+runner-args: "raft-leader-election"
 ---
 
 bootstrap a two-node cluster. Assert exactly one node carries `picloud:hasRole picloud:Leader` in the RDF graph within 10 seconds of init.

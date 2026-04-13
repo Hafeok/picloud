@@ -8,6 +8,8 @@ validates:
   adrs:
   - ADR-002
 phase: 1
+runner: picloud-test
+runner-args: "raft-leader-failover"
 ---
 
 kill the current Raft leader process via SIGKILL. Assert a new leader is elected and the `picloud:Leader` triple updated within 5 seconds. Assert the cluster continues accepting commands.

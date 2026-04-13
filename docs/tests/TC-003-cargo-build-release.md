@@ -8,5 +8,7 @@ validates:
   adrs:
   - ADR-001
 phase: 1
+runner: picloud-test
+runner-args: "binary_compiles"
 ---
 

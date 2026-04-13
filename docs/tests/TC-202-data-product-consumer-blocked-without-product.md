@@ -9,6 +9,8 @@ validates:
   adrs:
   - ADR-056
 phase: 1
+runner: cargo-test
+runner-args: "data_product_consumer_blocked_without_product"
 ---
 
 attempt to deploy `maps-app` with a `dataProducts` dependency on `photo-app/photo-locations` when that data product does not exist. Assert `resource apply` fails with a `DataProductNotFound` error. Assert `maps-app` is not deployed.

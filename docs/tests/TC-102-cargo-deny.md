@@ -8,5 +8,7 @@ validates:
   adrs:
   - ADR-034
 phase: 1
+runner: picloud-test
+runner-args: "per-slice-build"
 ---
 

@@ -5,23 +5,26 @@
 
 ## Phase 1
 
-### FT-001 — Resource Model [x]
+### FT-001 — Resource Model [~]
 
 - [x] ADR-007: Bicep-Inspired Declarative Resource Syntax (accepted)
 - [x] ADR-015: Imperative API with Idempotent Execution (accepted)
 - [x] ADR-016: Product as Native Deployment Unit (accepted)
-- [x] TC-022: picloud_syntax_parse (scenario) — passing
-- [x] TC-023: invalid_syntax_rejection (scenario) — passing
-- [x] TC-024: symbolic_reference_resolution (scenario) — passing
-- [x] TC-042: idempotent_apply (scenario) — passing
-- [x] TC-043: partial_failure_reapply (scenario) — passing
-- [x] TC-044: idempotency_key_uniqueness (scenario) — passing
-- [x] TC-045: product_full_lifecycle (scenario) — passing
-- [x] TC-046: cascading_delete (scenario) — passing
-- [x] TC-047: orphan_prevention (scenario) — passing
-- [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
+- [x] ADR-001: Rust as Implementation Language (accepted)
+- [x] ADR-029: IRI-Based Resource Addressing (accepted)
+- [x] ADR-034: Vertical Slice Architecture with Stable Domain Dependency (accepted)
+- [!] TC-022: picloud_syntax_parse (scenario) — failing
+- [!] TC-023: invalid_syntax_rejection (scenario) — failing
+- [!] TC-024: symbolic_reference_resolution (scenario) — failing
+- [!] TC-042: idempotent_apply (scenario) — failing
+- [!] TC-043: partial_failure_reapply (scenario) — failing
+- [!] TC-044: idempotency_key_uniqueness (scenario) — failing
+- [!] TC-045: product_full_lifecycle (scenario) — failing
+- [!] TC-046: cascading_delete (scenario) — failing
+- [!] TC-047: orphan_prevention (scenario) — failing
+- [!] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — failing
 
-### FT-002 — Event & State Model [x]
+### FT-002 — Event & State Model [~]
 
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] ADR-005: RDF Graph as Event Projection and Read Model (accepted)
@@ -29,49 +32,50 @@
 - [x] ADR-008: Eventually Consistent Command Model (accepted)
 - [x] ADR-031: Event Schema Versioning via Schema IRIs (accepted)
 - [x] ADR-035: Event Replay as First-Class Platform and Product Capability (accepted)
-- [x] TC-013: event_log_replay (scenario) — passing
-- [x] TC-014: projection_consistency (scenario) — passing
-- [x] TC-015: event_ordering (scenario) — passing
-- [x] TC-016: rdf_projection_roundtrip (scenario) — passing
-- [x] TC-017: sparql_query_types (scenario) — passing
-- [x] TC-018: graph_isolation (scenario) — passing
-- [x] TC-019: oxigraph_sparql_compliance (scenario) — passing
-- [x] TC-020: named_graph_isolation (scenario) — passing
-- [x] TC-021: oxigraph_persistence (scenario) — passing
-- [x] TC-025: command_correlation (scenario) — passing
-- [x] TC-026: progress_streaming (scenario) — passing
-- [x] TC-027: concurrent_commands (scenario) — passing
-- [x] TC-090: schema_iri_resolution (scenario) — passing
-- [x] TC-091: schema_evolution (scenario) — passing
-- [x] TC-092: schema_iri_permanence (scenario) — passing
-- [x] TC-103: platform_replay_full (scenario) — passing
-- [x] TC-104: shadow_swap_live_traffic (scenario) — passing
-- [x] TC-105: replay_marked_flag (scenario) — passing
-- [x] TC-106: aggregate_replay (scenario) — passing
-- [x] TC-210: Cluster survives one node restart without data loss (exit-criteria) — passing
-- [ ] TC-219: Raft leader failover under network partition (chaos) — unimplemented
-- [ ] TC-223: Split brain scenario — exactly one leader invariant (chaos) — unimplemented
+- [x] ADR-002: openraft for Cluster Consensus (accepted)
+- [!] TC-013: event_log_replay (scenario) — failing
+- [!] TC-014: projection_consistency (scenario) — failing
+- [!] TC-015: event_ordering (scenario) — failing
+- [!] TC-016: rdf_projection_roundtrip (scenario) — failing
+- [!] TC-017: sparql_query_types (scenario) — failing
+- [!] TC-018: graph_isolation (scenario) — failing
+- [!] TC-019: oxigraph_sparql_compliance (scenario) — failing
+- [!] TC-020: named_graph_isolation (scenario) — failing
+- [!] TC-021: oxigraph_persistence (scenario) — failing
+- [!] TC-025: command_correlation (scenario) — failing
+- [!] TC-026: progress_streaming (scenario) — failing
+- [!] TC-027: concurrent_commands (scenario) — failing
+- [!] TC-090: schema_iri_resolution (scenario) — failing
+- [!] TC-091: schema_evolution (scenario) — failing
+- [!] TC-092: schema_iri_permanence (scenario) — failing
+- [!] TC-103: platform_replay_full (scenario) — failing
+- [!] TC-104: shadow_swap_live_traffic (scenario) — failing
+- [!] TC-105: replay_marked_flag (scenario) — failing
+- [!] TC-106: aggregate_replay (scenario) — failing
+- [!] TC-210: Cluster survives one node restart without data loss (exit-criteria) — failing
+- [!] TC-219: Raft leader failover under network partition (chaos) — failing
+- [!] TC-223: Split brain scenario — exactly one leader invariant (chaos) — failing
 
-### FT-007 — IaC & CLI Design [x]
+### FT-007 — IaC & CLI Design [~]
 
 - [x] ADR-015: Imperative API with Idempotent Execution (accepted)
 - [x] ADR-042: Tenant Identity — Domain and Cluster ID as Dual Boundary (accepted)
 - [x] ADR-049: .picloud Format as Compiler Target — Turtle as Canonical IaC (accepted)
 - [x] ADR-050: Builder Pattern CLI for Resource Generation (accepted)
-- [x] TC-042: idempotent_apply (scenario) — passing
-- [x] TC-043: partial_failure_reapply (scenario) — passing
-- [x] TC-044: idempotency_key_uniqueness (scenario) — passing
-- [x] TC-133: dual_cluster_mDNS_isolation (scenario) — passing
-- [x] TC-134: cross_cluster_join_rejection (scenario) — passing
-- [x] TC-135: iri_namespace_uniqueness (scenario) — passing
-- [x] TC-163: compiler_roundtrip (scenario) — passing
-- [x] TC-164: iri_determinism (scenario) — passing
-- [x] TC-165: shacl_validation_errors (scenario) — passing
-- [x] TC-166: offline_validation (scenario) — passing
-- [x] TC-167: new_resource_flags (scenario) — passing
-- [x] TC-168: new_resource_partial (scenario) — passing
-- [x] TC-169: overwrite_protection (scenario) — passing
-- [x] TC-170: auto_validation_failure (scenario) — passing
+- [!] TC-042: idempotent_apply (scenario) — failing
+- [!] TC-043: partial_failure_reapply (scenario) — failing
+- [!] TC-044: idempotency_key_uniqueness (scenario) — failing
+- [!] TC-133: dual_cluster_mDNS_isolation (scenario) — failing
+- [!] TC-134: cross_cluster_join_rejection (scenario) — failing
+- [!] TC-135: iri_namespace_uniqueness (scenario) — failing
+- [!] TC-163: compiler_roundtrip (scenario) — failing
+- [!] TC-164: iri_determinism (scenario) — failing
+- [!] TC-165: shacl_validation_errors (scenario) — failing
+- [!] TC-166: offline_validation (scenario) — failing
+- [!] TC-167: new_resource_flags (scenario) — failing
+- [!] TC-168: new_resource_partial (scenario) — failing
+- [!] TC-169: overwrite_protection (scenario) — failing
+- [!] TC-170: auto_validation_failure (scenario) — failing
 
 ### FT-003 — IAM Model [~]
 
@@ -81,28 +85,28 @@
 - [x] ADR-026: Bootstrap Token Exchange and Three-Tier Passkey Recovery (accepted)
 - [x] ADR-027: mTLS for Workload-to-Platform and Direct Workload-to-SPARQL Communication (accepted)
 - [x] ADR-051: Product IAM — Roles, Custom Claims, Scopes, and Audience (accepted)
-- [x] TC-028: human_identity_lifecycle (scenario) — passing
-- [x] TC-029: workload_identity_injection (scenario) — passing
-- [x] TC-030: token_expiry_enforcement (scenario) — passing
-- [x] TC-048: oidc_authorization_code (scenario) — passing
-- [x] TC-049: oidc_client_credentials (scenario) — passing
-- [x] TC-050: jwks_key_rotation (scenario) — passing
-- [x] TC-051: GET /.well-known/openid-configuration (scenario) — passing
-- [x] TC-071: passkey_registration (scenario) — passing
-- [x] TC-072: fido2_cli_auth (scenario) — passing
-- [x] TC-073: webauthn_challenge_replay_rejection (scenario) — passing
-- [x] TC-074: bootstrap_token_single_use (scenario) — passing
-- [x] TC-075: bootstrap_token_expiry (scenario) — passing
-- [x] TC-076: tier1_admin_reset (scenario) — passing
-- [x] TC-077: tier3_physical_recovery (scenario) — passing
-- [x] TC-078: mtls_enforcement (scenario) — passing
-- [x] TC-079: workload_cert_injection (scenario) — passing
-- [x] TC-080: sparql_direct_mtls (scenario) — passing
-- [x] TC-171: role_inheritance_claims (scenario) — passing
-- [x] TC-172: audience_enforcement (scenario) — passing
-- [x] TC-173: token_exchange_on_behalf_of (scenario) — passing
-- [x] TC-174: m2m_permission_required (scenario) — passing
-- [ ] TC-212: User authenticates against Product-hosted application via OIDC (exit-criteria) — unimplemented
+- [!] TC-028: human_identity_lifecycle (scenario) — failing
+- [!] TC-029: workload_identity_injection (scenario) — failing
+- [!] TC-030: token_expiry_enforcement (scenario) — failing
+- [!] TC-048: oidc_authorization_code (scenario) — failing
+- [!] TC-049: oidc_client_credentials (scenario) — failing
+- [!] TC-050: jwks_key_rotation (scenario) — failing
+- [!] TC-051: GET /.well-known/openid-configuration (scenario) — failing
+- [!] TC-071: passkey_registration (scenario) — failing
+- [!] TC-072: fido2_cli_auth (scenario) — failing
+- [!] TC-073: webauthn_challenge_replay_rejection (scenario) — failing
+- [!] TC-074: bootstrap_token_single_use (scenario) — failing
+- [!] TC-075: bootstrap_token_expiry (scenario) — failing
+- [!] TC-076: tier1_admin_reset (scenario) — failing
+- [!] TC-077: tier3_physical_recovery (scenario) — failing
+- [!] TC-078: mtls_enforcement (scenario) — failing
+- [!] TC-079: workload_cert_injection (scenario) — failing
+- [!] TC-080: sparql_direct_mtls (scenario) — failing
+- [!] TC-171: role_inheritance_claims (scenario) — failing
+- [!] TC-172: audience_enforcement (scenario) — failing
+- [!] TC-173: token_exchange_on_behalf_of (scenario) — failing
+- [!] TC-174: m2m_permission_required (scenario) — failing
+- [!] TC-212: User authenticates against Product-hosted application via OIDC (exit-criteria) — failing
 
 ### FT-004 — Storage Model [~]
 
@@ -111,24 +115,24 @@
 - [x] ADR-013: Platform-Managed Replication Factor (accepted)
 - [x] ADR-024: Storage Intent Model (accepted)
 - [x] ADR-047: Volume Snapshots and Offsite Backup as Storage Intent Primitives (accepted)
-- [x] TC-034: phase_dependency_order (scenario) — passing
-- [x] TC-035: mounted_volume (scenario) — passing
-- [x] TC-036: raw_block_device (scenario) — passing
-- [x] TC-037: volume_mount_restart (scenario) — passing
-- [x] TC-038: full_replication_coverage (scenario) — passing
-- [x] TC-039: replication_on_node_join (scenario) — passing
-- [x] TC-068: storage_intent_full_replication (scenario) — passing
-- [x] TC-069: intent_translated_to_implementation (scenario) — passing
-- [x] TC-070: full-replication (scenario) — passing
-- [x] TC-153: snapshot_create_verify (scenario) — passing
-- [x] TC-154: snapshot_restore (scenario) — passing
-- [x] TC-155: snapshot_retention (scenario) — passing
-- [x] TC-156: offsite_backup_complete (scenario) — passing
-- [x] TC-157: backup_failure_alert (scenario) — passing
-- [x] TC-158: BackupFailed (scenario) — passing
-- [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
-- [ ] TC-220: Node crash during volume write — no data corruption (chaos) — unimplemented
-- [ ] TC-221: Node restart during replication — eventual consistency restored (chaos) — unimplemented
+- [!] TC-034: phase_dependency_order (scenario) — failing
+- [!] TC-035: mounted_volume (scenario) — failing
+- [!] TC-036: raw_block_device (scenario) — failing
+- [!] TC-037: volume_mount_restart (scenario) — failing
+- [!] TC-038: full_replication_coverage (scenario) — failing
+- [!] TC-039: replication_on_node_join (scenario) — failing
+- [!] TC-068: storage_intent_full_replication (scenario) — failing
+- [!] TC-069: intent_translated_to_implementation (scenario) — failing
+- [!] TC-070: full-replication (scenario) — failing
+- [!] TC-153: snapshot_create_verify (scenario) — failing
+- [!] TC-154: snapshot_restore (scenario) — failing
+- [!] TC-155: snapshot_retention (scenario) — failing
+- [!] TC-156: offsite_backup_complete (scenario) — failing
+- [!] TC-157: backup_failure_alert (scenario) — failing
+- [!] TC-158: BackupFailed (scenario) — failing
+- [!] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — failing
+- [!] TC-220: Node crash during volume write — no data corruption (chaos) — failing
+- [!] TC-221: Node restart during replication — eventual consistency restored (chaos) — failing
 
 ### FT-006 — Networking Model [~]
 
@@ -139,50 +143,52 @@
 - [x] ADR-048: Native Ingress Router in picloud-http (accepted)
 - [x] ADR-052: Integrated DNS Server — Authoritative for Tenant Domain (accepted)
 - [x] ADR-053: Node Certificate Issuance and Enrollment (accepted)
-- [x] TC-008: dns_resolution (scenario) — passing
-- [x] TC-009: node_join_dns (scenario) — passing
-- [x] TC-010: product_fqdn_dns (scenario) — passing
-- [x] TC-011: picloud.local (scenario) — passing
-- [x] TC-012: picloud.local (scenario) — passing
-- [x] TC-040: internal_dns_resolution (scenario) — passing
-- [x] TC-041: cross_product_isolation (scenario) — passing
-- [x] TC-081: slice_dependency_enforcement (scenario) — passing
-- [x] TC-082: no_cross_slice_imports (scenario) — passing
-- [x] TC-083: cargo tree -p picloud-{slice} (scenario) — passing
-- [x] TC-084: platform_ca_export (scenario) — passing
-- [x] TC-085: byo_ca (scenario) — passing
-- [x] TC-086: cert_chain_validation (scenario) — passing
-- [x] TC-159: ingress_host_routing (scenario) — passing
-- [x] TC-160: workload_reschedule_routing (scenario) — passing
-- [x] TC-161: internal_port_isolation (scenario) — passing
-- [x] TC-162: sni_cert_selection (scenario) — passing
-- [x] TC-175: dns_a_records (scenario) — passing
-- [x] TC-176: dns_srv_records (scenario) — passing
-- [x] TC-177: dns_txt_records (scenario) — passing
-- [x] TC-178: dns_cache_invalidation (scenario) — passing
-- [x] TC-179: dns_nxdomain (scenario) — passing
-- [x] TC-180: auto_enroll_mode (scenario) — passing
-- [x] TC-181: token_enroll_single_use (scenario) — passing
-- [x] TC-182: token_enroll_expiry (scenario) — passing
-- [x] TC-183: cert_revocation (scenario) — passing
-- [x] TC-184: csr_wildcard_rejection (scenario) — passing
-- [ ] TC-222: DNS server failure — fallback to mDNS (chaos) — unimplemented
+- [!] TC-008: dns_resolution (scenario) — failing
+- [!] TC-009: node_join_dns (scenario) — failing
+- [!] TC-010: product_fqdn_dns (scenario) — failing
+- [!] TC-011: picloud.local (scenario) — failing
+- [!] TC-012: picloud.local (scenario) — failing
+- [!] TC-040: internal_dns_resolution (scenario) — failing
+- [!] TC-041: cross_product_isolation (scenario) — failing
+- [!] TC-081: slice_dependency_enforcement (scenario) — failing
+- [!] TC-082: no_cross_slice_imports (scenario) — failing
+- [!] TC-083: cargo tree -p picloud-{slice} (scenario) — failing
+- [!] TC-084: platform_ca_export (scenario) — failing
+- [!] TC-085: byo_ca (scenario) — failing
+- [!] TC-086: cert_chain_validation (scenario) — failing
+- [!] TC-159: ingress_host_routing (scenario) — failing
+- [!] TC-160: workload_reschedule_routing (scenario) — failing
+- [!] TC-161: internal_port_isolation (scenario) — failing
+- [!] TC-162: sni_cert_selection (scenario) — failing
+- [!] TC-175: dns_a_records (scenario) — failing
+- [!] TC-176: dns_srv_records (scenario) — failing
+- [!] TC-177: dns_txt_records (scenario) — failing
+- [!] TC-178: dns_cache_invalidation (scenario) — failing
+- [!] TC-179: dns_nxdomain (scenario) — failing
+- [!] TC-180: auto_enroll_mode (scenario) — failing
+- [!] TC-181: token_enroll_single_use (scenario) — failing
+- [!] TC-182: token_enroll_expiry (scenario) — failing
+- [!] TC-183: cert_revocation (scenario) — failing
+- [!] TC-184: csr_wildcard_rejection (scenario) — failing
+- [!] TC-222: DNS server failure — fallback to mDNS (chaos) — failing
 
 ### FT-005 — Workload Model [~]
 
 - [x] ADR-010: OCI Containers and Raw Binaries as Workload Primitives (accepted)
 - [x] ADR-020: Cluster Graph as Semantic Service Registry (accepted)
 - [x] ADR-022: Inter-Product Event Subscriptions as First-Class Resources (accepted)
-- [x] TC-031: container_schedule (scenario) — passing
-- [x] TC-032: binary_workload (scenario) — passing
-- [x] TC-033: workload_identity_injection (scenario) — passing
-- [x] TC-058: cluster_registry_discovery (scenario) — passing
-- [x] TC-059: registry_version_binding (scenario) — passing
-- [x] TC-063: event_subscription_provisioning (scenario) — passing
-- [x] TC-064: undeclared_subscription_rejection (scenario) — passing
-- [x] TC-065: subscription_lifecycle (scenario) — passing
-- [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
-- [ ] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — unimplemented
+- [!] TC-031: container_schedule (scenario) — failing
+- [!] TC-032: binary_workload (scenario) — failing
+- [!] TC-033: workload_identity_injection (scenario) — failing
+- [!] TC-058: cluster_registry_discovery (scenario) — failing
+- [!] TC-059: registry_version_binding (scenario) — failing
+- [!] TC-063: event_subscription_provisioning (scenario) — failing
+- [!] TC-064: undeclared_subscription_rejection (scenario) — failing
+- [!] TC-065: subscription_lifecycle (scenario) — failing
+- [!] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — failing
+- [!] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — failing
+
+## Phase 2
 
 ### FT-008 — Product Event Store [~]
 
@@ -191,22 +197,22 @@
 - [x] ADR-021: One Active Version Per Product (accepted)
 - [x] ADR-023: Ontology Files Bound to Product Version (accepted)
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
-- [x] TC-052: inter_product_event_delivery (scenario) — passing
-- [x] TC-053: direct_network_blocked (scenario) — passing
-- [x] TC-054: event_bus_burst (scenario) — passing
-- [x] TC-055: product_sparql_endpoint (scenario) — passing
-- [x] TC-056: sparql_iam_enforcement (scenario) — passing
-- [x] TC-057: ontology_served (scenario) — passing
-- [x] TC-060: atomic_version_cutover (scenario) — passing
-- [x] TC-061: failed_upgrade_rollback (scenario) — passing
-- [x] TC-062: one_active_version_invariant (invariant) — passing
-- [x] TC-066: ontology_version_binding (scenario) — passing
-- [x] TC-067: ontology_shacl_validation (scenario) — passing
-- [x] TC-093: event_store_append_read (scenario) — passing
-- [x] TC-094: event_store_rdf_projection (scenario) — passing
-- [x] TC-095: event_store_replay (scenario) — passing
-- [x] TC-096: event_store_survivor (scenario) — passing
-- [ ] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — unimplemented
+- [!] TC-052: inter_product_event_delivery (scenario) — failing
+- [!] TC-053: direct_network_blocked (scenario) — failing
+- [!] TC-054: event_bus_burst (scenario) — failing
+- [!] TC-055: product_sparql_endpoint (scenario) — failing
+- [!] TC-056: sparql_iam_enforcement (scenario) — failing
+- [!] TC-057: ontology_served (scenario) — failing
+- [!] TC-060: atomic_version_cutover (scenario) — failing
+- [!] TC-061: failed_upgrade_rollback (scenario) — failing
+- [!] TC-062: one_active_version_invariant (invariant) — failing
+- [!] TC-066: ontology_version_binding (scenario) — failing
+- [!] TC-067: ontology_shacl_validation (scenario) — failing
+- [!] TC-093: event_store_append_read (scenario) — failing
+- [!] TC-094: event_store_rdf_projection (scenario) — failing
+- [!] TC-095: event_store_replay (scenario) — failing
+- [!] TC-096: event_store_survivor (scenario) — failing
+- [!] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — failing
 
 ### FT-009 — Inference, Metrics & Alerts [~]
 
@@ -223,51 +229,51 @@
 - [x] ADR-054: Test-Augmented ADR Template (accepted)
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
-- [x] TC-107: tag_add_event (scenario) — passing
-- [x] TC-108: tag_rdf_projection (scenario) — passing
-- [x] TC-109: tag_remove (scenario) — passing
-- [x] TC-110: tag_sparql_queryable (scenario) — passing
-- [x] TC-111: picloud tag find (scenario) — passing
-- [x] TC-112: group_membership_via_inference (scenario) — passing
-- [x] TC-113: group_membership_removal (scenario) — passing
-- [x] TC-114: circular_group_rejection (scenario) — passing
-- [x] TC-115: group_role_inheritance (scenario) — passing
-- [x] TC-116: inference_rule_lifecycle (scenario) — passing
-- [x] TC-117: inference_retraction (scenario) — passing
-- [x] TC-118: reconciliation_pass (scenario) — passing
-- [x] TC-119: rule_idempotency (scenario) — passing
-- [x] TC-120: rdfs_subclass_inference (scenario) — passing
-- [x] TC-121: owl_transitivity (scenario) — passing
-- [x] TC-122: ontology_deploy_immediate (scenario) — passing
-- [x] TC-123: metrics_collection_interval (scenario) — passing
-- [x] TC-124: metrics_rdf_projection (scenario) — passing
-- [x] TC-125: metrics_upsert (scenario) — passing
-- [x] TC-126: MetricRecorded (scenario) — passing
-- [x] TC-127: alert_fired (scenario) — passing
-- [x] TC-128: alert_resolved (scenario) — passing
-- [x] TC-129: alert_dampening (scenario) — passing
-- [x] TC-130: all_builtin_rules (scenario) — passing
-- [x] TC-131: AlertFired (scenario) — passing
-- [x] TC-132: AlertResolved (scenario) — passing
-- [x] TC-136: config_api_lifecycle (scenario) — passing
-- [x] TC-137: config_live_reload (scenario) — passing
-- [x] TC-138: workload_config_override (scenario) — passing
-- [x] TC-139: config_secret_separation (scenario) — passing
-- [x] TC-140: ConfigChanged (scenario) — passing
-- [x] TC-141: flag_version_evaluation (scenario) — passing
-- [x] TC-142: flag_live_update (scenario) — passing
-- [x] TC-143: flag_version_range (scenario) — passing
-- [x] TC-144: flag_in_process_evaluation (scenario) — passing
-- [x] TC-145: FeatureFlagChanged (scenario) — passing
-- [x] TC-146: otlp_trace_ingestion (scenario) — passing
-- [x] TC-147: cli_trace_propagation (scenario) — passing
-- [x] TC-148: otel_does_not_starve_raft (scenario) — passing
-- [x] TC-149: parquet_write_read (scenario) — passing
-- [x] TC-150: retention_enforcement (scenario) — passing
-- [x] TC-151: datafusion_time_range (scenario) — passing
-- [x] TC-152: parquet_portability (scenario) — passing
-- [x] TC-185: adr_test_coverage_completeness (scenario) — passing
-- [x] TC-186: scenario_catalogue_sync (scenario) — passing
+- [!] TC-107: tag_add_event (scenario) — failing
+- [!] TC-108: tag_rdf_projection (scenario) — failing
+- [!] TC-109: tag_remove (scenario) — failing
+- [!] TC-110: tag_sparql_queryable (scenario) — failing
+- [!] TC-111: picloud tag find (scenario) — failing
+- [!] TC-112: group_membership_via_inference (scenario) — failing
+- [!] TC-113: group_membership_removal (scenario) — failing
+- [!] TC-114: circular_group_rejection (scenario) — failing
+- [!] TC-115: group_role_inheritance (scenario) — failing
+- [!] TC-116: inference_rule_lifecycle (scenario) — failing
+- [!] TC-117: inference_retraction (scenario) — failing
+- [!] TC-118: reconciliation_pass (scenario) — failing
+- [!] TC-119: rule_idempotency (scenario) — failing
+- [!] TC-120: rdfs_subclass_inference (scenario) — failing
+- [!] TC-121: owl_transitivity (scenario) — failing
+- [!] TC-122: ontology_deploy_immediate (scenario) — failing
+- [!] TC-123: metrics_collection_interval (scenario) — failing
+- [!] TC-124: metrics_rdf_projection (scenario) — failing
+- [!] TC-125: metrics_upsert (scenario) — failing
+- [!] TC-126: MetricRecorded (scenario) — failing
+- [!] TC-127: alert_fired (scenario) — failing
+- [!] TC-128: alert_resolved (scenario) — failing
+- [!] TC-129: alert_dampening (scenario) — failing
+- [!] TC-130: all_builtin_rules (scenario) — failing
+- [!] TC-131: AlertFired (scenario) — failing
+- [!] TC-132: AlertResolved (scenario) — failing
+- [!] TC-136: config_api_lifecycle (scenario) — failing
+- [!] TC-137: config_live_reload (scenario) — failing
+- [!] TC-138: workload_config_override (scenario) — failing
+- [!] TC-139: config_secret_separation (scenario) — failing
+- [!] TC-140: ConfigChanged (scenario) — failing
+- [!] TC-141: flag_version_evaluation (scenario) — failing
+- [!] TC-142: flag_live_update (scenario) — failing
+- [!] TC-143: flag_version_range (scenario) — failing
+- [!] TC-144: flag_in_process_evaluation (scenario) — failing
+- [!] TC-145: FeatureFlagChanged (scenario) — failing
+- [!] TC-146: otlp_trace_ingestion (scenario) — failing
+- [!] TC-147: cli_trace_propagation (scenario) — failing
+- [!] TC-148: otel_does_not_starve_raft (scenario) — failing
+- [!] TC-149: parquet_write_read (scenario) — failing
+- [!] TC-150: retention_enforcement (scenario) — failing
+- [!] TC-151: datafusion_time_range (scenario) — failing
+- [!] TC-152: parquet_portability (scenario) — failing
+- [!] TC-185: adr_test_coverage_completeness (scenario) — failing
+- [!] TC-186: scenario_catalogue_sync (scenario) — failing
 - [x] TC-187: capability_declaration (scenario) — passing
 - [x] TC-188: capability_implements_shacl_validation (scenario) — passing
 - [x] TC-189: capability_consumer_blocked_without_implementor (scenario) — passing
@@ -275,8 +281,8 @@
 - [x] TC-191: capability_version_selection (scenario) — passing
 - [x] TC-192: capability_implementor_removed_unfulfilled (scenario) — passing
 - [x] TC-193: capability_deletion_guard (scenario) — passing
-- [x] TC-194: resource apply (scenario) — passing
-- [x] TC-195: CapabilityUnfulfilled (scenario) — passing
+- [!] TC-194: resource apply (scenario) — failing
+- [!] TC-195: CapabilityUnfulfilled (scenario) — failing
 - [x] TC-196: data_domain_declaration (scenario) — passing
 - [x] TC-197: data_product_field_validation (scenario) — passing
 - [x] TC-198: data_product_projection_on_trigger (scenario) — passing
@@ -288,19 +294,26 @@
 - [x] TC-204: data_product_deletion_guard (scenario) — passing
 - [x] TC-205: data_domain_deletion_guard (scenario) — passing
 - [x] TC-206: capability_triggers_data_product (scenario) — passing
-- [x] TC-207: DataProductSLOBreached (scenario) — passing
-- [x] TC-208: data-domain (scenario) — passing
-- [ ] TC-213: Inference rule assigns user to group on tag change (exit-criteria) — unimplemented
-- [ ] TC-214: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
-- [ ] TC-215: Product appends to event store and queries RDF projection (exit-criteria) — unimplemented
-- [ ] TC-216: Data product declared, projection rebuilt, second product queries it (exit-criteria) — unimplemented
-- [ ] TC-217: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+- [!] TC-207: DataProductSLOBreached (scenario) — failing
+- [!] TC-208: data-domain (scenario) — failing
+- [!] TC-213: Inference rule assigns user to group on tag change (exit-criteria) — failing
+- [!] TC-214: CPU temperature alert fires and resolves (exit-criteria) — failing
+- [!] TC-215: Product appends to event store and queries RDF projection (exit-criteria) — failing
+- [!] TC-216: Data product declared, projection rebuilt, second product queries it (exit-criteria) — failing
+- [!] TC-217: Capability declared and fulfilled by implementing product (exit-criteria) — failing
+
+## Phase 3
 
 ### FT-010 — SDK Model [~]
 
 - [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
-- [x] TC-097: sdk_generation (scenario) — passing
-- [x] TC-098: sdk_publish (scenario) — passing
-- [x] TC-099: sdk_ontology_sync (scenario) — passing
-- [ ] TC-218: SDKs published to package registries (exit-criteria) — unimplemented
+- [!] TC-097: sdk_generation (scenario) — failing
+- [!] TC-098: sdk_publish (scenario) — failing
+- [!] TC-099: sdk_ontology_sync (scenario) — failing
+- [!] TC-218: SDKs published to package registries (exit-criteria) — failing
+
+## Phase 4
+
+### FT-011 — Operational Maturity [ ]
+
 

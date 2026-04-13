@@ -2,12 +2,15 @@
 id: FT-001
 title: Resource Model
 phase: 1
-status: complete
+status: in-progress
 depends-on: []
 adrs:
 - ADR-007
 - ADR-015
 - ADR-016
+- ADR-001
+- ADR-029
+- ADR-034
 tests:
 - TC-022
 - TC-023
