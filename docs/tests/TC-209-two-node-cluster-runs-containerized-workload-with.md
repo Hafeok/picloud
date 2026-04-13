@@ -9,7 +9,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "two-node-cluster-runs-containerized-workload-with-replicated-volume"
-last-run: 2026-04-13T19:41:49.618598309+00:00
+last-run: 2026-04-13T19:48:54.098720974+00:00
 ---
 
 ## Description

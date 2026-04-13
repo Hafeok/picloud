@@ -40,6 +40,7 @@ mod token_expiry_enforcement;
 // ADR-010
 mod binary_workload;
 mod container_schedule;
+mod product_e2e_container_volume_identity;
 mod workload_identity_injection;
 // ADR-011
 mod phase_dependency_order;
@@ -292,6 +293,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         // ADR-010
         Box::new(binary_workload::BinaryWorkloadScenario),
         Box::new(container_schedule::ContainerSchedule),
+        Box::new(product_e2e_container_volume_identity::ProductE2eContainerVolumeIdentity),
         Box::new(workload_identity_injection::WorkloadIdentityInjectionScenario),
         // ADR-011
         Box::new(phase_dependency_order::PhaseDependencyOrder),

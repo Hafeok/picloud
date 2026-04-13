@@ -113,21 +113,21 @@
 - [x] TC-220: Node crash during volume write — no data corruption (chaos) — passing
 - [x] TC-221: Node restart during replication — eventual consistency restored (chaos) — passing
 
-### FT-005 — Workload Model [~]
+### FT-005 — Workload Model [x]
 
 - [x] ADR-010: OCI Containers and Raw Binaries as Workload Primitives (accepted)
 - [x] ADR-020: Cluster Graph as Semantic Service Registry (accepted)
 - [x] ADR-022: Inter-Product Event Subscriptions as First-Class Resources (accepted)
-- [!] TC-031: container_schedule (scenario) — failing
-- [!] TC-032: binary_workload (scenario) — failing
-- [!] TC-033: workload_identity_injection (scenario) — failing
-- [!] TC-058: cluster_registry_discovery (scenario) — failing
-- [!] TC-059: registry_version_binding (scenario) — failing
-- [!] TC-063: event_subscription_provisioning (scenario) — failing
-- [!] TC-064: undeclared_subscription_rejection (scenario) — failing
-- [!] TC-065: subscription_lifecycle (scenario) — failing
+- [x] TC-031: container_schedule (scenario) — passing
+- [x] TC-032: binary_workload (scenario) — passing
+- [x] TC-033: workload_identity_injection (scenario) — passing
+- [x] TC-058: cluster_registry_discovery (scenario) — passing
+- [x] TC-059: registry_version_binding (scenario) — passing
+- [x] TC-063: event_subscription_provisioning (scenario) — passing
+- [x] TC-064: undeclared_subscription_rejection (scenario) — passing
+- [x] TC-065: subscription_lifecycle (scenario) — passing
 - [x] TC-209: Two-node cluster runs containerized workload with replicated volume (exit-criteria) — passing
-- [!] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — failing
+- [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
 
 ### FT-006 — Networking Model [~]
 
@@ -282,7 +282,7 @@
 - [!] TC-094: event_store_rdf_projection (scenario) — failing
 - [!] TC-095: event_store_replay (scenario) — failing
 - [!] TC-096: event_store_survivor (scenario) — failing
-- [!] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — failing
+- [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
 
 ### FT-009 — Inference, Metrics & Alerts [~]
 

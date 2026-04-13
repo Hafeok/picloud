@@ -2,15 +2,16 @@
 id: TC-058
 title: cluster_registry_discovery
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-005
   adrs:
   - ADR-020
 phase: 1
-runner: picloud-test
+runner: scripts/run-tc.sh
 runner-args: "cluster-registry-discovery"
+last-run: 2026-04-13T19:48:54.098720974+00:00
 ---
 
 deploy three products with different event types, SPARQL endpoints, and ontologies. Query the cluster-level SPARQL endpoint for all products, their event schemas, and their ontology IRIs. Assert all three products discoverable in a single query.

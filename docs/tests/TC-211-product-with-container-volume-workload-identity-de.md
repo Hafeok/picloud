@@ -2,13 +2,14 @@
 id: TC-211
 title: Product with container, volume, workload identity deploys end-to-end
 type: exit-criteria
-status: failing
+status: passing
 validates:
   features: []
   adrs: []
 phase: 1
-runner: picloud-test
-runner-args: "product-with-container-volume-workload-identity-deploys-end-to-end"
+runner: scripts/run-tc.sh
+runner-args: "product-e2e-container-volume-identity"
+last-run: 2026-04-13T19:48:54.098720974+00:00
 ---
 
 ## Description
