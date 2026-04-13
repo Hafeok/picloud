@@ -2,7 +2,7 @@
 id: FT-026
 title: Platform as OIDC provider — authorization endpoint, token endpoint, JWKS
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

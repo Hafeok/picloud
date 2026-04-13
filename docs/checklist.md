@@ -382,7 +382,7 @@
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 - [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
-### FT-026 — Platform as OIDC provider — authorization endpoint, token endpoint, JWKS [ ]
+### FT-026 — Platform as OIDC provider — authorization endpoint, token endpoint, JWKS [x]
 
 - [x] TC-227: User authenticates against Product-hosted application via OIDC (exit-criteria) — passing
 
