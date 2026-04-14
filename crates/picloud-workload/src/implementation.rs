@@ -164,8 +164,8 @@ impl ProcessScheduler {
     }
 
     /// Create a scheduler with an explicitly set runtime and secret store (for testing).
-    #[cfg(test)]
-    fn new_with_runtime_and_secrets(
+    #[doc(hidden)]
+    pub fn new_with_runtime_and_secrets(
         node_id: Uuid,
         domain: ClusterDomain,
         runtime: ContainerRuntime,

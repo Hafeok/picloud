@@ -2,7 +2,7 @@
 id: FT-030
 title: Secret management — encrypted at rest, workload injection
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

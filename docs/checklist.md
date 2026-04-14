@@ -400,10 +400,10 @@
 - [x] TC-243: Raw block device attached to workload is readable and writable (scenario) — passing
 - [x] TC-300: Block device exit — raw block device provisioned and accessible (exit-criteria) — passing
 
-### FT-030 — Secret management — encrypted at rest, workload injection [ ]
+### FT-030 — Secret management — encrypted at rest, workload injection [x]
 
-- [ ] TC-244: Secret encrypted at rest and injected into workload environment (scenario) — unimplemented
-- [ ] TC-301: Secret management exit — secrets encrypted at rest and injected (exit-criteria) — unimplemented
+- [x] TC-244: Secret encrypted at rest and injected into workload environment (scenario) — passing
+- [x] TC-301: Secret management exit — secrets encrypted at rest and injected (exit-criteria) — passing
 
 ### FT-031 — Cascading deletion — delete Product cascades to all child resources [ ]
 
