@@ -419,10 +419,10 @@
 - [x] TC-246: Volume snapshot created on schedule and restorable to new volume (scenario) — passing
 - [x] TC-303: Volume snapshots exit — snapshot created, listed, and restored (exit-criteria) — passing
 
-### FT-034 — Offsite backup — S3-compatible, client-side encryption, incremental deduplication [ ]
+### FT-034 — Offsite backup — S3-compatible, client-side encryption, incremental deduplication [x]
 
-- [ ] TC-247: Offsite backup uploads encrypted incremental snapshot to S3 endpoint (scenario) — unimplemented
-- [ ] TC-304: Offsite backup exit — backup uploaded encrypted to S3 endpoint (exit-criteria) — unimplemented
+- [x] TC-247: Offsite backup uploads encrypted incremental snapshot to S3 endpoint (scenario) — passing
+- [x] TC-304: Offsite backup exit — backup uploaded encrypted to S3 endpoint (exit-criteria) — passing
 
 ### FT-035 — Snapshot and backup lifecycle events [ ]
 
