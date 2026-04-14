@@ -337,8 +337,8 @@ impl PiCloudHttpServer {
                 get(handle_config_effective),
             )
             // --- Feature flag routes (ADR-044) ---
-            .route("/products/:name/flags", get(handle_flags_list))
-            .route("/products/:name/flags/:flag", get(handle_flag_get))
+            .route("/products/:name/flags", get(handle_flags_list).post(handle_flag_set))
+            .route("/products/:name/flags/:flag", get(handle_flag_get).delete(handle_flag_delete))
             .route("/products/:name/flags/:flag/evaluate", get(handle_flag_evaluate))
             // --- Upgrade route (ADR-017) ---
             .route("/products/:name/upgrade", post(handle_product_upgrade))
@@ -5103,6 +5103,138 @@ async fn handle_flag_get(
             Json(serde_json::json!({ "error": format!("flag '{}' not found", flag_name) })),
         )
             .into_response(),
+    }
+}
+
+/// Request payload for setting/updating a feature flag.
+#[derive(Deserialize)]
+struct FlagSetPayload {
+    name: String,
+    #[serde(default = "default_flag_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+fn default_flag_enabled() -> bool {
+    true
+}
+
+/// POST /products/:name/flags — set or update a feature flag (ADR-044)
+async fn handle_flag_set(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(name): Path<String>,
+    Json(payload): Json<FlagSetPayload>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    // Validate version expression
+    if !payload.version.is_empty() {
+        if picloud_domain::resources::VersionOp::parse(&payload.version).is_none() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("invalid version expression: '{}'", payload.version),
+                })),
+            );
+        }
+    }
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let flag_iri = iri_builder.feature_flag(&name, &payload.name);
+    let correlation_id = Uuid::new_v4();
+
+    let schema = iri_builder.event_schema("FeatureFlagChanged", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "FeatureFlagChanged",
+        flag_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "flag_iri": flag_iri.as_str(),
+            "product": name,
+            "flag_name": payload.name,
+            "enabled": payload.enabled,
+            "version_expr": payload.version,
+            "description": payload.description,
+            "action": "set",
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "flag": payload.name,
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append FeatureFlagChanged event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+/// DELETE /products/:name/flags/:flag — delete a feature flag (ADR-044)
+async fn handle_flag_delete(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path((name, flag_name)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let Some(ref event_log) = state.event_log else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "event log not available" })),
+        );
+    };
+
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let flag_iri = iri_builder.feature_flag(&name, &flag_name);
+    let correlation_id = Uuid::new_v4();
+
+    let schema = iri_builder.event_schema("FeatureFlagChanged", 1);
+    let envelope = EventEnvelope::new(
+        schema,
+        "FeatureFlagChanged",
+        flag_iri.clone(),
+        Some(name.clone()),
+        correlation_id,
+        serde_json::json!({
+            "flag_iri": flag_iri.as_str(),
+            "product": name,
+            "flag_name": flag_name,
+            "action": "deleted",
+        }),
+    );
+
+    match event_log.append(envelope).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "flag": flag_name,
+                "correlationId": correlation_id.to_string(),
+            })),
+        ),
+        Err(e) => {
+            warn!(error = %e, "Failed to append FeatureFlagChanged event");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
     }
 }
 

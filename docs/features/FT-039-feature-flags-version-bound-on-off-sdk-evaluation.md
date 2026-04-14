@@ -2,7 +2,7 @@
 id: FT-039
 title: Feature flags — version-bound on/off, SDK evaluation, event invalidation
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

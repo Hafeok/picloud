@@ -444,10 +444,10 @@
 - [x] TC-251: Config store typed key-value set and live-reloaded by workload (scenario) — passing
 - [x] TC-308: Config store exit — typed values stored, retrieved, and live-reloaded (exit-criteria) — passing
 
-### FT-039 — Feature flags — version-bound on/off, SDK evaluation, event invalidation [ ]
+### FT-039 — Feature flags — version-bound on/off, SDK evaluation, event invalidation [x]
 
-- [ ] TC-252: Feature flag toggled and SDK evaluation reflects new state (scenario) — unimplemented
-- [ ] TC-309: Feature flags exit — flag toggled and SDK evaluation updated (exit-criteria) — unimplemented
+- [x] TC-252: Feature flag toggled and SDK evaluation reflects new state (scenario) — passing
+- [x] TC-309: Feature flags exit — flag toggled and SDK evaluation updated (exit-criteria) — passing
 
 ### FT-040 — PICLOUD_PRODUCT_VERSION injected into all workloads at startup [ ]
 
