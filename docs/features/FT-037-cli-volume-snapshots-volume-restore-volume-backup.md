@@ -2,7 +2,7 @@
 id: FT-037
 title: 'CLI: volume snapshots, volume restore, volume backup'
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

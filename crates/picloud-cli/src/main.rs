@@ -370,10 +370,29 @@ enum VolumeCommands {
         /// Volume path (product/volumes/name) or full IRI
         volume: String,
     },
+    /// Create a snapshot for a volume (ADR-047)
+    SnapshotCreate {
+        /// Volume path (product/volumes/name) or full IRI
+        volume: String,
+        /// Product name (required for snapshot creation)
+        #[arg(long)]
+        product: Option<String>,
+    },
     /// List offsite backups for a volume (ADR-047)
     Backups {
         /// Volume path (product/volumes/name) or full IRI
         volume: String,
+    },
+    /// Trigger an offsite backup for a volume (ADR-047)
+    Backup {
+        /// Volume path (product/volumes/name) or full IRI
+        volume: String,
+        /// Product name
+        #[arg(long)]
+        product: Option<String>,
+        /// Backup target (default: offsite)
+        #[arg(long, default_value = "offsite")]
+        target: String,
     },
     /// Restore a volume from a snapshot (ADR-047)
     Restore {
@@ -2304,6 +2323,122 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     Err(e) => eprintln!("Failed to query backups: {}", e),
+                }
+            }
+            VolumeCommands::SnapshotCreate { volume, product } => {
+                let volume_iri = resolve_volume_iri(&cli.domain, &volume);
+                let product_name = product.as_deref().unwrap_or_else(|| {
+                    // Extract product from volume path: product/volumes/name → product
+                    volume.split('/').next().unwrap_or("default")
+                });
+                println!("Creating snapshot for volume {}", volume);
+
+                let payload = json!({
+                    "volume": volume.split('/').last().unwrap_or(&volume),
+                    "product": product_name,
+                    "volume_iri": volume_iri,
+                });
+
+                let mut request = client
+                    .client
+                    .post(format!("{}/api/volumes/snapshots", client.base_url))
+                    .json(&payload);
+
+                if let Some(ref token) = client.token {
+                    request = request.header("Authorization", format!("Bearer {}", token));
+                }
+
+                match request.send().await {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(body) => {
+                                if status.is_success() || status.as_u16() == 202 {
+                                    let snap_path = body.get("snapshot_path")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+                                    let created_at = body.get("created_at")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+                                    println!("Snapshot created successfully.");
+                                    println!("  Path:       {}", snap_path);
+                                    println!("  Created at: {}", created_at);
+                                } else {
+                                    let err = body.get("error")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown error");
+                                    eprintln!("Snapshot creation failed: {}", err);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to parse response: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Snapshot creation failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            VolumeCommands::Backup { volume, product, target } => {
+                let volume_iri = resolve_volume_iri(&cli.domain, &volume);
+                let product_name = product.as_deref().unwrap_or_else(|| {
+                    volume.split('/').next().unwrap_or("default")
+                });
+                println!("Triggering offsite backup for volume {}", volume);
+
+                let payload = json!({
+                    "volume": volume.split('/').last().unwrap_or(&volume),
+                    "product": product_name,
+                    "volume_iri": volume_iri,
+                    "target": target,
+                });
+
+                let mut request = client
+                    .client
+                    .post(format!("{}/api/volumes/backup", client.base_url))
+                    .json(&payload);
+
+                if let Some(ref token) = client.token {
+                    request = request.header("Authorization", format!("Bearer {}", token));
+                }
+
+                match request.send().await {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(body) => {
+                                if status.is_success() || status.as_u16() == 202 {
+                                    let backup_target = body.get("backup_target")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+                                    let completed_at = body.get("completed_at")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown");
+                                    println!("Backup initiated successfully.");
+                                    println!("  Target:       {}", backup_target);
+                                    println!("  Completed at: {}", completed_at);
+                                } else {
+                                    let err = body.get("error")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown error");
+                                    eprintln!("Backup failed: {}", err);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to parse response: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Backup failed: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
             VolumeCommands::Restore { volume, snapshot } => {

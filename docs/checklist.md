@@ -434,10 +434,10 @@
 - [x] TC-249: Backup failure emits alert event within configured threshold (scenario) — passing
 - [x] TC-306: Backup alerts exit — failure alert triggered within threshold (exit-criteria) — passing
 
-### FT-037 — CLI: volume snapshots, volume restore, volume backup [ ]
+### FT-037 — CLI: volume snapshots, volume restore, volume backup [x]
 
-- [ ] TC-250: CLI volume snapshot create and volume restore round-trip (scenario) — unimplemented
-- [ ] TC-307: CLI backup exit — volume snapshot and restore commands work (exit-criteria) — unimplemented
+- [x] TC-250: CLI volume snapshot create and volume restore round-trip (scenario) — passing
+- [x] TC-307: CLI backup exit — volume snapshot and restore commands work (exit-criteria) — passing
 
 ### FT-038 — Product configuration store — typed key-value with tags, workload override, live reload [ ]
 
