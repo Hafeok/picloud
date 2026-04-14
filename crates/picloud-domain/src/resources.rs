@@ -477,6 +477,43 @@ pub fn builtin_alert_rules() -> Vec<BuiltInAlertRule> {
     ]
 }
 
+/// A built-in event-driven alert rule (ADR-041, ADR-047).
+///
+/// Unlike `BuiltInAlertRule` which fires on metric thresholds, event alert
+/// rules fire when a specific event type is observed within a time window.
+/// The `threshold_secs` defines how quickly after the triggering event the
+/// alert must be emitted.
+#[derive(Debug, Clone)]
+pub struct BuiltInEventAlertRule {
+    /// Rule name, used to derive the rule IRI
+    pub name: &'static str,
+    /// The event type that triggers this alert (e.g. "BackupFailed")
+    pub trigger_event: &'static str,
+    /// Alert type name emitted in AlertFired
+    pub alert_type: &'static str,
+    /// Alert severity
+    pub severity: crate::events::AlertSeverity,
+    /// Human-readable message template (use {reason} for event payload details)
+    pub message_template: &'static str,
+    /// Maximum seconds between trigger event and alert emission
+    pub threshold_secs: u64,
+}
+
+/// The set of built-in event-driven alert rules shipped with PiCloud (ADR-041, ADR-047).
+pub fn builtin_event_alert_rules() -> Vec<BuiltInEventAlertRule> {
+    use crate::events::AlertSeverity;
+    vec![
+        BuiltInEventAlertRule {
+            name: "backup-failed-critical",
+            trigger_event: "BackupFailed",
+            alert_type: "BackupFailed",
+            severity: AlertSeverity::Critical,
+            message_template: "Offsite backup failed: {reason}",
+            threshold_secs: 5,
+        },
+    ]
+}
+
 // --- Capability resources (ADR-055) ---
 
 /// A Capability — a cluster-scoped interface contract (ADR-055)

@@ -40,6 +40,9 @@ pub enum PiCloudError {
     #[error("Insufficient storage capacity: requested {requested_gb}GB, available {available_gb}GB")]
     InsufficientCapacity { requested_gb: u64, available_gb: u64 },
 
+    #[error("Storage operation failed: {0}")]
+    Storage(String),
+
     // --- Cluster errors ---
     #[error("No cluster leader available")]
     NoLeader,

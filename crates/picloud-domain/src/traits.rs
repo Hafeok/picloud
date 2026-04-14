@@ -329,6 +329,22 @@ pub enum AlertAction {
     Resolve(crate::events::AlertResolvedPayload),
 }
 
+/// Evaluate built-in event-driven alert rules against incoming events and
+/// emit AlertFired events within the configured threshold (ADR-041, ADR-047).
+///
+/// Unlike `AlertEvaluator` which checks metrics, this trait reacts to specific
+/// event types (e.g. `BackupFailed`) and produces alerts immediately.
+/// Implemented by: picloud-storage (for backup alerts)
+#[async_trait]
+pub trait EventAlertEvaluator: Send + Sync {
+    /// Evaluate an incoming event against registered event alert rules.
+    /// Returns alert actions to emit (typically `AlertAction::Fire`).
+    async fn evaluate_event(
+        &self,
+        event: &crate::events::EventEnvelope,
+    ) -> Result<Vec<AlertAction>>;
+}
+
 // ---- Cluster Identity (ADR-042) ----
 
 /// Manage the cluster's immutable identity.

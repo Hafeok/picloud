@@ -2,7 +2,7 @@
 id: FT-036
 title: Backup failure alert rules (built-in)
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

@@ -316,15 +316,26 @@ impl BackupTarget for S3BackupClient {
 }
 
 /// In-memory backup target for testing — stores uploaded blobs in a `HashMap`.
+///
+/// Optionally simulates failures when `failure_message` is set.
 pub struct InMemoryBackupTarget {
     store: std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<u8>>>>,
+    /// When set, all uploads will fail with this error message.
+    failure_message: Option<String>,
 }
 
 impl InMemoryBackupTarget {
     pub fn new() -> Self {
         Self {
             store: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            failure_message: None,
         }
+    }
+
+    /// Create a failing backup target that returns errors on upload (FT-036).
+    pub fn with_failure(mut self, message: &str) -> Self {
+        self.failure_message = Some(message.to_string());
+        self
     }
 
     /// Return a snapshot of all stored keys.
@@ -343,6 +354,9 @@ impl InMemoryBackupTarget {
 #[async_trait::async_trait]
 impl BackupTarget for InMemoryBackupTarget {
     async fn upload(&self, key: &str, data: &[u8]) -> Result<()> {
+        if let Some(ref msg) = self.failure_message {
+            return Err(picloud_domain::error::PiCloudError::Storage(msg.clone()));
+        }
         let mut guard = self.store.write().await;
         guard.insert(key.to_string(), data.to_vec());
         Ok(())

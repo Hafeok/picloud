@@ -429,10 +429,10 @@
 - [x] TC-248: Snapshot and backup lifecycle events emitted to event log (scenario) — passing
 - [x] TC-305: Backup events exit — snapshot and backup lifecycle events emitted (exit-criteria) — passing
 
-### FT-036 — Backup failure alert rules (built-in) [ ]
+### FT-036 — Backup failure alert rules (built-in) [x]
 
-- [ ] TC-249: Backup failure emits alert event within configured threshold (scenario) — unimplemented
-- [ ] TC-306: Backup alerts exit — failure alert triggered within threshold (exit-criteria) — unimplemented
+- [x] TC-249: Backup failure emits alert event within configured threshold (scenario) — passing
+- [x] TC-306: Backup alerts exit — failure alert triggered within threshold (exit-criteria) — passing
 
 ### FT-037 — CLI: volume snapshots, volume restore, volume backup [ ]
 

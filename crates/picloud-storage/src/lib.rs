@@ -17,4 +17,5 @@ pub use implementation::LocalSnapshotManager;
 pub use implementation::SnapshotScheduler;
 pub use event_emitting::EventEmittingSnapshotManager;
 pub use event_emitting::EventEmittingBackupManager;
+pub use event_emitting::BackupFailureAlertEvaluator;
 pub use replication::StorageReplicator;

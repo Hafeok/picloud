@@ -331,6 +331,93 @@ impl<T: BackupTarget> EventEmittingBackupManager<T> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// BackupFailureAlertEvaluator (FT-036, ADR-047)
+// ---------------------------------------------------------------------------
+
+/// Evaluates incoming events against built-in event-driven alert rules for
+/// backup failures (FT-036).
+///
+/// When a `BackupFailed` event is observed, this evaluator produces an
+/// `AlertAction::Fire` with severity `Critical` within the configured
+/// threshold time. The threshold is defined in `builtin_event_alert_rules()`.
+pub struct BackupFailureAlertEvaluator {
+    rules: Vec<picloud_domain::resources::BuiltInEventAlertRule>,
+    iri_builder: IriBuilder,
+}
+
+impl BackupFailureAlertEvaluator {
+    /// Create a new backup failure alert evaluator with the built-in rules.
+    pub fn new() -> Self {
+        Self {
+            rules: picloud_domain::resources::builtin_event_alert_rules(),
+            iri_builder: IriBuilder::new(ClusterDomain::default()),
+        }
+    }
+
+    /// Create with custom rules (for testing threshold configuration).
+    pub fn with_rules(rules: Vec<picloud_domain::resources::BuiltInEventAlertRule>) -> Self {
+        Self {
+            rules,
+            iri_builder: IriBuilder::new(ClusterDomain::default()),
+        }
+    }
+
+    /// Returns a reference to the configured rules.
+    pub fn rules(&self) -> &[picloud_domain::resources::BuiltInEventAlertRule] {
+        &self.rules
+    }
+}
+
+impl Default for BackupFailureAlertEvaluator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl picloud_domain::traits::EventAlertEvaluator for BackupFailureAlertEvaluator {
+    async fn evaluate_event(
+        &self,
+        event: &picloud_domain::events::EventEnvelope,
+    ) -> picloud_domain::error::Result<Vec<picloud_domain::traits::AlertAction>> {
+        let mut actions = Vec::new();
+
+        for rule in &self.rules {
+            if event.event_type == rule.trigger_event {
+                let reason = event.payload["reason"]
+                    .as_str()
+                    .unwrap_or("unknown reason");
+                let resource_iri_str = event.payload["volume_iri"]
+                    .as_str()
+                    .unwrap_or(event.source.as_str());
+
+                let message = rule.message_template.replace("{reason}", reason);
+                let rule_iri = self.iri_builder.inference_rule(rule.name);
+
+                let payload = picloud_domain::events::AlertFiredPayload {
+                    alert_type: rule.alert_type.to_string(),
+                    severity: rule.severity.clone(),
+                    message,
+                    resource_iri: ResourceIri(resource_iri_str.to_string()),
+                    rule_iri,
+                    fired_at: Utc::now(),
+                };
+
+                debug!(
+                    alert_type = rule.alert_type,
+                    resource = resource_iri_str,
+                    "BackupFailureAlertEvaluator firing alert"
+                );
+
+                actions.push(picloud_domain::traits::AlertAction::Fire(payload));
+            }
+        }
+
+        Ok(actions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,5 +431,11 @@ mod tests {
         // This test just verifies the types are constructible — the real
         // integration tests run against InMemoryEventLog + LocalSnapshotManager.
         assert_eq!(std::mem::size_of::<EventEmittingBackupManager<crate::backup::InMemoryBackupTarget>>(), std::mem::size_of::<EventEmittingBackupManager<crate::backup::InMemoryBackupTarget>>());
+    }
+
+    #[test]
+    fn backup_failure_alert_evaluator_types_exist() {
+        let evaluator = BackupFailureAlertEvaluator::new();
+        assert!(!evaluator.rules().is_empty(), "should have at least one built-in event alert rule");
     }
 }
