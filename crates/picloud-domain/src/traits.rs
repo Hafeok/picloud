@@ -420,6 +420,26 @@ pub trait SnapshotManager: Send + Sync {
 
     /// List all offsite backups for a volume.
     async fn list_backups(&self, volume_iri: &ResourceIri) -> Result<Vec<BackupInfo>>;
+
+    /// Restore a snapshot to a new (different) volume.
+    ///
+    /// Copies the contents of the snapshot identified by `snapshot_timestamp`
+    /// (taken from `source_volume_iri`) into `target_volume_iri`. The target
+    /// volume directory is created if it does not exist.
+    async fn restore_snapshot_to_new_volume(
+        &self,
+        source_volume_iri: &ResourceIri,
+        snapshot_timestamp: &str,
+        target_volume_iri: &ResourceIri,
+    ) -> Result<()>;
+
+    /// Enforce retention policy: delete snapshots that exceed the configured
+    /// retention limits. Returns the number of snapshots deleted.
+    async fn enforce_retention(
+        &self,
+        volume_iri: &ResourceIri,
+        retention: &crate::storage::SnapshotRetention,
+    ) -> Result<usize>;
 }
 
 /// Information about a volume snapshot (ADR-047).

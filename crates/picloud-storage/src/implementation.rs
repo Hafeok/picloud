@@ -362,7 +362,7 @@ impl SnapshotManager for LocalSnapshotManager {
         }
 
         let now = chrono::Utc::now();
-        let timestamp = now.format("%Y-%m-%dT%H-%M-%SZ").to_string();
+        let timestamp = now.format("%Y-%m-%dT%H-%M-%S%.6fZ").to_string();
         let snapshot_path = self
             .snapshot_dir(&volume_name)
             .join(&timestamp);
@@ -499,6 +499,155 @@ impl SnapshotManager for LocalSnapshotManager {
     async fn list_backups(&self, _volume_iri: &ResourceIri) -> Result<Vec<BackupInfo>> {
         // Phase 1: no actual offsite backup transport — return empty list
         Ok(Vec::new())
+    }
+
+    async fn restore_snapshot_to_new_volume(
+        &self,
+        source_volume_iri: &ResourceIri,
+        snapshot_timestamp: &str,
+        target_volume_iri: &ResourceIri,
+    ) -> Result<()> {
+        let source_name = Self::volume_name(source_volume_iri);
+        let target_name = Self::volume_name(target_volume_iri);
+
+        let snapshot_path = self
+            .snapshot_dir(&source_name)
+            .join(snapshot_timestamp);
+
+        if !snapshot_path.exists() {
+            return Err(PiCloudError::ResourceNotFound {
+                iri: format!(
+                    "snapshot {} for {}",
+                    snapshot_timestamp, source_volume_iri
+                ),
+            });
+        }
+
+        let target_dir = self.base_path.join(&target_name);
+
+        // Create the target volume directory and copy snapshot contents into it
+        Self::copy_dir_all(&snapshot_path, &target_dir).map_err(|e| {
+            PiCloudError::Internal(format!(
+                "Failed to restore snapshot to new volume {}: {}",
+                target_name, e
+            ))
+        })?;
+
+        info!(
+            source_volume = %source_volume_iri,
+            target_volume = %target_volume_iri,
+            snapshot = snapshot_timestamp,
+            "Volume restored from snapshot to new volume"
+        );
+
+        Ok(())
+    }
+
+    async fn enforce_retention(
+        &self,
+        volume_iri: &ResourceIri,
+        retention: &picloud_domain::storage::SnapshotRetention,
+    ) -> Result<usize> {
+        let mut snapshots = self.list_snapshots(volume_iri).await?;
+        if snapshots.is_empty() {
+            return Ok(0);
+        }
+
+        // Snapshots are sorted newest-first by list_snapshots
+        // For Phase 1 we apply a simple policy: keep at most
+        // retention.daily snapshots total (the most recent ones).
+        // Weekly/monthly tiers will be implemented when the scheduler
+        // categorises snapshots by age bracket.
+        let max_keep = retention.daily as usize;
+        if max_keep == 0 || snapshots.len() <= max_keep {
+            return Ok(0);
+        }
+
+        // Sort newest-first (already done by list_snapshots, but be explicit)
+        snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        let to_delete = snapshots.split_off(max_keep);
+        let deleted_count = to_delete.len();
+
+        for snap in &to_delete {
+            self.delete_snapshot(volume_iri, &snap.snapshot_path).await?;
+        }
+
+        info!(
+            volume = %volume_iri,
+            kept = max_keep,
+            deleted = deleted_count,
+            "Snapshot retention enforced"
+        );
+
+        Ok(deleted_count)
+    }
+}
+
+/// Snapshot scheduler — checks whether a snapshot is due based on a
+/// `SnapshotSchedule` and triggers creation + retention enforcement.
+///
+/// In production this runs as a background Tokio task. For testing it
+/// exposes `run_once` which performs a single evaluation cycle.
+pub struct SnapshotScheduler<S: SnapshotManager> {
+    snapshot_manager: Arc<S>,
+}
+
+impl<S: SnapshotManager> SnapshotScheduler<S> {
+    pub fn new(snapshot_manager: Arc<S>) -> Self {
+        Self { snapshot_manager }
+    }
+
+    /// Determine whether a snapshot is due given the schedule and the most
+    /// recent snapshot timestamp.
+    pub fn is_due(
+        schedule: &picloud_domain::storage::SnapshotSchedule,
+        last_snapshot: Option<chrono::DateTime<chrono::Utc>>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        let interval = match schedule {
+            picloud_domain::storage::SnapshotSchedule::Hourly => chrono::Duration::hours(1),
+            picloud_domain::storage::SnapshotSchedule::Daily => chrono::Duration::days(1),
+            picloud_domain::storage::SnapshotSchedule::Weekly => chrono::Duration::weeks(1),
+        };
+        match last_snapshot {
+            None => true, // never taken — due immediately
+            Some(last) => now - last >= interval,
+        }
+    }
+
+    /// Execute a single scheduling cycle for one volume:
+    /// 1. Check if a snapshot is due.
+    /// 2. Create a snapshot if due.
+    /// 3. Enforce retention.
+    ///
+    /// Returns `Some(SnapshotInfo)` when a snapshot was created, `None` if
+    /// no snapshot was due.
+    pub async fn run_once(
+        &self,
+        volume_iri: &ResourceIri,
+        config: &picloud_domain::storage::SnapshotConfig,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<SnapshotInfo>> {
+        if !config.enabled {
+            return Ok(None);
+        }
+
+        let existing = self.snapshot_manager.list_snapshots(volume_iri).await?;
+        let last = existing.first().map(|s| s.created_at);
+
+        if !Self::is_due(&config.schedule, last, now) {
+            return Ok(None);
+        }
+
+        let info = self.snapshot_manager.create_snapshot(volume_iri).await?;
+
+        // Enforce retention after creating a new snapshot
+        self.snapshot_manager
+            .enforce_retention(volume_iri, &config.retention)
+            .await?;
+
+        Ok(Some(info))
     }
 }
 
@@ -958,6 +1107,240 @@ mod tests {
         backend.delete_volume(&mounted_iri).await.unwrap();
         assert_eq!(backend.available_capacity_gb().await.unwrap(), 200);
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -----------------------------------------------------------------------
+    // TC-246 — Volume snapshot created on schedule and restorable to new volume
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn tc246_volume_snapshot_created_on_schedule_and_restorable_to_new_volume() {
+        use picloud_domain::storage::{SnapshotConfig, SnapshotRetention, SnapshotSchedule};
+
+        let base = temp_base_path();
+        let backend = make_backend(base.clone(), 100);
+        let snap_mgr = Arc::new(LocalSnapshotManager::new(base.clone()));
+        let scheduler = super::SnapshotScheduler::new(snap_mgr.clone());
+
+        let volume_iri = make_volume_iri("sched-vol");
+        let intent = StorageIntent::default();
+
+        // --- Allocate a volume and write test data ---
+        let handle = backend
+            .allocate_volume(&volume_iri, 5, &intent, &VolumeType::Mounted)
+            .await
+            .unwrap();
+        let data_file = std::path::PathBuf::from(&handle.device_path).join("data.txt");
+        std::fs::write(&data_file, b"scheduled-snapshot-data").unwrap();
+
+        // --- Configure a snapshot schedule (Hourly, keep 3 daily) ---
+        let config = SnapshotConfig {
+            enabled: true,
+            schedule: SnapshotSchedule::Hourly,
+            storage_secret: "test-nas-secret".to_string(),
+            retention: SnapshotRetention {
+                daily: 3,
+                weekly: 2,
+                monthly: 1,
+            },
+        };
+
+        // --- First run: no previous snapshots → should create one ---
+        let now = chrono::Utc::now();
+        let result = scheduler.run_once(&volume_iri, &config, now).await.unwrap();
+        assert!(result.is_some(), "first run should create a snapshot");
+        let snap1 = result.unwrap();
+        assert!(snap1.size_bytes > 0, "snapshot should have non-zero size");
+
+        // --- Immediately after: not due yet (< 1 hour elapsed) ---
+        let soon = now + chrono::Duration::minutes(30);
+        let result2 = scheduler.run_once(&volume_iri, &config, soon).await.unwrap();
+        assert!(result2.is_none(), "snapshot not due within the hour");
+
+        // --- After 1 hour: should create another ---
+        let one_hour_later = now + chrono::Duration::hours(1);
+        let result3 = scheduler
+            .run_once(&volume_iri, &config, one_hour_later)
+            .await
+            .unwrap();
+        assert!(result3.is_some(), "snapshot due after 1 hour");
+
+        // --- Verify snapshots are listed ---
+        let listed = snap_mgr.list_snapshots(&volume_iri).await.unwrap();
+        assert!(listed.len() >= 2, "at least 2 snapshots should exist");
+
+        // --- Restore the first snapshot to a NEW volume ---
+        let new_volume_iri = make_volume_iri("restored-vol");
+        // Extract the timestamp portion from the first snapshot path
+        let snap_timestamp = std::path::Path::new(&snap1.snapshot_path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        snap_mgr
+            .restore_snapshot_to_new_volume(&volume_iri, &snap_timestamp, &new_volume_iri)
+            .await
+            .unwrap();
+
+        // --- Verify the restored volume contains the original data ---
+        let restored_data_file = base.join("restored-vol").join("data.txt");
+        assert!(
+            restored_data_file.exists(),
+            "restored volume should contain data.txt"
+        );
+        let restored_content = std::fs::read_to_string(&restored_data_file).unwrap();
+        assert_eq!(
+            restored_content, "scheduled-snapshot-data",
+            "restored data must match original"
+        );
+
+        // --- Retention enforcement: create enough snapshots to exceed limit ---
+        // We already have 2. Create 2 more to have 4 total (limit is 3).
+        for _ in 0..2 {
+            snap_mgr.create_snapshot(&volume_iri).await.unwrap();
+        }
+        let before_retention = snap_mgr.list_snapshots(&volume_iri).await.unwrap();
+        assert!(
+            before_retention.len() >= 4,
+            "should have >= 4 snapshots before retention"
+        );
+
+        let deleted = snap_mgr
+            .enforce_retention(&volume_iri, &config.retention)
+            .await
+            .unwrap();
+        assert!(deleted > 0, "retention should have deleted old snapshots");
+
+        let after_retention = snap_mgr.list_snapshots(&volume_iri).await.unwrap();
+        assert_eq!(
+            after_retention.len(),
+            3,
+            "should keep exactly 3 snapshots (daily limit)"
+        );
+
+        // --- Disabled config should be a no-op ---
+        let disabled_config = SnapshotConfig {
+            enabled: false,
+            ..config.clone()
+        };
+        let disabled_result = scheduler
+            .run_once(&volume_iri, &disabled_config, chrono::Utc::now())
+            .await
+            .unwrap();
+        assert!(disabled_result.is_none(), "disabled config should not create snapshot");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -----------------------------------------------------------------------
+    // TC-303 — Volume snapshots exit — snapshot created, listed, and restored
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn tc303_volume_snapshots_exit_snapshot_created_listed_and_restored() {
+        let base = temp_base_path();
+        let backend = make_backend(base.clone(), 100);
+        let snap_mgr = LocalSnapshotManager::new(base.clone());
+
+        let volume_iri = make_volume_iri("snap-exit-vol");
+        let intent = StorageIntent::default();
+
+        // --- 1. Allocate a mounted volume ---
+        let handle = backend
+            .allocate_volume(&volume_iri, 5, &intent, &VolumeType::Mounted)
+            .await
+            .unwrap();
+        assert!(
+            std::path::Path::new(&handle.device_path).is_dir(),
+            "volume directory must exist"
+        );
+
+        // --- 2. Write known data to the volume ---
+        let file1 = std::path::PathBuf::from(&handle.device_path).join("file1.txt");
+        let file2 = std::path::PathBuf::from(&handle.device_path).join("file2.txt");
+        std::fs::write(&file1, b"hello-snapshot").unwrap();
+        std::fs::write(&file2, b"second-file-data").unwrap();
+
+        // --- 3. Create a snapshot (exit criterion: snapshot created) ---
+        let snap_info = snap_mgr.create_snapshot(&volume_iri).await.unwrap();
+        assert_eq!(snap_info.volume_iri, volume_iri);
+        assert!(snap_info.size_bytes > 0, "snapshot must have content");
+        assert!(
+            std::path::Path::new(&snap_info.snapshot_path).exists(),
+            "snapshot directory must exist on disk"
+        );
+
+        // --- 4. List snapshots (exit criterion: snapshot listed) ---
+        let listed = snap_mgr.list_snapshots(&volume_iri).await.unwrap();
+        assert_eq!(listed.len(), 1, "exactly one snapshot should exist");
+        assert_eq!(listed[0].snapshot_path, snap_info.snapshot_path);
+
+        // --- 5. Mutate the volume data (simulates corruption / later writes) ---
+        std::fs::write(&file1, b"overwritten-data").unwrap();
+        std::fs::remove_file(&file2).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file1).unwrap(),
+            "overwritten-data"
+        );
+        assert!(!file2.exists());
+
+        // --- 6. Restore from snapshot (exit criterion: snapshot restored) ---
+        let snap_timestamp = std::path::Path::new(&snap_info.snapshot_path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        snap_mgr
+            .restore_snapshot(&volume_iri, &snap_timestamp)
+            .await
+            .unwrap();
+
+        // --- 7. Verify data matches the original snapshot ---
+        let restored1 = std::fs::read_to_string(&file1).unwrap();
+        assert_eq!(
+            restored1, "hello-snapshot",
+            "file1 must be restored to original content"
+        );
+        assert!(file2.exists(), "file2 must be restored");
+        let restored2 = std::fs::read_to_string(&file2).unwrap();
+        assert_eq!(
+            restored2, "second-file-data",
+            "file2 must be restored to original content"
+        );
+
+        // --- 8. Create a second snapshot and verify listing ---
+        std::fs::write(&file1, b"new-data-after-restore").unwrap();
+        let snap2 = snap_mgr.create_snapshot(&volume_iri).await.unwrap();
+        let listed2 = snap_mgr.list_snapshots(&volume_iri).await.unwrap();
+        assert_eq!(listed2.len(), 2, "two snapshots should exist");
+        // Newest first
+        assert_eq!(listed2[0].snapshot_path, snap2.snapshot_path);
+
+        // --- 9. Restore to a new volume (exit criterion: restorable to different target) ---
+        let new_vol_iri = make_volume_iri("snap-exit-restored");
+        snap_mgr
+            .restore_snapshot_to_new_volume(&volume_iri, &snap_timestamp, &new_vol_iri)
+            .await
+            .unwrap();
+        let new_vol_file1 = base.join("snap-exit-restored").join("file1.txt");
+        assert_eq!(
+            std::fs::read_to_string(&new_vol_file1).unwrap(),
+            "hello-snapshot",
+            "new volume must contain original data from first snapshot"
+        );
+
+        // --- 10. Delete a snapshot and verify ---
+        snap_mgr
+            .delete_snapshot(&volume_iri, &snap_info.snapshot_path)
+            .await
+            .unwrap();
+        let listed3 = snap_mgr.list_snapshots(&volume_iri).await.unwrap();
+        assert_eq!(listed3.len(), 1, "one snapshot should remain after deletion");
+
+        // Cleanup
         let _ = std::fs::remove_dir_all(&base);
     }
 }
