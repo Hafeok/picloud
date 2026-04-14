@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use picloud_domain::events::EventEnvelope;
 use picloud_domain::iri::{IriBuilder, ResourceIri};
+use picloud_domain::resources::VolumeType;
 use picloud_domain::storage::StorageIntent;
 use picloud_domain::traits::{EventFilter, EventLog, SecretStore, StateProjector, StorageBackend, WorkloadScheduler, WorkloadSpec};
 use picloud_domain::workload::{ContainerSpec, BinarySpec, EnvValue, PortMapping, ResourceLimits, RestartPolicy, VolumeMount};
@@ -280,9 +281,14 @@ async fn provision_volume(
         .and_then(|v| v.as_u64())
         .unwrap_or(1);
 
+    let volume_type = payload
+        .get("volume_type")
+        .and_then(|v| serde_json::from_value::<VolumeType>(v.clone()).ok())
+        .unwrap_or(VolumeType::Mounted);
+
     let intent = StorageIntent::default();
 
-    storage.allocate_volume(resource_iri, size_gb, &intent).await?;
+    storage.allocate_volume(resource_iri, size_gb, &intent, &volume_type).await?;
     Ok(())
 }
 
@@ -966,6 +972,7 @@ mod tests {
             volume_iri: &ResourceIri,
             _size_gb: u64,
             _intent: &StorageIntent,
+            _volume_type: &VolumeType,
         ) -> Result<VolumeHandle> {
             self.allocated.lock().unwrap().push(volume_iri.0.clone());
             Ok(VolumeHandle {

@@ -341,6 +341,7 @@ impl picloud_domain::traits::StorageBackend for FakeStorage {
         _iri: &picloud_domain::iri::ResourceIri,
         _size: u64,
         _intent: &picloud_domain::storage::StorageIntent,
+        _volume_type: &picloud_domain::resources::VolumeType,
     ) -> picloud_domain::error::Result<picloud_domain::traits::VolumeHandle> {
         Ok(picloud_domain::traits::VolumeHandle {
             volume_iri: picloud_domain::iri::ResourceIri::new("https://picloud.local/test/vol").unwrap(),

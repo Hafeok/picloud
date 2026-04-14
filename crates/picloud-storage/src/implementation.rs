@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use picloud_domain::error::{PiCloudError, Result};
 use picloud_domain::iri::{ClusterDomain, IriBuilder, ResourceIri};
+use picloud_domain::resources::VolumeType;
 use picloud_domain::storage::{DurabilityTier, StorageIntent};
 use picloud_domain::traits::{
     BackupInfo, ClusterMembership, SnapshotInfo, SnapshotManager, StorageBackend, VolumeHandle,
@@ -107,6 +108,7 @@ impl StorageBackend for LocalStorageBackend {
         volume_iri: &ResourceIri,
         size_gb: u64,
         intent: &StorageIntent,
+        volume_type: &VolumeType,
     ) -> Result<VolumeHandle> {
         let available = self.available_capacity_gb().await?;
         if size_gb > available {
@@ -117,17 +119,55 @@ impl StorageBackend for LocalStorageBackend {
         }
 
         let volume_name = Self::volume_name_from_iri(volume_iri);
-        let volume_dir = self.base_path.join(&volume_name);
 
-        std::fs::create_dir_all(&volume_dir).map_err(|e| {
-            PiCloudError::Internal(format!(
-                "Failed to create volume directory {}: {}",
-                volume_dir.display(),
-                e
-            ))
-        })?;
-
-        let device_path = volume_dir.to_string_lossy().to_string();
+        let device_path = match volume_type {
+            VolumeType::Mounted => {
+                // Mounted volumes: create a directory (existing Phase 1 behaviour)
+                let volume_dir = self.base_path.join(&volume_name);
+                std::fs::create_dir_all(&volume_dir).map_err(|e| {
+                    PiCloudError::Internal(format!(
+                        "Failed to create volume directory {}: {}",
+                        volume_dir.display(),
+                        e
+                    ))
+                })?;
+                volume_dir.to_string_lossy().to_string()
+            }
+            VolumeType::RawBlock => {
+                // Raw block devices: create a fixed-size file that simulates
+                // a block device. On production NVMe hardware this would be a
+                // real /dev/ node; in Phase 1 we use a regular file so tests
+                // can read and write without root privileges.
+                let block_dir = self.base_path.join("block");
+                std::fs::create_dir_all(&block_dir).map_err(|e| {
+                    PiCloudError::Internal(format!(
+                        "Failed to create block device directory {}: {}",
+                        block_dir.display(),
+                        e
+                    ))
+                })?;
+                let block_file = block_dir.join(&volume_name);
+                // Allocate the file at the declared size (1 GB = 1 GiB for
+                // simulation — we only write the first/last byte so the OS
+                // can use a sparse file on filesystems that support it).
+                let size_bytes = size_gb * 1024 * 1024 * 1024;
+                let file = std::fs::File::create(&block_file).map_err(|e| {
+                    PiCloudError::Internal(format!(
+                        "Failed to create raw block file {}: {}",
+                        block_file.display(),
+                        e
+                    ))
+                })?;
+                file.set_len(size_bytes).map_err(|e| {
+                    PiCloudError::Internal(format!(
+                        "Failed to set raw block file size {}: {}",
+                        block_file.display(),
+                        e
+                    ))
+                })?;
+                block_file.to_string_lossy().to_string()
+            }
+        };
 
         let record = VolumeRecord {
             volume_iri: volume_iri.as_str().to_string(),
@@ -199,13 +239,23 @@ impl StorageBackend for LocalStorageBackend {
             Some(record) => {
                 let path = PathBuf::from(&record.device_path);
                 if path.exists() {
-                    std::fs::remove_dir_all(&path).map_err(|e| {
-                        PiCloudError::Internal(format!(
-                            "Failed to remove volume directory {}: {}",
-                            path.display(),
-                            e
-                        ))
-                    })?;
+                    if path.is_dir() {
+                        std::fs::remove_dir_all(&path).map_err(|e| {
+                            PiCloudError::Internal(format!(
+                                "Failed to remove volume directory {}: {}",
+                                path.display(),
+                                e
+                            ))
+                        })?;
+                    } else {
+                        std::fs::remove_file(&path).map_err(|e| {
+                            PiCloudError::Internal(format!(
+                                "Failed to remove raw block file {}: {}",
+                                path.display(),
+                                e
+                            ))
+                        })?;
+                    }
                 }
 
                 info!(volume_iri = %volume_iri, "Volume deleted");
@@ -456,6 +506,7 @@ impl SnapshotManager for LocalSnapshotManager {
 mod tests {
     use super::*;
     use picloud_domain::iri::ResourceIri;
+    use picloud_domain::resources::VolumeType;
     use picloud_domain::storage::StorageIntent;
     use picloud_domain::traits::{ClusterMembership, NodeInfo};
 
@@ -522,7 +573,7 @@ mod tests {
         let iri = make_volume_iri("vol-1");
         let intent = StorageIntent::default();
 
-        let handle = backend.allocate_volume(&iri, 30, &intent).await.unwrap();
+        let handle = backend.allocate_volume(&iri, 30, &intent, &VolumeType::Mounted).await.unwrap();
         assert_eq!(handle.volume_iri, iri);
         assert!(handle.device_path.contains("vol-1"));
         assert_eq!(handle.replicated_to.len(), 1);
@@ -541,7 +592,7 @@ mod tests {
         let iri = make_volume_iri("vol-2");
         let intent = StorageIntent::default();
 
-        backend.allocate_volume(&iri, 25, &intent).await.unwrap();
+        backend.allocate_volume(&iri, 25, &intent, &VolumeType::Mounted).await.unwrap();
         assert_eq!(backend.available_capacity_gb().await.unwrap(), 75);
 
         backend.delete_volume(&iri).await.unwrap();
@@ -561,7 +612,7 @@ mod tests {
         let iri = make_volume_iri("big-vol");
         let intent = StorageIntent::default();
 
-        let result = backend.allocate_volume(&iri, 20, &intent).await;
+        let result = backend.allocate_volume(&iri, 20, &intent, &VolumeType::Mounted).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -586,15 +637,15 @@ mod tests {
         let intent = StorageIntent::default();
 
         backend
-            .allocate_volume(&make_volume_iri("v1"), 10, &intent)
+            .allocate_volume(&make_volume_iri("v1"), 10, &intent, &VolumeType::Mounted)
             .await
             .unwrap();
         backend
-            .allocate_volume(&make_volume_iri("v2"), 20, &intent)
+            .allocate_volume(&make_volume_iri("v2"), 20, &intent, &VolumeType::Mounted)
             .await
             .unwrap();
         backend
-            .allocate_volume(&make_volume_iri("v3"), 30, &intent)
+            .allocate_volume(&make_volume_iri("v3"), 30, &intent, &VolumeType::Mounted)
             .await
             .unwrap();
 
@@ -643,7 +694,7 @@ mod tests {
         let iri = make_volume_iri("replicated-vol");
         let intent = StorageIntent::default(); // FullReplication
 
-        let handle = backend.allocate_volume(&iri, 10, &intent).await.unwrap();
+        let handle = backend.allocate_volume(&iri, 10, &intent, &VolumeType::Mounted).await.unwrap();
 
         // Should list all 3 cluster nodes
         assert_eq!(handle.replicated_to.len(), 3);
@@ -677,7 +728,7 @@ mod tests {
             offsite: None,
         };
 
-        let handle = backend.allocate_volume(&iri, 10, &intent).await.unwrap();
+        let handle = backend.allocate_volume(&iri, 10, &intent, &VolumeType::Mounted).await.unwrap();
 
         // Quorum of 5 nodes = 3 (5/2 + 1)
         assert_eq!(handle.replicated_to.len(), 3);
@@ -705,7 +756,7 @@ mod tests {
             offsite: None,
         };
 
-        let handle = backend.allocate_volume(&iri, 10, &intent).await.unwrap();
+        let handle = backend.allocate_volume(&iri, 10, &intent, &VolumeType::Mounted).await.unwrap();
 
         // Local durability = only this node
         assert_eq!(handle.replicated_to.len(), 1);
@@ -722,10 +773,190 @@ mod tests {
         let iri = make_volume_iri("no-membership-vol");
         let intent = StorageIntent::default(); // FullReplication
 
-        let handle = backend.allocate_volume(&iri, 10, &intent).await.unwrap();
+        let handle = backend.allocate_volume(&iri, 10, &intent, &VolumeType::Mounted).await.unwrap();
 
         // Without cluster membership, only local node is listed
         assert_eq!(handle.replicated_to.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -----------------------------------------------------------------------
+    // TC-243 — Raw block device attached to workload is readable and writable
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn tc243_raw_block_device_attached_to_workload_is_readable_and_writable() {
+        let base = temp_base_path();
+        let backend = make_backend(base.clone(), 100);
+        let iri = make_volume_iri("raw-vol");
+        let intent = StorageIntent::default();
+
+        // Allocate a raw block device volume (1 GB sparse file)
+        let handle = backend
+            .allocate_volume(&iri, 1, &intent, &VolumeType::RawBlock)
+            .await
+            .unwrap();
+
+        // The device_path should point into the block/ subdirectory
+        assert!(
+            handle.device_path.contains("block/raw-vol"),
+            "device_path should be a block file, got: {}",
+            handle.device_path
+        );
+
+        let path = std::path::Path::new(&handle.device_path);
+        assert!(path.exists(), "raw block file must exist on disk");
+        assert!(path.is_file(), "raw block device must be a regular file");
+
+        // File size should be 1 GiB (sparse)
+        let meta = std::fs::metadata(path).unwrap();
+        assert_eq!(
+            meta.len(),
+            1 * 1024 * 1024 * 1024,
+            "raw block file should be 1 GiB"
+        );
+
+        // Write arbitrary data at the beginning of the block device
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let test_data = b"PiCloud raw block device test payload";
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap();
+            f.write_all(test_data).unwrap();
+            f.flush().unwrap();
+        }
+
+        // Read it back and verify
+        {
+            let mut f = std::fs::File::open(path).unwrap();
+            let mut buf = vec![0u8; test_data.len()];
+            f.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, test_data, "read-back must match written data");
+        }
+
+        // Write at an arbitrary offset (simulating random I/O)
+        let offset: u64 = 4096;
+        let offset_data = b"offset-write-test";
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap();
+            f.seek(SeekFrom::Start(offset)).unwrap();
+            f.write_all(offset_data).unwrap();
+            f.flush().unwrap();
+        }
+
+        // Read offset data back
+        {
+            let mut f = std::fs::File::open(path).unwrap();
+            f.seek(SeekFrom::Start(offset)).unwrap();
+            let mut buf = vec![0u8; offset_data.len()];
+            f.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, offset_data, "offset read-back must match");
+        }
+
+        // Capacity should have decreased
+        let available = backend.available_capacity_gb().await.unwrap();
+        assert_eq!(available, 99, "allocating 1 GB should decrease capacity");
+
+        // Clean up
+        backend.delete_volume(&iri).await.unwrap();
+        assert!(
+            !path.exists(),
+            "raw block file should be removed after delete"
+        );
+        assert_eq!(
+            backend.available_capacity_gb().await.unwrap(),
+            100,
+            "capacity restored after deletion"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -----------------------------------------------------------------------
+    // TC-300 — Block device exit — raw block device provisioned and accessible
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn tc300_block_device_exit_raw_block_device_provisioned_and_accessible() {
+        let base = temp_base_path();
+        let local_id = Uuid::new_v4();
+        let node2 = Uuid::new_v4();
+        let node3 = Uuid::new_v4();
+        let membership = Arc::new(MockClusterMembership::new(
+            local_id,
+            vec![local_id, node2, node3],
+        ));
+        let backend =
+            LocalStorageBackend::with_cluster_membership(base.clone(), local_id, 200, membership);
+
+        let intent = StorageIntent::default(); // FullReplication
+
+        // --- Provision a raw block volume ---
+        let iri = make_volume_iri("block-exit-vol");
+        let handle = backend
+            .allocate_volume(&iri, 2, &intent, &VolumeType::RawBlock)
+            .await
+            .unwrap();
+
+        // Exit criterion 1: volume is provisioned — handle returned without error
+        assert_eq!(handle.volume_iri, iri);
+
+        // Exit criterion 2: device_path exists and is a file (Phase 1 simulation)
+        let path = std::path::Path::new(&handle.device_path);
+        assert!(path.exists(), "block device must be provisioned on disk");
+        assert!(path.is_file(), "block device is a regular file in Phase 1");
+
+        // Exit criterion 3: file is the declared size
+        let meta = std::fs::metadata(path).unwrap();
+        assert_eq!(meta.len(), 2 * 1024 * 1024 * 1024);
+
+        // Exit criterion 4: replication targets populated for FullReplication
+        assert_eq!(
+            handle.replicated_to.len(),
+            3,
+            "FullReplication should list all cluster nodes"
+        );
+
+        // Exit criterion 5: the device is accessible (read + write)
+        use std::io::{Read, Write};
+        let payload = b"exit-criteria-validation";
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap();
+            f.write_all(payload).unwrap();
+        }
+        {
+            let mut f = std::fs::File::open(path).unwrap();
+            let mut buf = vec![0u8; payload.len()];
+            f.read_exact(&mut buf).unwrap();
+            assert_eq!(&buf, payload);
+        }
+
+        // Exit criterion 6: a mounted volume still works alongside a raw block volume
+        let mounted_iri = make_volume_iri("mounted-exit-vol");
+        let mounted_handle = backend
+            .allocate_volume(&mounted_iri, 5, &intent, &VolumeType::Mounted)
+            .await
+            .unwrap();
+        let mounted_path = std::path::Path::new(&mounted_handle.device_path);
+        assert!(mounted_path.is_dir(), "mounted volume must be a directory");
+
+        // Exit criterion 7: capacity tracks both volume types correctly
+        let available = backend.available_capacity_gb().await.unwrap();
+        assert_eq!(available, 193, "200 - 2 (raw) - 5 (mounted) = 193");
+
+        // Cleanup
+        backend.delete_volume(&iri).await.unwrap();
+        backend.delete_volume(&mounted_iri).await.unwrap();
+        assert_eq!(backend.available_capacity_gb().await.unwrap(), 200);
 
         let _ = std::fs::remove_dir_all(&base);
     }

@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::error::Result;
 use crate::events::{CertType, EventEnvelope, MetricRecord, SpanRecord, TelemetryFilter};
 use crate::iri::ResourceIri;
+use crate::resources::VolumeType;
 
 // ---- Event Log ----
 
@@ -205,6 +206,7 @@ pub trait StorageBackend: Send + Sync {
         volume_iri: &ResourceIri,
         size_gb: u64,
         intent: &crate::storage::StorageIntent,
+        volume_type: &VolumeType,
     ) -> Result<VolumeHandle>;
 
     async fn delete_volume(&self, volume_iri: &ResourceIri) -> Result<()>;

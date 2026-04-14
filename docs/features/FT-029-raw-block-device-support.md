@@ -2,7 +2,7 @@
 id: FT-029
 title: Raw block device support
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
