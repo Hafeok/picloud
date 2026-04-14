@@ -405,10 +405,10 @@
 - [x] TC-244: Secret encrypted at rest and injected into workload environment (scenario) — passing
 - [x] TC-301: Secret management exit — secrets encrypted at rest and injected (exit-criteria) — passing
 
-### FT-031 — Cascading deletion — delete Product cascades to all child resources [ ]
+### FT-031 — Cascading deletion — delete Product cascades to all child resources [x]
 
-- [ ] TC-245: Delete Product cascades to all child containers, volumes, and identities (scenario) — unimplemented
-- [ ] TC-302: Cascading delete exit — product deletion removes all child resources (exit-criteria) — unimplemented
+- [x] TC-245: Delete Product cascades to all child containers, volumes, and identities (scenario) — passing
+- [x] TC-302: Cascading delete exit — product deletion removes all child resources (exit-criteria) — passing
 
 ### FT-032 — Per-product event bus [ ]
 

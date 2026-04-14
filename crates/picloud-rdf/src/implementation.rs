@@ -1112,9 +1112,11 @@ impl OxigraphProjector {
                 }
             }
 
-            // Query 2: children whose IRI contains /products/{product_name}/
+            // Query 2: any subject whose IRI contains /products/{product_name}/
+            // (catches NetworkPolicy, ontology, and other auto-created resources
+            // that may not be typed as picloud:Resource)
             let path_query = format!(
-                "SELECT ?child WHERE {{ ?child a <{PICLOUD_NS}Resource> . FILTER(CONTAINS(STR(?child), \"/products/{}/\")) }}",
+                "SELECT DISTINCT ?child WHERE {{ ?child ?p ?o . FILTER(CONTAINS(STR(?child), \"/products/{}/\")) }}",
                 product_name
             );
             if let Ok(result) = self.execute_query(&path_query) {
