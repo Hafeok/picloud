@@ -410,7 +410,7 @@
 - [x] TC-245: Delete Product cascades to all child containers, volumes, and identities (scenario) — passing
 - [x] TC-302: Cascading delete exit — product deletion removes all child resources (exit-criteria) — passing
 
-### FT-032 — Per-product event bus [ ]
+### FT-032 — Per-product event bus [x]
 
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 

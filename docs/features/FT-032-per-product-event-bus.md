@@ -2,7 +2,7 @@
 id: FT-032
 title: Per-product event bus
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
