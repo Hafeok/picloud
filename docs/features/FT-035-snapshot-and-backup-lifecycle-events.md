@@ -2,7 +2,7 @@
 id: FT-035
 title: Snapshot and backup lifecycle events
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

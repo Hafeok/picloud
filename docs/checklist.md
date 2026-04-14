@@ -424,10 +424,10 @@
 - [x] TC-247: Offsite backup uploads encrypted incremental snapshot to S3 endpoint (scenario) — passing
 - [x] TC-304: Offsite backup exit — backup uploaded encrypted to S3 endpoint (exit-criteria) — passing
 
-### FT-035 — Snapshot and backup lifecycle events [ ]
+### FT-035 — Snapshot and backup lifecycle events [x]
 
-- [ ] TC-248: Snapshot and backup lifecycle events emitted to event log (scenario) — unimplemented
-- [ ] TC-305: Backup events exit — snapshot and backup lifecycle events emitted (exit-criteria) — unimplemented
+- [x] TC-248: Snapshot and backup lifecycle events emitted to event log (scenario) — passing
+- [x] TC-305: Backup events exit — snapshot and backup lifecycle events emitted (exit-criteria) — passing
 
 ### FT-036 — Backup failure alert rules (built-in) [ ]
 

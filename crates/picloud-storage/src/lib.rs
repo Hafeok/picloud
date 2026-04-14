@@ -9,9 +9,12 @@
 
 pub mod implementation;
 pub mod backup;
+pub mod event_emitting;
 pub mod replication;
 
 pub use implementation::LocalStorageBackend;
 pub use implementation::LocalSnapshotManager;
 pub use implementation::SnapshotScheduler;
+pub use event_emitting::EventEmittingSnapshotManager;
+pub use event_emitting::EventEmittingBackupManager;
 pub use replication::StorageReplicator;
