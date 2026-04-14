@@ -392,8 +392,8 @@
 
 ### FT-028 — Raw binary workload support [ ]
 
-- [ ] TC-242: Raw binary workload starts and is health-checked by platform (scenario) — unimplemented
-- [ ] TC-299: Binary workload exit — raw binary scheduled, started, and monitored (exit-criteria) — unimplemented
+- [x] TC-242: Raw binary workload starts and is health-checked by platform (scenario) — passing
+- [x] TC-299: Binary workload exit — raw binary scheduled, started, and monitored (exit-criteria) — passing
 
 ### FT-029 — Raw block device support [ ]
 

@@ -7,3 +7,4 @@
 pub mod implementation;
 
 pub use implementation::ProcessScheduler;
+pub use implementation::ContainerRuntime;

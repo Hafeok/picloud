@@ -2,7 +2,7 @@
 id: FT-028
 title: Raw binary workload support
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

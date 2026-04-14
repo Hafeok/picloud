@@ -5,7 +5,6 @@
 //! when no container runtime is available.
 
 use std::collections::HashMap;
-use std::os::unix::process::CommandExt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -24,7 +23,8 @@ use picloud_domain::workload::{BinarySpec, ContainerSpec, EnvValue, RestartPolic
 ///
 /// Youki is preferred (pure Rust, ADR-010), then Podman, then Docker.
 #[derive(Debug, Clone, PartialEq)]
-enum ContainerRuntime {
+#[doc(hidden)]
+pub enum ContainerRuntime {
     Youki,
     Podman,
     Docker,
@@ -32,22 +32,23 @@ enum ContainerRuntime {
 }
 
 /// Internal record of a scheduled workload.
-struct WorkloadEntry {
-    workload_iri: String,
-    spec: WorkloadSpec,
-    status: WorkloadStatus,
-    node_id: Uuid,
-    pid: Option<u32>,
+#[doc(hidden)]
+pub struct WorkloadEntry {
+    pub workload_iri: String,
+    pub spec: WorkloadSpec,
+    pub status: WorkloadStatus,
+    pub node_id: Uuid,
+    pub pid: Option<u32>,
     #[allow(dead_code)]
-    started_at: DateTime<Utc>,
+    pub started_at: DateTime<Utc>,
     /// The spawned child process handle (for real process execution).
-    child: Option<Child>,
+    pub child: Option<Child>,
     /// Number of restarts performed so far.
-    restart_count: u32,
+    pub restart_count: u32,
     /// Whether the workload was explicitly stopped (should not be restarted).
-    explicitly_stopped: bool,
+    pub explicitly_stopped: bool,
     /// Whether this workload is a container (for docker stop on cleanup).
-    is_container: bool,
+    pub is_container: bool,
 }
 
 /// A workload scheduler that spawns real processes.
@@ -57,7 +58,8 @@ struct WorkloadEntry {
 ///   otherwise simulated with a warning.
 pub struct ProcessScheduler {
     node_id: Uuid,
-    workloads: Arc<RwLock<HashMap<String, WorkloadEntry>>>,
+    #[doc(hidden)]
+    pub workloads: Arc<RwLock<HashMap<String, WorkloadEntry>>>,
     iri_builder: IriBuilder,
     next_pid: AtomicU32,
     container_runtime: ContainerRuntime,
@@ -149,8 +151,8 @@ impl ProcessScheduler {
     }
 
     /// Create a scheduler with an explicitly set container runtime (for testing).
-    #[cfg(test)]
-    fn new_with_runtime(node_id: Uuid, domain: ClusterDomain, runtime: ContainerRuntime) -> Self {
+    #[doc(hidden)]
+    pub fn new_with_runtime(node_id: Uuid, domain: ClusterDomain, runtime: ContainerRuntime) -> Self {
         Self {
             node_id,
             workloads: Arc::new(RwLock::new(HashMap::new())),
