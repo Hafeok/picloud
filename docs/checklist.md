@@ -439,10 +439,10 @@
 - [x] TC-250: CLI volume snapshot create and volume restore round-trip (scenario) — passing
 - [x] TC-307: CLI backup exit — volume snapshot and restore commands work (exit-criteria) — passing
 
-### FT-038 — Product configuration store — typed key-value with tags, workload override, live reload [ ]
+### FT-038 — Product configuration store — typed key-value with tags, workload override, live reload [x]
 
-- [ ] TC-251: Config store typed key-value set and live-reloaded by workload (scenario) — unimplemented
-- [ ] TC-308: Config store exit — typed values stored, retrieved, and live-reloaded (exit-criteria) — unimplemented
+- [x] TC-251: Config store typed key-value set and live-reloaded by workload (scenario) — passing
+- [x] TC-308: Config store exit — typed values stored, retrieved, and live-reloaded (exit-criteria) — passing
 
 ### FT-039 — Feature flags — version-bound on/off, SDK evaluation, event invalidation [ ]
 

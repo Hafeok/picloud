@@ -2,7 +2,7 @@
 id: FT-038
 title: Product configuration store — typed key-value with tags, workload override, live reload
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
