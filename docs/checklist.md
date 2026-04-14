@@ -451,8 +451,8 @@
 
 ### FT-040 — PICLOUD_PRODUCT_VERSION injected into all workloads at startup [ ]
 
-- [ ] TC-253: PICLOUD_PRODUCT_VERSION env var present in workload container (scenario) — unimplemented
-- [ ] TC-310: Version injection exit — PICLOUD_PRODUCT_VERSION present in workload (exit-criteria) — unimplemented
+- [x] TC-253: PICLOUD_PRODUCT_VERSION env var present in workload container (scenario) — passing
+- [x] TC-310: Version injection exit — PICLOUD_PRODUCT_VERSION present in workload (exit-criteria) — passing
 
 ### FT-041 — OTel environment variables injected into all workloads at startup [ ]
 
