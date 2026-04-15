@@ -969,6 +969,7 @@ impl ContainerDecl {
             ports,
             health_check: None,
             restart_policy: RestartPolicy::Always,
+            product_version: None,
         }
     }
 }
@@ -1018,6 +1019,7 @@ impl BinaryDecl {
             mounts,
             env,
             restart_policy: RestartPolicy::Always,
+            product_version: None,
         }
     }
 }

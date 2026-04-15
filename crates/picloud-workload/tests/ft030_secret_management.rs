@@ -120,6 +120,7 @@ async fn tc244_secret_encrypted_at_rest_and_injected_into_workload_environment()
         mounts: vec![],
         env,
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let handle = scheduler.schedule(&iri, &spec).await.unwrap();
@@ -186,6 +187,7 @@ async fn tc244_missing_secret_does_not_crash_workload() {
         mounts: vec![],
         env,
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     // Should not panic — missing secret is handled gracefully
@@ -255,6 +257,7 @@ async fn tc301_secret_management_exit_secrets_encrypted_at_rest_and_injected() {
         mounts: vec![],
         env,
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let handle = scheduler.schedule(&iri, &spec).await.unwrap();

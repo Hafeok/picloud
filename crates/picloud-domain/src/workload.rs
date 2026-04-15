@@ -19,6 +19,9 @@ pub struct ContainerSpec {
     pub ports: Vec<PortMapping>,
     pub health_check: Option<HealthCheck>,
     pub restart_policy: RestartPolicy,
+    /// Product version — injected as PICLOUD_PRODUCT_VERSION env var (FT-040)
+    #[serde(default)]
+    pub product_version: Option<String>,
 }
 
 /// Specification for a raw ARM64 binary workload
@@ -32,6 +35,9 @@ pub struct BinarySpec {
     pub mounts: Vec<VolumeMount>,
     pub env: HashMap<String, EnvValue>,
     pub restart_policy: RestartPolicy,
+    /// Product version — injected as PICLOUD_PRODUCT_VERSION env var (FT-040)
+    #[serde(default)]
+    pub product_version: Option<String>,
 }
 
 /// CPU and memory limits for a workload

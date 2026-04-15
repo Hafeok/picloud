@@ -276,6 +276,11 @@ impl ProcessScheduler {
             cmd.env(key, value);
         }
 
+        // Inject PICLOUD_PRODUCT_VERSION (FT-040)
+        if let Some(ref version) = spec.product_version {
+            cmd.env("PICLOUD_PRODUCT_VERSION", version);
+        }
+
         // Configure stdio to avoid blocking
         cmd.stdin(std::process::Stdio::null());
         cmd.stdout(std::process::Stdio::piped());
@@ -347,6 +352,11 @@ impl ProcessScheduler {
         }
         for (key, value) in self.otel_env_vars(workload_iri) {
             env_vars.push(format!("{}={}", key, value));
+        }
+
+        // Inject PICLOUD_PRODUCT_VERSION (FT-040)
+        if let Some(ref version) = spec.product_version {
+            env_vars.push(format!("PICLOUD_PRODUCT_VERSION={}", version));
         }
 
         let config = serde_json::json!({
@@ -490,6 +500,11 @@ impl ProcessScheduler {
         // Inject OTEL_* env vars (ADR-045)
         for (key, value) in self.otel_env_vars(workload_iri) {
             cmd.args(["-e", &format!("{}={}", key, value)]);
+        }
+
+        // Inject PICLOUD_PRODUCT_VERSION (FT-040)
+        if let Some(ref version) = spec.product_version {
+            cmd.args(["-e", &format!("PICLOUD_PRODUCT_VERSION={}", version)]);
         }
 
         // Port mappings
@@ -949,6 +964,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         })
     }
 
@@ -965,6 +981,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         })
     }
 
@@ -985,6 +1002,7 @@ mod tests {
             ports: vec![],
             health_check: None,
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         let handle = scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1010,6 +1028,7 @@ mod tests {
             ports: vec![],
             health_check: None,
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1036,6 +1055,7 @@ mod tests {
             ports: vec![],
             health_check: None,
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1061,6 +1081,7 @@ mod tests {
             ports: vec![],
             health_check: None,
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1174,6 +1195,7 @@ mod tests {
             mounts: vec![],
             env,
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         let handle = scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1205,6 +1227,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         let result = scheduler.schedule(&iri, &spec).await;
@@ -1234,6 +1257,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::Always,
+            product_version: None,
         });
 
         scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1281,6 +1305,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1332,6 +1357,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::OnFailure { max_retries: 2 },
+            product_version: None,
         });
 
         scheduler.schedule(&iri, &spec).await.unwrap();
@@ -1376,6 +1402,7 @@ mod tests {
             mounts: vec![],
             env: HashMap::new(),
             restart_policy: RestartPolicy::Never,
+            product_version: None,
         });
 
         // This verifies the pre_exec hook doesn't crash the spawn

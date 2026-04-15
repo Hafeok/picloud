@@ -51,6 +51,7 @@ async fn tc242_raw_binary_workload_starts_and_is_health_checked() {
         mounts: vec![],
         env: HashMap::new(),
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let handle = scheduler.schedule(&iri, &spec).await.unwrap();
@@ -107,6 +108,7 @@ async fn tc242_raw_binary_workload_starts_and_is_health_checked() {
         mounts: vec![],
         env: HashMap::new(),
         restart_policy: RestartPolicy::Always,
+        product_version: None,
     });
 
     scheduler.schedule(&iri2, &spec2).await.unwrap();
@@ -162,6 +164,7 @@ async fn tc299_binary_workload_exit() {
         mounts: vec![],
         env: HashMap::new(),
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let handle_ok = scheduler.schedule(&iri_ok, &spec_ok).await.unwrap();
@@ -190,6 +193,7 @@ async fn tc299_binary_workload_exit() {
         mounts: vec![],
         env: HashMap::new(),
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let handle_fail = scheduler.schedule(&iri_fail, &spec_fail).await.unwrap();
@@ -226,6 +230,7 @@ async fn tc299_binary_workload_exit() {
         mounts: vec![],
         env,
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     scheduler.schedule(&iri_env, &spec_env).await.unwrap();
@@ -251,6 +256,7 @@ async fn tc299_binary_workload_exit() {
         mounts: vec![],
         env: HashMap::new(),
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let result = scheduler.schedule(&iri_bad, &spec_bad).await;
@@ -273,6 +279,7 @@ async fn tc299_binary_workload_exit() {
         mounts: vec![],
         env: HashMap::new(),
         restart_policy: RestartPolicy::Never,
+        product_version: None,
     });
 
     let handle_limited = scheduler.schedule(&iri_limited, &spec_limited).await.unwrap();

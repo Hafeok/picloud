@@ -492,6 +492,11 @@ async fn provision_container(
         .unwrap_or("default")
         .to_string();
 
+    let product_version = payload
+        .get("product_version")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let spec = WorkloadSpec::Container(ContainerSpec {
         image,
         identity,
@@ -501,6 +506,7 @@ async fn provision_container(
         ports: parse_ports(payload),
         health_check: None,
         restart_policy: RestartPolicy::Always,
+        product_version,
     });
 
     scheduler.schedule(resource_iri, &spec).await?;
@@ -525,6 +531,11 @@ async fn provision_binary(
         .unwrap_or("default")
         .to_string();
 
+    let product_version = payload
+        .get("product_version")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let spec = WorkloadSpec::Binary(BinarySpec {
         executable,
         args: parse_args(payload),
@@ -533,6 +544,7 @@ async fn provision_binary(
         mounts: parse_mounts(payload),
         env: parse_env(payload),
         restart_policy: RestartPolicy::Always,
+        product_version,
     });
 
     scheduler.schedule(resource_iri, &spec).await?;
