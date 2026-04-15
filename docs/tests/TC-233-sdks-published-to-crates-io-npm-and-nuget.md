@@ -4,12 +4,15 @@ title: SDKs published to crates.io, npm, and NuGet
 type: exit-criteria
 status: passing
 validates:
-  features: [FT-086]
-  adrs: [ADR-033]
+  features:
+  - FT-086
+  - FT-087
+  adrs:
+  - ADR-033
 phase: 3
 runner: cargo-test
-runner-args: "tc233_sdks_published_to_crates_io_npm_and_nuget"
-last-run: 2026-04-15T17:43:16.930096060+00:00
+runner-args: tc233_sdks_published_to_crates_io_npm_and_nuget
+last-run: 2026-04-15T17:44:57.956120221+00:00
 last-run-duration: 0.5s
 ---
 
