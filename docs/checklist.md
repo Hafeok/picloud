@@ -485,10 +485,10 @@
 - [x] TC-259: Metric aggregator emits MetricRecorded events every 15 seconds (scenario) — passing
 - [x] TC-316: Metric aggregator exit — MetricRecorded events emitted on schedule (exit-criteria) — passing
 
-### FT-047 — CLI traces — every command produces an OTel trace [ ]
+### FT-047 — CLI traces — every command produces an OTel trace [x]
 
-- [ ] TC-260: CLI command produces OTel trace with correct span hierarchy (scenario) — unimplemented
-- [ ] TC-317: CLI traces exit — CLI commands produce OTel traces (exit-criteria) — unimplemented
+- [x] TC-260: CLI command produces OTel trace with correct span hierarchy (scenario) — passing
+- [x] TC-317: CLI traces exit — CLI commands produce OTel traces (exit-criteria) — passing
 
 ### FT-048 — W3C trace context propagation — platform to workload correlation [ ]
 

@@ -2,7 +2,7 @@
 id: FT-047
 title: CLI traces — every command produces an OTel trace
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

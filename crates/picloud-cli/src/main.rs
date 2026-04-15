@@ -12,6 +12,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
+use picloud_cli::tracer::{self, CliTracer};
 use serde_json::json;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -712,22 +713,34 @@ enum DataProductCommands {
     List,
 }
 
-/// HTTP client for communicating with the PiCloud cluster
+/// HTTP client for communicating with the PiCloud cluster.
+/// Carries a `CliTracer` so that every HTTP call is recorded as a child span.
 struct ClusterClient {
     base_url: String,
     token: Option<String>,
     client: reqwest::Client,
+    tracer: CliTracer,
 }
 
 impl ClusterClient {
-    fn new(domain: &str, port: u16, token: Option<String>) -> Self {
+    fn new(domain: &str, port: u16, token: Option<String>, tracer: CliTracer) -> Self {
         Self {
             base_url: format!("http://{}:{}", domain, port),
             token,
             client: reqwest::Client::builder()
                 .build()
                 .expect("failed to create HTTP client"),
+            tracer,
         }
+    }
+
+    /// Attach common headers (auth + traceparent) to a request builder.
+    fn attach_headers(&self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+        request = request.header("traceparent", self.tracer.traceparent());
+        request
     }
 
     async fn post_command(
@@ -748,18 +761,20 @@ impl ClusterClient {
             "Submitting command"
         );
 
-        let mut request = self
+        let child = self.tracer.start_child_span(&format!("POST /api/commands [{}]", command_type));
+
+        let request = self
             .client
             .post(format!("{}/api/commands", self.base_url))
             .json(&body);
-
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
+        let request = self.attach_headers(request);
 
         let response = request.send().await?;
         let status = response.status();
         let body = response.json::<serde_json::Value>().await?;
+
+        let span_status = if status.is_success() { "OK" } else { "ERROR" };
+        self.tracer.record(child.finish(span_status));
 
         if status.is_success() {
             println!("-> Command accepted (correlation_id: {})", correlation_id);
@@ -774,18 +789,20 @@ impl ClusterClient {
         &self,
         resource_file: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        let mut request = self
+        let child = self.tracer.start_child_span("POST /api/apply");
+
+        let request = self
             .client
             .post(format!("{}/api/apply", self.base_url))
             .json(&resource_file);
-
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
+        let request = self.attach_headers(request);
 
         let response = request.send().await?;
         let status = response.status();
         let body = response.json::<serde_json::Value>().await?;
+
+        let span_status = if status.is_success() { "OK" } else { "ERROR" };
+        self.tracer.record(child.finish(span_status));
 
         if status.is_success() {
             Ok(body)
@@ -800,18 +817,20 @@ impl ClusterClient {
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         let body = json!({ "product": product });
 
-        let mut request = self
+        let child = self.tracer.start_child_span("POST /api/delete");
+
+        let request = self
             .client
             .post(format!("{}/api/delete", self.base_url))
             .json(&body);
-
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
+        let request = self.attach_headers(request);
 
         let response = request.send().await?;
         let status = response.status();
         let body = response.json::<serde_json::Value>().await?;
+
+        let span_status = if status.is_success() { "OK" } else { "ERROR" };
+        self.tracer.record(child.finish(span_status));
 
         if status.is_success() {
             Ok(body)
@@ -821,17 +840,20 @@ impl ClusterClient {
     }
 
     async fn get(&self, path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        let mut request = self
+        let child = self.tracer.start_child_span(&format!("GET {}", path));
+
+        let request = self
             .client
             .get(format!("{}{}", self.base_url, path))
             .header("Accept", "application/json");
-
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
+        let request = self.attach_headers(request);
 
         let response = request.send().await?;
         let status = response.status();
+
+        let span_status = if status.is_success() { "OK" } else { "ERROR" };
+        self.tracer.record(child.finish(span_status));
+
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             return Err(format!("HTTP {} — {}", status, text).into());
@@ -846,18 +868,21 @@ impl ClusterClient {
         path: &str,
         body: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        let mut request = self
+        let child = self.tracer.start_child_span(&format!("POST {}", path));
+
+        let request = self
             .client
             .post(format!("{}{}", self.base_url, path))
             .header("Accept", "application/json")
             .json(&body);
-
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
+        let request = self.attach_headers(request);
 
         let response = request.send().await?;
         let status = response.status();
+
+        let span_status = if status.is_success() { "OK" } else { "ERROR" };
+        self.tracer.record(child.finish(span_status));
+
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             return Err(format!("HTTP {} — {}", status, text).into());
@@ -868,17 +893,20 @@ impl ClusterClient {
 
     /// Send a DELETE request to a cluster endpoint.
     async fn delete(&self, path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        let mut request = self
+        let child = self.tracer.start_child_span(&format!("DELETE {}", path));
+
+        let request = self
             .client
             .delete(format!("{}{}", self.base_url, path))
             .header("Accept", "application/json");
-
-        if let Some(ref token) = self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
+        let request = self.attach_headers(request);
 
         let response = request.send().await?;
         let status = response.status();
+
+        let span_status = if status.is_success() { "OK" } else { "ERROR" };
+        self.tracer.record(child.finish(span_status));
+
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             return Err(format!("HTTP {} — {}", status, text).into());
@@ -890,10 +918,13 @@ impl ClusterClient {
     /// Connect to an SSE endpoint and stream events line-by-line.
     /// Runs until the connection is closed or the caller cancels.
     async fn get_sse_stream(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let child = self.tracer.start_child_span(&format!("SSE {}", path));
+
         let mut request = self
             .client
             .get(format!("{}{}", self.base_url, path))
-            .header("Accept", "text/event-stream");
+            .header("Accept", "text/event-stream")
+            .header("traceparent", self.tracer.traceparent());
 
         if let Some(ref token) = self.token {
             request = request.header("Authorization", format!("Bearer {}", token));
@@ -959,6 +990,7 @@ impl ClusterClient {
             }
         }
 
+        self.tracer.record(child.finish("OK"));
         Ok(())
     }
 }
@@ -973,7 +1005,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let cli = Cli::parse();
-    let client = ClusterClient::new(&cli.domain, cli.port, cli.token);
+
+    // Derive command name from CLI args for tracing
+    let cmd_name = tracer::command_name(
+        &std::env::args().collect::<Vec<_>>(),
+    );
+    let tracer = CliTracer::new(&cmd_name);
+    let root_span = tracer.start_root_span(&cmd_name);
+
+    let client = ClusterClient::new(&cli.domain, cli.port, cli.token.clone(), tracer.clone());
 
     match cli.command {
         Commands::Cluster { command } => match command {
@@ -2661,6 +2701,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     }
+
+    // Finish the root span and flush all collected spans to the cluster
+    tracer.finish_root(root_span, "OK");
+    tracer
+        .flush(
+            &format!("http://{}:{}", cli.domain, cli.port),
+            cli.token.as_deref(),
+        )
+        .await;
 
     Ok(())
 }
