@@ -459,10 +459,10 @@
 - [x] TC-254: OTel environment variables present in workload container (scenario) — passing
 - [x] TC-311: OTel injection exit — OTel env vars present in workload (exit-criteria) — passing
 
-### FT-042 — OTLP endpoint at picloud.local/otel [ ]
+### FT-042 — OTLP endpoint at picloud.local/otel [x]
 
-- [ ] TC-255: OTLP endpoint accepts traces and metrics at picloud.local/otel (scenario) — unimplemented
-- [ ] TC-312: OTLP endpoint exit — traces and metrics accepted at /otel (exit-criteria) — unimplemented
+- [x] TC-255: OTLP endpoint accepts traces and metrics at picloud.local/otel (scenario) — passing
+- [x] TC-312: OTLP endpoint exit — traces and metrics accepted at /otel (exit-criteria) — passing
 
 ### FT-043 — OTel event stream — in-process pub/sub for traces, metrics, logs [ ]
 
