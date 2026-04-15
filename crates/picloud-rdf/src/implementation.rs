@@ -3428,6 +3428,96 @@ impl OxigraphProjector {
         })
     }
 
+    /// Execute an aggregate-scoped replay (FT-082, ADR-035).
+    ///
+    /// Filters the provided events to include only those matching the
+    /// specified aggregate type and/or aggregate IDs, then projects
+    /// the matching events into a shadow graph and atomically swaps
+    /// with the target graph.
+    ///
+    /// Supports:
+    ///   - Single aggregate replay: one aggregate_id in the request
+    ///   - Batch aggregate replay: up to 1000 aggregate_ids
+    ///
+    /// Events match an aggregate scope when:
+    ///   1. Their payload contains `aggregate_type` matching the request, AND
+    ///   2. Their payload contains `aggregate_id` matching one of the request IDs
+    ///
+    /// If `aggregate_ids` is empty, all events matching `aggregate_type` are included.
+    /// If `aggregate_type` is None, only `aggregate_ids` are matched (via source IRI suffix).
+    pub fn execute_aggregate_replay(
+        &self,
+        replay_id: Uuid,
+        events: &[EventEnvelope],
+        request: &ReplayRequest,
+        target_graph: Option<&str>,
+    ) -> Result<ReplayResult> {
+        // Validate batch size (ADR-035: up to 1000 aggregates)
+        if request.aggregate_ids.len() > 1000 {
+            return Err(PiCloudError::ResourceValidationFailed {
+                reason: format!(
+                    "aggregate replay batch size {} exceeds maximum of 1000",
+                    request.aggregate_ids.len()
+                ),
+            });
+        }
+
+        // Filter events by aggregate scope
+        let filtered: Vec<&EventEnvelope> = events
+            .iter()
+            .filter(|event| {
+                // Check time range
+                if event.timestamp < request.from {
+                    return false;
+                }
+                if let Some(ref to) = request.to {
+                    if event.timestamp > *to {
+                        return false;
+                    }
+                }
+
+                // Check product scope
+                if let Some(ref product) = request.product {
+                    if event.product.as_deref() != Some(product.as_str()) {
+                        return false;
+                    }
+                }
+
+                // Check aggregate type filter
+                let event_agg_type = event.payload.get("aggregate_type")
+                    .and_then(|v| v.as_str());
+
+                if let Some(ref agg_type) = request.aggregate_type {
+                    match event_agg_type {
+                        Some(t) if t == agg_type.as_str() => {}
+                        _ => return false,
+                    }
+                }
+
+                // Check aggregate ID filter
+                if !request.aggregate_ids.is_empty() {
+                    let event_agg_id = event.payload.get("aggregate_id")
+                        .and_then(|v| v.as_str());
+                    match event_agg_id {
+                        Some(id) => {
+                            if !request.aggregate_ids.iter().any(|a| a == id) {
+                                return false;
+                            }
+                        }
+                        None => return false,
+                    }
+                }
+
+                true
+            })
+            .collect();
+
+        // Build owned copies for execute_replay
+        let filtered_owned: Vec<EventEnvelope> = filtered.into_iter().cloned().collect();
+
+        self.execute_replay(replay_id, &filtered_owned, target_graph)
+    }
+
     /// Capitalize a status string for use as a named node, e.g. "ready" -> "Ready".
     fn capitalize_status(status: &str) -> String {
         let mut chars = status.chars();
@@ -3750,11 +3840,31 @@ impl ReplayEngine for OxigraphProjector {
             )?;
         }
 
+        // Record aggregate scope metadata if provided (FT-082)
+        if let Some(ref aggregate_type) = request.aggregate_type {
+            self.insert_triple_in_graph(
+                &replay_meta_iri,
+                &format!("{PICLOUD_NS}replayAggregateType"),
+                Literal::new_simple_literal(aggregate_type).into(),
+                shadow_graph_iri.as_str(),
+            )?;
+        }
+        for aggregate_id in &request.aggregate_ids {
+            self.insert_triple_in_graph(
+                &replay_meta_iri,
+                &format!("{PICLOUD_NS}replayAggregateId"),
+                Literal::new_simple_literal(aggregate_id).into(),
+                shadow_graph_iri.as_str(),
+            )?;
+        }
+
         info!(
             replay_id = %replay_id,
             product = ?request.product,
             from = %request.from,
             to = ?request.to,
+            aggregate_type = ?request.aggregate_type,
+            aggregate_ids_count = request.aggregate_ids.len(),
             "Replay operation started — shadow graph created"
         );
 

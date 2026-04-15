@@ -2,7 +2,7 @@
 id: FT-082
 title: Aggregate-scoped replay (single and batch up to 1000)
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

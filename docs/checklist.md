@@ -671,10 +671,10 @@
 - [x] TC-280: Event replay creates shadow projection and swaps atomically (scenario) — passing
 - [x] TC-337: Event replay exit — shadow projection created and swapped atomically (exit-criteria) — passing
 
-### FT-082 — Aggregate-scoped replay (single and batch up to 1000) [ ]
+### FT-082 — Aggregate-scoped replay (single and batch up to 1000) [x]
 
-- [ ] TC-281: Aggregate-scoped replay replays events for single aggregate (scenario) — unimplemented
-- [ ] TC-338: Scoped replay exit — single aggregate replay completes (exit-criteria) — unimplemented
+- [x] TC-281: Aggregate-scoped replay replays events for single aggregate (scenario) — passing
+- [x] TC-338: Scoped replay exit — single aggregate replay completes (exit-criteria) — passing
 
 ### FT-083 — event-subscription resource type [ ]
 
