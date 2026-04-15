@@ -354,19 +354,19 @@
 - [x] TC-193: capability_deletion_guard (scenario) — passing
 - [x] TC-194: resource apply (scenario) — passing
 - [x] TC-195: CapabilityUnfulfilled (scenario) — passing
-- [x] TC-196: data_domain_declaration (scenario) — passing
-- [x] TC-197: data_product_field_validation (scenario) — passing
-- [x] TC-198: data_product_projection_on_trigger (scenario) — passing
-- [x] TC-199: data_product_named_graph_separation (scenario) — passing
-- [x] TC-200: data_product_atomic_swap (scenario) — passing
-- [x] TC-201: cross_product_internal_graph_blocked (scenario) — passing
-- [x] TC-202: data_product_consumer_blocked_without_product (scenario) — passing
-- [x] TC-203: data_product_slo_breach_and_restore (scenario) — passing
-- [x] TC-204: data_product_deletion_guard (scenario) — passing
-- [x] TC-205: data_domain_deletion_guard (scenario) — passing
-- [x] TC-206: capability_triggers_data_product (scenario) — passing
-- [x] TC-207: DataProductSLOBreached (scenario) — passing
-- [x] TC-208: data-domain (scenario) — passing
+- [!] TC-196: data_domain_declaration (scenario) — failing
+- [!] TC-197: data_product_field_validation (scenario) — failing
+- [!] TC-198: data_product_projection_on_trigger (scenario) — failing
+- [!] TC-199: data_product_named_graph_separation (scenario) — failing
+- [!] TC-200: data_product_atomic_swap (scenario) — failing
+- [!] TC-201: cross_product_internal_graph_blocked (scenario) — failing
+- [!] TC-202: data_product_consumer_blocked_without_product (scenario) — failing
+- [!] TC-203: data_product_slo_breach_and_restore (scenario) — failing
+- [!] TC-204: data_product_deletion_guard (scenario) — failing
+- [!] TC-205: data_domain_deletion_guard (scenario) — failing
+- [!] TC-206: capability_triggers_data_product (scenario) — failing
+- [!] TC-207: DataProductSLOBreached (scenario) — failing
+- [!] TC-208: data-domain (scenario) — failing
 - [x] TC-213: Inference rule assigns user to group on tag change (exit-criteria) — passing
 - [x] TC-214: CPU temperature alert fires and resolves (exit-criteria) — passing
 - [x] TC-215: Product appends to event store and queries RDF projection (exit-criteria) — passing
@@ -590,8 +590,9 @@
 
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
-### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [ ]
+### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [x]
 
+- [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
 ### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [ ]

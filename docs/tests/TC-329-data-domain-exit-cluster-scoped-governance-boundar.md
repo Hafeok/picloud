@@ -10,8 +10,8 @@ validates:
   - ADR-056
 phase: 3
 runner: cargo-test
-runner-args: "tc329_data_domain_exit_cluster_scoped_governance_boundary_created"
-last-run: 2026-04-15T14:19:09.008847312+00:00
+runner-args: tc329_data_domain_exit_cluster_scoped_governance_boundary_created
+last-run: 2026-04-15T14:29:59.558362753+00:00
 last-run-duration: 0.5s
 ---
 

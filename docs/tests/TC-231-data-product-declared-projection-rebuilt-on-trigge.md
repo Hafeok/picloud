@@ -4,13 +4,16 @@ title: Data product declared, projection rebuilt on trigger event, second produc
 type: exit-criteria
 status: passing
 validates:
-  features: [FT-066]
-  adrs: [ADR-056]
+  features:
+  - FT-066
+  - FT-067
+  adrs:
+  - ADR-056
 phase: 3
 runner: cargo-test
-runner-args: "tc231_data_product_declared_projection_rebuilt_on_trigger_event_second_product_queries_it"
-last-run: 2026-04-15T14:24:34.239051194+00:00
-last-run-duration: 1.0s
+runner-args: tc231_data_product_declared_projection_rebuilt_on_trigger_event_second_product_queries_it
+last-run: 2026-04-15T14:32:14.488742744+00:00
+last-run-duration: 0.5s
 ---
 
 ## Description
