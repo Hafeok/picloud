@@ -16,7 +16,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use oxigraph::model::{
-    GraphName, GraphNameRef, Literal, NamedNode, NamedNodeRef, Quad, QuadRef, SubjectRef, Term,
+    GraphName, GraphNameRef, Literal, NamedNode, NamedNodeRef, Quad, QuadRef, Subject, SubjectRef,
+    Term,
 };
 use oxigraph::sparql::QueryResults;
 use oxigraph::store::Store;
@@ -32,6 +33,7 @@ use picloud_domain::traits::{QueryResult, ReplayEngine, ReplayRequest, ReplayRes
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDFS_SUBCLASS_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 const PICLOUD_NS: &str = "https://picloud.local/ontology#";
+const OWL_TRANSITIVE_PROPERTY: &str = "http://www.w3.org/2002/07/owl#TransitiveProperty";
 
 /// Constructs a PiCloud ontology IRI, e.g. `https://picloud.local/ontology#Node`.
 fn picloud_term(local: &str) -> NamedNode {
@@ -244,7 +246,7 @@ impl OxigraphProjector {
     }
 
     /// Insert a triple into a named graph (for product-scoped data).
-    fn insert_triple_in_graph(
+    pub fn insert_triple_in_graph(
         &self,
         subject: &str,
         predicate: &str,
@@ -2848,11 +2850,128 @@ impl OxigraphProjector {
         Ok(total_inferred)
     }
 
-    /// Load ontology triples (Turtle format) and materialise RDFS inference.
+    /// Materialise OWL transitive-property inference (OWL 2 RL rule prp-trp).
     ///
-    /// Accepts a Turtle string containing rdfs:subClassOf and other ontology
-    /// axioms. After loading, runs `materialise_rdfs_subclass` to derive
-    /// inferred type triples.
+    /// Scans all properties declared as `owl:TransitiveProperty`. For each
+    /// such property `p`, computes the transitive closure: if `(x, p, y)` and
+    /// `(y, p, z)` both exist, asserts `(x, p, z)`.
+    ///
+    /// Runs to a fixed point so chains of arbitrary depth are fully materialised.
+    pub fn materialise_owl_transitive_property(&self) -> Result<usize> {
+        let mut total_inferred = 0;
+        let rdf_type_node = NamedNode::new(RDF_TYPE)
+            .map_err(|e| PiCloudError::Internal(format!("invalid RDF_TYPE IRI: {e}")))?;
+        let owl_tp = NamedNode::new(OWL_TRANSITIVE_PROPERTY)
+            .map_err(|e| PiCloudError::Internal(format!("invalid OWL IRI: {e}")))?;
+
+        // Step 1: Collect all properties declared as owl:TransitiveProperty
+        let tp_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                None,
+                Some(rdf_type_node.as_ref()),
+                Some((&owl_tp).into()),
+                None,
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+        let transitive_props: Vec<NamedNode> = tp_quads
+            .iter()
+            .filter_map(|q| match &q.subject {
+                Subject::NamedNode(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+
+        if transitive_props.is_empty() {
+            return Ok(0);
+        }
+
+        // Step 2: For each transitive property, compute fixed-point closure
+        for prop in &transitive_props {
+            loop {
+                let mut inferred_this_pass = 0;
+
+                // Collect all (x, prop, y) triples across all graphs
+                let all_triples: Vec<Quad> = self
+                    .store
+                    .quads_for_pattern(None, Some(prop.as_ref()), None, None)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+                for left in &all_triples {
+                    // left is (x, prop, y)
+                    let y = match &left.object {
+                        Term::NamedNode(n) => n,
+                        _ => continue,
+                    };
+                    let graph = &left.graph_name;
+
+                    // Find all (y, prop, z) in the same graph
+                    let rights: Vec<Quad> = self
+                        .store
+                        .quads_for_pattern(
+                            Some(y.into()),
+                            Some(prop.as_ref()),
+                            None,
+                            Some(graph.as_ref()),
+                        )
+                        .collect::<std::result::Result<Vec<_>, _>>()
+                        .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+                    for right in &rights {
+                        // right is (y, prop, z) — infer (x, prop, z)
+                        let z = &right.object;
+
+                        // Check if (x, prop, z) already exists in this graph
+                        let existing: Vec<Quad> = self
+                            .store
+                            .quads_for_pattern(
+                                Some((&left.subject).into()),
+                                Some(prop.as_ref()),
+                                Some(z.into()),
+                                Some(graph.as_ref()),
+                            )
+                            .collect::<std::result::Result<Vec<_>, _>>()
+                            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+
+                        if existing.is_empty() {
+                            self.store
+                                .insert(QuadRef::new(
+                                    &left.subject,
+                                    prop,
+                                    z,
+                                    graph.as_ref(),
+                                ))
+                                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+                            inferred_this_pass += 1;
+                        }
+                    }
+                }
+
+                total_inferred += inferred_this_pass;
+                if inferred_this_pass == 0 {
+                    break;
+                }
+            }
+        }
+
+        if total_inferred > 0 {
+            debug!(
+                triples_inferred = total_inferred,
+                "OWL transitive-property materialisation complete"
+            );
+        }
+        Ok(total_inferred)
+    }
+
+    /// Load ontology triples (Turtle format) and materialise RDFS/OWL inference.
+    ///
+    /// Accepts a Turtle string containing rdfs:subClassOf, owl:TransitiveProperty,
+    /// and other ontology axioms. After loading, runs both
+    /// `materialise_rdfs_subclass` and `materialise_owl_transitive_property`
+    /// to derive inferred triples.
     pub fn load_ontology(&self, turtle: &str, graph: Option<&str>) -> Result<usize> {
         use oxigraph::io::RdfParser;
 
@@ -2876,10 +2995,19 @@ impl OxigraphProjector {
             .map_err(|e| PiCloudError::Internal(format!("ontology load failed: {e}")))?;
 
         // Materialise RDFS subclass hierarchy
-        let inferred = self.materialise_rdfs_subclass()?;
+        let rdfs_inferred = self.materialise_rdfs_subclass()?;
 
-        info!(inferred_triples = inferred, "Ontology loaded and RDFS materialised");
-        Ok(inferred)
+        // Materialise OWL transitive-property closure (ADR-039)
+        let owl_inferred = self.materialise_owl_transitive_property()?;
+
+        let total_inferred = rdfs_inferred + owl_inferred;
+        info!(
+            rdfs_inferred,
+            owl_inferred,
+            total_inferred,
+            "Ontology loaded and RDFS/OWL materialised"
+        );
+        Ok(total_inferred)
     }
 
     // ---- Shadow Graph Replay (ADR-035) ----
