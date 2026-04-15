@@ -17,6 +17,7 @@ pub mod parquet_store;
 pub mod provisioner;
 pub mod proxy;
 pub mod router;
+pub mod self_monitor;
 pub mod telemetry_store;
 pub mod tls;
 
@@ -31,5 +32,6 @@ pub use otel::{OtelAggregator, OtelDatum, OtelLogRecord, OtelStream, aggregate_o
 pub use parquet_store::ParquetTelemetryStore;
 pub use provisioner::Provisioner;
 pub use router::{IngressRouter, SharedRouter};
+pub use self_monitor::PlatformSelfMonitor;
 pub use telemetry_store::JsonlTelemetryStore;
 pub use tls::{SharedTls, TlsState};

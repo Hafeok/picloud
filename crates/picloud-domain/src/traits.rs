@@ -279,6 +279,68 @@ pub trait ClusterMembership: Send + Sync {
     async fn local_node_id(&self) -> Uuid;
 }
 
+// ---- Node Drain (FT-011) ----
+
+/// The drain state of a node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeDrainState {
+    /// Node is active and accepting workloads
+    Active,
+    /// Node is cordoned — no new workloads accepted
+    Cordoned,
+    /// Node is draining — workloads being evacuated
+    Draining,
+    /// Node is fully drained — no workloads remain
+    Drained,
+}
+
+/// Information about a workload running on a node (for drain purposes).
+#[derive(Debug, Clone)]
+pub struct NodeWorkloadInfo {
+    pub workload_iri: ResourceIri,
+    pub workload_type: String,
+}
+
+/// Node drain coordinator — manages cordoning and draining of nodes.
+/// Implemented by: picloud-cluster (or picloud-workload)
+#[async_trait]
+pub trait NodeDrainCoordinator: Send + Sync {
+    /// Cordon a node — mark it as not accepting new workloads.
+    async fn cordon(&self, node_id: Uuid) -> Result<()>;
+
+    /// Uncordon a node — allow it to accept workloads again.
+    async fn uncordon(&self, node_id: Uuid) -> Result<()>;
+
+    /// Drain a node — cordon it and migrate all workloads to other nodes.
+    /// Returns when all workloads have been migrated or the timeout expires.
+    async fn drain(&self, node_id: Uuid, timeout_secs: u64) -> Result<DrainResult>;
+
+    /// Get the drain state of a node.
+    async fn drain_state(&self, node_id: Uuid) -> Result<NodeDrainState>;
+
+    /// List workloads currently running on a node.
+    async fn node_workloads(&self, node_id: Uuid) -> Result<Vec<NodeWorkloadInfo>>;
+}
+
+/// Result of a drain operation.
+#[derive(Debug, Clone)]
+pub struct DrainResult {
+    pub node_id: Uuid,
+    pub workloads_migrated: usize,
+    pub duration_ms: u64,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// Self-monitoring system — checks platform health using its own RDF graph
+/// and inference rules.
+/// Implemented by: picloud-http (or wherever the monitoring engine lives)
+#[async_trait]
+pub trait SelfMonitor: Send + Sync {
+    /// Run all self-monitoring checks and return results.
+    async fn run_checks(&self) -> Result<Vec<crate::events::SelfMonitoringCheck>>;
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
     pub node_id: Uuid,

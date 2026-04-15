@@ -219,6 +219,20 @@ pub enum PlatformEvent {
 
     // --- Subscription event routing (ADR-022, FT-084) ---
     SubscriptionEventRouted(SubscriptionEventRoutedPayload),
+
+    // --- Node drain events (FT-011) ---
+    NodeCordoned(NodeCordonedPayload),
+    NodeUncordoned(NodeUncordonedPayload),
+    NodeDrainStarted(NodeDrainStartedPayload),
+    NodeDrainCompleted(NodeDrainCompletedPayload),
+    NodeDrainFailed(NodeDrainFailedPayload),
+    WorkloadMigrated(WorkloadMigratedPayload),
+
+    // --- Log compaction events (FT-011) ---
+    LogCompactionCompleted(LogCompactionCompletedPayload),
+
+    // --- Self-monitoring events (FT-011) ---
+    SelfMonitoringCheckCompleted(SelfMonitoringCheckCompletedPayload),
 }
 
 // --- Payload types ---
@@ -617,6 +631,127 @@ pub struct WorkloadRescheduledPayload {
     pub from_node_iri: ResourceIri,
     /// Reason for rescheduling
     pub reason: String,
+}
+
+// --- Node drain payloads (FT-011) ---
+
+/// Payload for NodeCordoned event.
+/// Emitted when a node is cordoned — it will not accept new workloads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeCordonedPayload {
+    pub node_id: Uuid,
+    pub node_iri: ResourceIri,
+    pub node_name: String,
+}
+
+/// Payload for NodeUncordoned event.
+/// Emitted when a cordoned node is returned to service.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeUncordonedPayload {
+    pub node_id: Uuid,
+    pub node_iri: ResourceIri,
+    pub node_name: String,
+}
+
+/// Payload for NodeDrainStarted event.
+/// Emitted when a drain operation begins on a node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeDrainStartedPayload {
+    pub node_id: Uuid,
+    pub node_iri: ResourceIri,
+    pub node_name: String,
+    /// Number of workloads to evacuate
+    pub workload_count: usize,
+}
+
+/// Payload for NodeDrainCompleted event.
+/// Emitted when all workloads have been successfully evacuated from a node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeDrainCompletedPayload {
+    pub node_id: Uuid,
+    pub node_iri: ResourceIri,
+    pub node_name: String,
+    /// Number of workloads that were migrated
+    pub workloads_migrated: usize,
+    /// Duration of the drain operation in milliseconds
+    pub duration_ms: u64,
+}
+
+/// Payload for NodeDrainFailed event.
+/// Emitted when a drain operation fails (timeout or workload migration error).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeDrainFailedPayload {
+    pub node_id: Uuid,
+    pub node_iri: ResourceIri,
+    pub node_name: String,
+    pub reason: String,
+}
+
+/// Payload for WorkloadMigrated event.
+/// Emitted when a workload is moved from a draining node to another node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkloadMigratedPayload {
+    pub workload_iri: ResourceIri,
+    pub from_node_iri: ResourceIri,
+    pub to_node_iri: ResourceIri,
+    pub reason: String,
+}
+
+// --- Log compaction payloads (FT-011) ---
+
+/// Payload for LogCompactionCompleted event.
+/// Emitted when the event log compaction finishes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogCompactionCompletedPayload {
+    /// Number of events discarded during compaction
+    pub events_discarded: usize,
+    /// Number of events remaining after compaction
+    pub events_remaining: usize,
+    /// The new snapshot offset after compaction
+    pub snapshot_offset: usize,
+}
+
+// --- Self-monitoring payloads (FT-011) ---
+
+/// Health status for a single self-monitoring check.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthStatus {
+    Healthy,
+    Degraded,
+    Unhealthy,
+}
+
+impl std::fmt::Display for HealthStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HealthStatus::Healthy => write!(f, "healthy"),
+            HealthStatus::Degraded => write!(f, "degraded"),
+            HealthStatus::Unhealthy => write!(f, "unhealthy"),
+        }
+    }
+}
+
+/// A single check result from the self-monitoring system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelfMonitoringCheck {
+    /// Name of the check, e.g. "raft_health", "replication_status", "projection_lag"
+    pub check_name: String,
+    /// Status of the check
+    pub status: HealthStatus,
+    /// Human-readable message
+    pub message: String,
+}
+
+/// Payload for SelfMonitoringCheckCompleted event.
+/// Emitted periodically by the platform self-monitoring system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelfMonitoringCheckCompletedPayload {
+    pub node_iri: ResourceIri,
+    /// Overall health status (worst of all checks)
+    pub overall_status: HealthStatus,
+    /// Individual check results
+    pub checks: Vec<SelfMonitoringCheck>,
 }
 
 // --- Telemetry record types (ADR-046) ---

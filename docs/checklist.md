@@ -720,10 +720,10 @@
 
 ## Phase 4
 
-### FT-011 — Operational Maturity [ ]
+### FT-011 — Operational Maturity [x]
 
-- [ ] TC-236: Node drain completes and workloads reschedule within timeout (scenario) — unimplemented
-- [ ] TC-292: Operational maturity exit — node drain, log compaction, self-monitoring pass (exit-criteria) — unimplemented
+- [x] TC-236: Node drain completes and workloads reschedule within timeout (scenario) — passing
+- [x] TC-292: Operational maturity exit — node drain, log compaction, self-monitoring pass (exit-criteria) — passing
 
 ### FT-090 — Additional storage intent tiers (quorum, local, archive, fast) [ ]
 

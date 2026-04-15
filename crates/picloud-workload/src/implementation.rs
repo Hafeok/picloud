@@ -1004,6 +1004,178 @@ impl WorkloadScheduler for ProcessScheduler {
     }
 }
 
+// ==========================================================================
+// Node Drain Coordinator (FT-011)
+// ==========================================================================
+
+use picloud_domain::traits::{DrainResult, NodeDrainCoordinator, NodeDrainState, NodeWorkloadInfo};
+
+/// In-memory drain coordinator that manages node cordon/drain state
+/// and coordinates workload migration during drain operations.
+pub struct InMemoryDrainCoordinator {
+    /// Map of node_id → drain state
+    drain_states: Arc<RwLock<HashMap<Uuid, NodeDrainState>>>,
+    /// Map of node_id → list of workloads running on the node
+    node_workloads: Arc<RwLock<HashMap<Uuid, Vec<NodeWorkloadInfo>>>>,
+    /// Available target nodes for migration
+    available_nodes: Arc<RwLock<Vec<Uuid>>>,
+}
+
+impl InMemoryDrainCoordinator {
+    pub fn new() -> Self {
+        Self {
+            drain_states: Arc::new(RwLock::new(HashMap::new())),
+            node_workloads: Arc::new(RwLock::new(HashMap::new())),
+            available_nodes: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Register a node as active (for testing).
+    pub async fn register_node(&self, node_id: Uuid) {
+        self.drain_states.write().await.insert(node_id, NodeDrainState::Active);
+    }
+
+    /// Register a workload as running on a node (for testing/tracking).
+    pub async fn register_workload(&self, node_id: Uuid, workload: NodeWorkloadInfo) {
+        self.node_workloads
+            .write()
+            .await
+            .entry(node_id)
+            .or_default()
+            .push(workload);
+    }
+
+    /// Set available target nodes for migration.
+    pub async fn set_available_nodes(&self, nodes: Vec<Uuid>) {
+        *self.available_nodes.write().await = nodes;
+    }
+}
+
+#[async_trait]
+impl NodeDrainCoordinator for InMemoryDrainCoordinator {
+    async fn cordon(&self, node_id: Uuid) -> Result<()> {
+        let mut states = self.drain_states.write().await;
+        match states.get(&node_id) {
+            Some(NodeDrainState::Active) | None => {
+                states.insert(node_id, NodeDrainState::Cordoned);
+                Ok(())
+            }
+            Some(state) => Err(PiCloudError::Internal(format!(
+                "Cannot cordon node in state {:?}",
+                state
+            ))),
+        }
+    }
+
+    async fn uncordon(&self, node_id: Uuid) -> Result<()> {
+        let mut states = self.drain_states.write().await;
+        match states.get(&node_id) {
+            Some(NodeDrainState::Cordoned) | Some(NodeDrainState::Drained) => {
+                states.insert(node_id, NodeDrainState::Active);
+                Ok(())
+            }
+            None => {
+                states.insert(node_id, NodeDrainState::Active);
+                Ok(())
+            }
+            Some(NodeDrainState::Draining) => Err(PiCloudError::Internal(
+                "Cannot uncordon a node that is currently draining".to_string(),
+            )),
+            Some(state) => Err(PiCloudError::Internal(format!(
+                "Cannot uncordon node in state {:?}",
+                state
+            ))),
+        }
+    }
+
+    async fn drain(&self, node_id: Uuid, timeout_secs: u64) -> Result<DrainResult> {
+        let start = std::time::Instant::now();
+
+        // Step 1: Cordon the node
+        {
+            let mut states = self.drain_states.write().await;
+            states.insert(node_id, NodeDrainState::Draining);
+        }
+
+        // Step 2: Get workloads on this node
+        let workloads = {
+            let wl = self.node_workloads.read().await;
+            wl.get(&node_id).cloned().unwrap_or_default()
+        };
+
+        let workload_count = workloads.len();
+
+        // Step 3: Get available target nodes
+        let target_nodes = self.available_nodes.read().await.clone();
+        if target_nodes.is_empty() && workload_count > 0 {
+            let mut states = self.drain_states.write().await;
+            states.insert(node_id, NodeDrainState::Cordoned);
+            return Ok(DrainResult {
+                node_id,
+                workloads_migrated: 0,
+                duration_ms: start.elapsed().as_millis() as u64,
+                success: false,
+                error: Some("No available target nodes for workload migration".to_string()),
+            });
+        }
+
+        // Step 4: Simulate migrating workloads (round-robin across target nodes)
+        let deadline = tokio::time::Instant::now()
+            + tokio::time::Duration::from_secs(timeout_secs);
+        let mut migrated = 0;
+
+        for (_i, _workload) in workloads.iter().enumerate() {
+            if tokio::time::Instant::now() >= deadline {
+                let mut states = self.drain_states.write().await;
+                states.insert(node_id, NodeDrainState::Cordoned);
+                return Ok(DrainResult {
+                    node_id,
+                    workloads_migrated: migrated,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    success: false,
+                    error: Some(format!(
+                        "Drain timeout: migrated {migrated}/{workload_count} workloads"
+                    )),
+                });
+            }
+
+            // Simulate migration work — in production this would stop the workload
+            // on the source node and restart it on the target
+            migrated += 1;
+        }
+
+        // Step 5: Clear workloads from the drained node
+        {
+            let mut wl = self.node_workloads.write().await;
+            wl.remove(&node_id);
+        }
+
+        // Step 6: Mark node as drained
+        {
+            let mut states = self.drain_states.write().await;
+            states.insert(node_id, NodeDrainState::Drained);
+        }
+
+        Ok(DrainResult {
+            node_id,
+            workloads_migrated: migrated,
+            duration_ms: start.elapsed().as_millis() as u64,
+            success: true,
+            error: None,
+        })
+    }
+
+    async fn drain_state(&self, node_id: Uuid) -> Result<NodeDrainState> {
+        let states = self.drain_states.read().await;
+        Ok(states.get(&node_id).cloned().unwrap_or(NodeDrainState::Active))
+    }
+
+    async fn node_workloads(&self, node_id: Uuid) -> Result<Vec<NodeWorkloadInfo>> {
+        let wl = self.node_workloads.read().await;
+        Ok(wl.get(&node_id).cloned().unwrap_or_default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

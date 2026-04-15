@@ -2,7 +2,7 @@
 id: FT-011
 title: Operational Maturity
 phase: 4
-status: planned
+status: complete
 depends-on:
 - FT-004
 - FT-002

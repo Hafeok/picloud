@@ -504,6 +504,169 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    /// Update the node's drain status in the RDF graph (upsert pattern).
+    fn upsert_node_drain_status(&self, node_iri_str: &str, status: &str) -> Result<()> {
+        // Remove old drainStatus triple
+        let s = NamedNode::new(node_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid node IRI: {e}")))?;
+        let pred = format!("{PICLOUD_NS}drainStatus");
+        let p = NamedNodeRef::new(&pred)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let old_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                None,
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &old_quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        // Insert new status
+        self.insert_triple(
+            node_iri_str,
+            &format!("{PICLOUD_NS}drainStatus"),
+            Literal::new_simple_literal(status).into(),
+        )?;
+        Ok(())
+    }
+
+    fn project_node_cordoned(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.upsert_node_drain_status(node_iri_str, "cordoned")?;
+        debug!(node_iri = node_iri_str, "projected NodeCordoned");
+        Ok(())
+    }
+
+    fn project_node_uncordoned(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.upsert_node_drain_status(node_iri_str, "active")?;
+        debug!(node_iri = node_iri_str, "projected NodeUncordoned");
+        Ok(())
+    }
+
+    fn project_node_drain_started(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.upsert_node_drain_status(node_iri_str, "draining")?;
+
+        // Record workload count being drained
+        if let Some(count) = event.payload["workload_count"].as_u64() {
+            self.insert_triple(
+                node_iri_str,
+                &format!("{PICLOUD_NS}drainingWorkloadCount"),
+                Literal::new_simple_literal(&count.to_string()).into(),
+            )?;
+        }
+
+        debug!(node_iri = node_iri_str, "projected NodeDrainStarted");
+        Ok(())
+    }
+
+    fn project_node_drain_completed(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        self.upsert_node_drain_status(node_iri_str, "drained")?;
+        debug!(node_iri = node_iri_str, "projected NodeDrainCompleted");
+        Ok(())
+    }
+
+    fn project_workload_migrated(&self, event: &EventEnvelope) -> Result<()> {
+        let workload_iri_str = event.payload["workload_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let to_node_iri = event.payload["to_node_iri"]
+            .as_str()
+            .unwrap_or_default();
+
+        // Update the workload's scheduledOn triple
+        let s = NamedNode::new(workload_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid workload IRI: {e}")))?;
+        let pred = format!("{PICLOUD_NS}scheduledOn");
+        let p = NamedNodeRef::new(&pred)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let old_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                None,
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &old_quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        if !to_node_iri.is_empty() {
+            self.insert_triple(
+                workload_iri_str,
+                &format!("{PICLOUD_NS}scheduledOn"),
+                NamedNode::new(to_node_iri)
+                    .map_err(|e| PiCloudError::Internal(format!("invalid node IRI: {e}")))?
+                    .into(),
+            )?;
+        }
+
+        debug!(workload_iri = workload_iri_str, to_node = to_node_iri, "projected WorkloadMigrated");
+        Ok(())
+    }
+
+    fn project_self_monitoring(&self, event: &EventEnvelope) -> Result<()> {
+        let node_iri_str = event.payload["node_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let overall_status = event.payload["overall_status"]
+            .as_str()
+            .unwrap_or("unknown");
+
+        // Upsert the selfMonitoringStatus triple
+        let s = NamedNode::new(node_iri_str)
+            .map_err(|e| PiCloudError::Internal(format!("invalid node IRI: {e}")))?;
+        let pred = format!("{PICLOUD_NS}selfMonitoringStatus");
+        let p = NamedNodeRef::new(&pred)
+            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+        let old_quads: Vec<Quad> = self
+            .store
+            .quads_for_pattern(
+                Some(SubjectRef::from(&s)),
+                Some(p),
+                None,
+                Some(GraphNameRef::DefaultGraph),
+            )
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        for quad in &old_quads {
+            self.store
+                .remove(quad)
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+        }
+
+        self.insert_triple(
+            node_iri_str,
+            &format!("{PICLOUD_NS}selfMonitoringStatus"),
+            Literal::new_simple_literal(overall_status).into(),
+        )?;
+
+        debug!(node_iri = node_iri_str, status = overall_status, "projected SelfMonitoringCheckCompleted");
+        Ok(())
+    }
+
     fn project_resource_declared(&self, event: &EventEnvelope) -> Result<()> {
         let resource_iri_str = event.payload["resource_iri"]
             .as_str()
@@ -3738,6 +3901,23 @@ impl StateProjector for OxigraphProjector {
                 debug!("TelemetryAggregated event — no RDF projection");
                 Ok(())
             }
+            // Node drain events (FT-011)
+            "NodeCordoned" => self.project_node_cordoned(event),
+            "NodeUncordoned" => self.project_node_uncordoned(event),
+            "NodeDrainStarted" => self.project_node_drain_started(event),
+            "NodeDrainCompleted" => self.project_node_drain_completed(event),
+            "NodeDrainFailed" => {
+                debug!(event_type = %event.event_type, "drain lifecycle event — recorded");
+                Ok(())
+            }
+            "WorkloadMigrated" => self.project_workload_migrated(event),
+            // Log compaction events (FT-011) — no RDF projection needed
+            "LogCompactionCompleted" => {
+                debug!("LogCompactionCompleted event — no RDF projection");
+                Ok(())
+            }
+            // Self-monitoring events (FT-011)
+            "SelfMonitoringCheckCompleted" => self.project_self_monitoring(event),
             other => {
                 debug!(event_type = other, "unhandled event type — skipping projection");
                 Ok(())
