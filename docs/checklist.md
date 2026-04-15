@@ -576,10 +576,10 @@
 - [x] TC-270: Event routed to implementing product resolved by capability IRI (scenario) — passing
 - [x] TC-327: Capability routing exit — events routed to implementing product (exit-criteria) — passing
 
-### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [ ]
+### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [x]
 
-- [ ] TC-271: picloud capability list shows all capabilities with fulfilment status (scenario) — unimplemented
-- [ ] TC-328: Capability list exit — all capabilities shown with fulfilment status (exit-criteria) — unimplemented
+- [x] TC-271: picloud capability list shows all capabilities with fulfilment status (scenario) — passing
+- [x] TC-328: Capability list exit — all capabilities shown with fulfilment status (exit-criteria) — passing
 
 ### FT-065 — data-domain resource type — cluster-scoped governance boundary [ ]
 

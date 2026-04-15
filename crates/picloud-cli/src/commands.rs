@@ -274,3 +274,160 @@ pub fn parse_sql_where_clause(sql: &str) -> Vec<(String, String)> {
 
     results
 }
+
+// ---------------------------------------------------------------------------
+// Capability list (FT-064)
+// ---------------------------------------------------------------------------
+
+/// A single row in the capability list output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapabilityListRow {
+    pub name: String,
+    pub version: String,
+    pub fulfilled: bool,
+    pub implementors: Vec<String>,
+    pub consumers: Vec<String>,
+}
+
+/// Build the SPARQL query for listing all capabilities with implementors,
+/// consumers, and fulfilment status.
+///
+/// Uses GROUP_CONCAT to aggregate implementors and consumers into
+/// comma-separated strings, keeping the result set to one row per capability.
+pub fn capability_list_sparql() -> &'static str {
+    "PREFIX picloud: <https://picloud.local/ontology#> \
+     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> \
+     SELECT ?name ?version ?status \
+     (GROUP_CONCAT(DISTINCT ?implementor; SEPARATOR=\", \") AS ?implementors) \
+     (GROUP_CONCAT(DISTINCT ?consumer; SEPARATOR=\", \") AS ?consumers) \
+     WHERE { \
+     ?cap rdf:type picloud:Capability . \
+     ?cap picloud:name ?name . \
+     ?cap picloud:version ?version . \
+     OPTIONAL { ?cap picloud:status ?status } \
+     OPTIONAL { ?cap picloud:implementedBy ?implementor } \
+     OPTIONAL { ?cap picloud:consumedBy ?consumer } \
+     } GROUP BY ?cap ?name ?version ?status ORDER BY ?name"
+}
+
+/// Determine whether a capability is fulfilled.
+///
+/// A capability is fulfilled when it has at least one implementor.
+pub fn capability_is_fulfilled(implementors: &[String]) -> bool {
+    !implementors.is_empty()
+}
+
+/// Extract a plain string value from a SPARQL binding field.
+///
+/// SPARQL JSON results encode values as either `"field": {"value": "..."}` or
+/// sometimes as a plain string. This helper handles both.
+fn binding_str<'a>(row: &'a Value, field: &str) -> &'a str {
+    row.get(field)
+        .and_then(|v| v.get("value").and_then(|v| v.as_str()).or_else(|| v.as_str()))
+        .unwrap_or("")
+}
+
+/// Parse the JSON response body from a SPARQL capability list query into
+/// structured rows.
+///
+/// Expects the standard SPARQL JSON results format with a top-level
+/// `"bindings"` array (possibly nested under `"results"`).
+pub fn parse_capability_list(body: &Value) -> Vec<CapabilityListRow> {
+    let bindings = body
+        .get("results")
+        .and_then(|r| r.get("bindings"))
+        .and_then(|b| b.as_array())
+        .or_else(|| body.get("bindings").and_then(|b| b.as_array()));
+
+    let bindings = match bindings {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    bindings
+        .iter()
+        .map(|row| {
+            let name = binding_str(row, "name").to_string();
+            let version = binding_str(row, "version").to_string();
+            let implementors_raw = binding_str(row, "implementors");
+            let consumers_raw = binding_str(row, "consumers");
+
+            let implementors: Vec<String> = if implementors_raw.is_empty() {
+                Vec::new()
+            } else {
+                implementors_raw
+                    .split(", ")
+                    .map(|s| extract_product_name(s).to_string())
+                    .collect()
+            };
+
+            let consumers: Vec<String> = if consumers_raw.is_empty() {
+                Vec::new()
+            } else {
+                consumers_raw
+                    .split(", ")
+                    .map(|s| extract_product_name(s).to_string())
+                    .collect()
+            };
+
+            let fulfilled = capability_is_fulfilled(&implementors);
+
+            CapabilityListRow {
+                name,
+                version,
+                fulfilled,
+                implementors,
+                consumers,
+            }
+        })
+        .collect()
+}
+
+/// Extract the product name from a product IRI.
+///
+/// Given `https://picloud.local/products/photo-app`, returns `photo-app`.
+/// If the IRI doesn't match the expected pattern, returns the full string.
+fn extract_product_name(iri: &str) -> &str {
+    iri.rsplit("/products/")
+        .next()
+        .and_then(|s| s.split('/').next())
+        .unwrap_or(iri)
+}
+
+/// Format capability list rows into a human-readable table.
+///
+/// Columns: NAME, VERSION, FULFILLED, IMPLEMENTORS, CONSUMERS
+pub fn format_capability_table(rows: &[CapabilityListRow]) -> String {
+    if rows.is_empty() {
+        return "No capabilities declared.".to_string();
+    }
+
+    let mut output = format!(
+        "{:<25} {:<10} {:<12} {:<30} {:<30}",
+        "NAME", "VERSION", "FULFILLED", "IMPLEMENTORS", "CONSUMERS"
+    );
+    output.push('\n');
+    output.push_str(&"-".repeat(107));
+
+    for row in rows {
+        let fulfilled_str = if row.fulfilled { "yes" } else { "no" };
+        let implementors_str = if row.implementors.is_empty() {
+            "-".to_string()
+        } else {
+            row.implementors.join(", ")
+        };
+        let consumers_str = if row.consumers.is_empty() {
+            "-".to_string()
+        } else {
+            row.consumers.join(", ")
+        };
+
+        output.push('\n');
+        output.push_str(&format!(
+            "{:<25} {:<10} {:<12} {:<30} {:<30}",
+            row.name, row.version, fulfilled_str, implementors_str, consumers_str,
+        ));
+    }
+
+    output
+}

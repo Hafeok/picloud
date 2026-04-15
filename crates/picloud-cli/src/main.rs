@@ -2559,32 +2559,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Capability { command } => match command {
             CapabilityCommands::List => {
-                let sparql = "SELECT ?cap ?name ?version ?status ?input ?output WHERE { \
-                    ?cap a <https://picloud.local/ontology#Capability> . \
-                    ?cap <https://picloud.local/ontology#name> ?name . \
-                    ?cap <https://picloud.local/ontology#version> ?version . \
-                    ?cap <https://picloud.local/ontology#status> ?status . \
-                    ?cap <https://picloud.local/ontology#inputEvent> ?input . \
-                    ?cap <https://picloud.local/ontology#outputEvent> ?output . \
-                } ORDER BY ?name";
+                let sparql = commands::capability_list_sparql();
                 match client.get(&format!("/api/graph/query?sparql={}", urlencoding(sparql))).await {
                     Ok(body) => {
-                        if let Some(bindings) = body.get("bindings").and_then(|b| b.as_array()) {
-                            if bindings.is_empty() {
-                                println!("No capabilities declared.");
-                            } else {
-                                println!("{:<25} {:<10} {:<12} {:<25} {:<25}", "NAME", "VERSION", "STATUS", "INPUT EVENT", "OUTPUT EVENT");
-                                println!("{}", "-".repeat(97));
-                                for row in bindings {
-                                    let name = row.get("name").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let version = row.get("version").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let status = row.get("status").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let input = row.get("input").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let output = row.get("output").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    println!("{:<25} {:<10} {:<12} {:<25} {:<25}", name, version, status, input, output);
-                                }
-                            }
-                        }
+                        let rows = commands::parse_capability_list(&body);
+                        println!("{}", commands::format_capability_table(&rows));
                     }
                     Err(e) => eprintln!("Failed to list capabilities: {e}"),
                 }
