@@ -2,13 +2,22 @@
 id: TC-325
 title: Groups exit — group role assignment grants inherited permissions
 type: exit-criteria
-status: unimplemented
+status: passing
+runner: cargo-test
+runner-args: "tc325_groups_exit_group_role_assignment_grants_inherited_permissions"
 validates:
-  features: []
+  features: [FT-056]
   adrs: []
 phase: 1
+last-run: 2026-04-15T13:38:47.319051934+00:00
+last-run-duration: 0.5s
 ---
 
 ## Description
 
-[Describe the test criterion here.]
+Exit criteria: Validates the full group role inheritance system end-to-end.
+Covers multiple groups with multiple members, users in multiple groups,
+combination of direct roles and group-inherited roles, dynamic role assignment
+and revocation on groups, membership removal, issue_token / issue_token_with_audience /
+resolve_roles all correctly include group-inherited roles, idempotent membership
+operations, and error handling for non-existent groups.

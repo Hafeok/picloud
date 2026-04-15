@@ -541,10 +541,10 @@
 
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
-### FT-056 — group resource type — roles assignable to groups, users inherit [ ]
+### FT-056 — group resource type — roles assignable to groups, users inherit [x]
 
-- [ ] TC-268: Group with assigned role grants inherited permissions to member users (scenario) — unimplemented
-- [ ] TC-325: Groups exit — group role assignment grants inherited permissions (exit-criteria) — unimplemented
+- [x] TC-268: Group with assigned role grants inherited permissions to member users (scenario) — passing
+- [x] TC-325: Groups exit — group role assignment grants inherited permissions (exit-criteria) — passing
 
 ### FT-057 — inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation [ ]
 

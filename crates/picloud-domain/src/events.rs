@@ -126,6 +126,10 @@ pub enum PlatformEvent {
 
     // --- Group events (ADR-037) ---
     GroupMembershipChanged(GroupMembershipChangedPayload),
+    GroupCreated(GroupCreatedPayload),
+    GroupRoleAssigned(GroupRoleAssignedPayload),
+    GroupRoleRevoked(GroupRoleRevokedPayload),
+    GroupDeleted(GroupDeletedPayload),
 
     // --- Inference events (ADR-038) ---
     InferenceRuleEvaluated(InferenceRuleEvaluatedPayload),
@@ -476,6 +480,50 @@ pub struct GroupMembershipChangedPayload {
     pub member_iri: ResourceIri,
     /// "added" or "removed"
     pub action: String,
+}
+
+/// Payload for GroupCreated event (ADR-037, FT-056).
+/// Emitted when a new group resource is created.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupCreatedPayload {
+    /// IRI of the newly created group
+    pub group_iri: ResourceIri,
+    /// Human-readable group name
+    pub name: String,
+    /// Optional description
+    pub description: Option<String>,
+}
+
+/// Payload for GroupRoleAssigned event (ADR-037, FT-056).
+/// Emitted when a role is assigned to a group. All group members inherit the role.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupRoleAssignedPayload {
+    /// IRI of the group
+    pub group_iri: ResourceIri,
+    /// Name of the role assigned to the group
+    pub role_name: String,
+    /// Product scope (if the role is product-scoped)
+    pub product: Option<String>,
+}
+
+/// Payload for GroupRoleRevoked event (ADR-037, FT-056).
+/// Emitted when a role is removed from a group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupRoleRevokedPayload {
+    /// IRI of the group
+    pub group_iri: ResourceIri,
+    /// Name of the role revoked from the group
+    pub role_name: String,
+    /// Product scope
+    pub product: Option<String>,
+}
+
+/// Payload for GroupDeleted event (ADR-037, FT-056).
+/// Emitted when a group resource is deleted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupDeletedPayload {
+    /// IRI of the deleted group
+    pub group_iri: ResourceIri,
 }
 
 // --- Inference payloads (ADR-038) ---

@@ -121,6 +121,18 @@ pub struct StoredM2mPermission {
     pub permission: picloud_domain::identity::M2mPermission,
 }
 
+/// A stored group with its assigned roles (FT-056).
+#[derive(Debug, Clone)]
+pub struct StoredGroup {
+    pub iri: ResourceIri,
+    pub name: String,
+    pub description: Option<String>,
+    /// Roles assigned to this group — all members inherit these roles.
+    pub roles: Vec<String>,
+    /// IRIs of members belonging to this group.
+    pub members: Vec<String>,
+}
+
 /// An in-flight authorization code awaiting exchange.
 #[derive(Debug, Clone)]
 struct PendingAuthorizationCode {
@@ -160,6 +172,8 @@ pub struct LocalIdentityProvider {
     /// Optional SPARQL query function for OWL role inheritance (ADR-051).
     /// Injected from composition root when RDF store is available.
     sparql_query: Option<SparqlQueryFn>,
+    /// Groups keyed by group IRI (FT-056).
+    groups: Arc<RwLock<HashMap<String, StoredGroup>>>,
 }
 
 impl LocalIdentityProvider {
@@ -182,6 +196,7 @@ impl LocalIdentityProvider {
             token_ttl_secs: 3600,
             challenge_ttl_secs: 300, // 5 minutes
             sparql_query: None,
+            groups: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -204,6 +219,7 @@ impl LocalIdentityProvider {
             token_ttl_secs,
             challenge_ttl_secs: 300,
             sparql_query: None,
+            groups: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -270,6 +286,7 @@ impl LocalIdentityProvider {
             token_ttl_secs: self.token_ttl_secs,
             challenge_ttl_secs: self.challenge_ttl_secs,
             sparql_query: self.sparql_query.clone(),
+            groups: Arc::clone(&self.groups),
         }
     }
 
@@ -656,13 +673,21 @@ impl LocalIdentityProvider {
         audience: &str,
         scopes: Vec<String>,
     ) -> Result<String> {
-        let roles = {
+        let mut roles = {
             let store = self.identities.read().await;
             store
                 .get(identity_iri.as_str())
                 .map(|s| s.roles.clone())
                 .unwrap_or_default()
         };
+
+        // Merge group-inherited roles (FT-056)
+        let group_roles = self.roles_from_groups(identity_iri).await;
+        for role in group_roles {
+            if !roles.contains(&role) {
+                roles.push(role);
+            }
+        }
 
         // Extract product name from audience URL (e.g. ".../products/photo-app")
         let product = audience
@@ -695,6 +720,124 @@ impl LocalIdentityProvider {
         };
         debug!("Registered identity: {}", key);
         self.identities.write().await.insert(key, stored);
+    }
+
+    // ---- Group management (FT-056) ----
+
+    /// Create a group with an initial set of roles.
+    /// All members added to this group will inherit these roles.
+    pub async fn create_group(
+        &self,
+        group_iri: ResourceIri,
+        name: String,
+        description: Option<String>,
+        roles: Vec<String>,
+    ) {
+        let key = group_iri.as_str().to_string();
+        let stored = StoredGroup {
+            iri: group_iri,
+            name: name.clone(),
+            description,
+            roles,
+            members: Vec::new(),
+        };
+        debug!("Created group: {} ({})", key, name);
+        self.groups.write().await.insert(key, stored);
+    }
+
+    /// Assign a role to an existing group.
+    /// Returns Err if the group does not exist.
+    pub async fn assign_group_role(
+        &self,
+        group_iri: &ResourceIri,
+        role_name: String,
+    ) -> Result<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups.get_mut(group_iri.as_str()).ok_or_else(|| {
+            PiCloudError::ResourceNotFound {
+                iri: group_iri.as_str().to_string(),
+            }
+        })?;
+        if !group.roles.contains(&role_name) {
+            group.roles.push(role_name.clone());
+            debug!("Assigned role {} to group {}", role_name, group_iri.as_str());
+        }
+        Ok(())
+    }
+
+    /// Revoke a role from an existing group.
+    /// Returns Err if the group does not exist.
+    pub async fn revoke_group_role(
+        &self,
+        group_iri: &ResourceIri,
+        role_name: &str,
+    ) -> Result<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups.get_mut(group_iri.as_str()).ok_or_else(|| {
+            PiCloudError::ResourceNotFound {
+                iri: group_iri.as_str().to_string(),
+            }
+        })?;
+        group.roles.retain(|r| r != role_name);
+        debug!("Revoked role {} from group {}", role_name, group_iri.as_str());
+        Ok(())
+    }
+
+    /// Add a member (user identity) to a group.
+    /// Returns Err if the group does not exist.
+    pub async fn add_group_member(
+        &self,
+        group_iri: &ResourceIri,
+        member_iri: &ResourceIri,
+    ) -> Result<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups.get_mut(group_iri.as_str()).ok_or_else(|| {
+            PiCloudError::ResourceNotFound {
+                iri: group_iri.as_str().to_string(),
+            }
+        })?;
+        let member_key = member_iri.as_str().to_string();
+        if !group.members.contains(&member_key) {
+            group.members.push(member_key);
+            debug!("Added member {} to group {}", member_iri.as_str(), group_iri.as_str());
+        }
+        Ok(())
+    }
+
+    /// Remove a member from a group.
+    /// Returns Err if the group does not exist.
+    pub async fn remove_group_member(
+        &self,
+        group_iri: &ResourceIri,
+        member_iri: &ResourceIri,
+    ) -> Result<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups.get_mut(group_iri.as_str()).ok_or_else(|| {
+            PiCloudError::ResourceNotFound {
+                iri: group_iri.as_str().to_string(),
+            }
+        })?;
+        group.members.retain(|m| m != member_iri.as_str());
+        debug!("Removed member {} from group {}", member_iri.as_str(), group_iri.as_str());
+        Ok(())
+    }
+
+    /// Collect all roles inherited from groups for a given identity.
+    /// Scans all groups for membership and returns the union of group roles.
+    pub async fn roles_from_groups(&self, identity_iri: &ResourceIri) -> Vec<String> {
+        let groups = self.groups.read().await;
+        let identity_key = identity_iri.as_str();
+        let mut inherited_roles = Vec::new();
+        for group in groups.values() {
+            if group.members.iter().any(|m| m == identity_key) {
+                for role in &group.roles {
+                    if !inherited_roles.contains(role) {
+                        inherited_roles.push(role.clone());
+                    }
+                }
+            }
+        }
+        inherited_roles
     }
 
     /// Sign a payload and return base64(json) + "." + base64(signature).
@@ -747,13 +890,21 @@ impl IdentityProvider for LocalIdentityProvider {
         identity_iri: &ResourceIri,
         product: Option<&str>,
     ) -> Result<String> {
-        let roles = {
+        let mut roles = {
             let store = self.identities.read().await;
             store
                 .get(identity_iri.as_str())
                 .map(|s| s.roles.clone())
                 .unwrap_or_default()
         };
+
+        // Merge group-inherited roles (FT-056)
+        let group_roles = self.roles_from_groups(identity_iri).await;
+        for role in group_roles {
+            if !roles.contains(&role) {
+                roles.push(role);
+            }
+        }
 
         let aud = product.map(|p| {
             format!("https://{}/products/{}", self.cluster_domain.0, p)
@@ -1541,9 +1692,15 @@ impl picloud_domain::traits::TokenExchange for LocalIdentityProvider {
                 .unwrap_or_default()
         };
 
-        // Expand roles via rdfs:subClassOf* traversal using the RDF graph
+        // Collect roles inherited from group memberships (FT-056)
+        let group_roles = self.roles_from_groups(identity_iri).await;
+
+        // Merge direct roles and group-inherited roles
         let mut all_roles: std::collections::HashSet<String> =
             direct_roles.iter().cloned().collect();
+        for role in &group_roles {
+            all_roles.insert(role.clone());
+        }
 
         if let Some(ref sparql_fn) = self.sparql_query {
             for role in &direct_roles {
