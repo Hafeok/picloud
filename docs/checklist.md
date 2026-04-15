@@ -704,8 +704,13 @@
 - [x] TC-218: SDKs published to package registries (exit-criteria) — passing
 - [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
-### FT-088 — picloud sdk publish command [ ]
+### FT-088 — picloud sdk publish command [x]
 
+- [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
+- [x] TC-097: sdk_generation (scenario) — passing
+- [x] TC-098: sdk_publish (scenario) — passing
+- [x] TC-099: sdk_ontology_sync (scenario) — passing
+- [x] TC-218: SDKs published to package registries (exit-criteria) — passing
 - [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
 ### FT-089 — .NET Aspire integration package [ ]

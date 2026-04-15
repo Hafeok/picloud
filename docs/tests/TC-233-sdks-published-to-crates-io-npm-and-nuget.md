@@ -7,12 +7,13 @@ validates:
   features:
   - FT-086
   - FT-087
+  - FT-088
   adrs:
   - ADR-033
 phase: 3
 runner: cargo-test
 runner-args: tc233_sdks_published_to_crates_io_npm_and_nuget
-last-run: 2026-04-15T17:44:57.956120221+00:00
+last-run: 2026-04-15T17:47:15.992133278+00:00
 last-run-duration: 0.5s
 ---
 
