@@ -649,7 +649,7 @@
 - [x] TC-132: AlertResolved (scenario) — passing
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-077 — AlertFired / AlertResolved events [ ]
+### FT-077 — AlertFired / AlertResolved events [x]
 
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
