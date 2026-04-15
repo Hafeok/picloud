@@ -2,7 +2,7 @@
 id: FT-060
 title: implements field on product — structural SHACL conformance validated at resource apply time
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

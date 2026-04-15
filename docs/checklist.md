@@ -558,7 +558,7 @@
 
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
-### FT-060 — implements field on product — structural SHACL conformance validated at resource apply time [ ]
+### FT-060 — implements field on product — structural SHACL conformance validated at resource apply time [x]
 
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
