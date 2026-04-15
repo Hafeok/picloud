@@ -581,10 +581,10 @@
 - [x] TC-271: picloud capability list shows all capabilities with fulfilment status (scenario) — passing
 - [x] TC-328: Capability list exit — all capabilities shown with fulfilment status (exit-criteria) — passing
 
-### FT-065 — data-domain resource type — cluster-scoped governance boundary [ ]
+### FT-065 — data-domain resource type — cluster-scoped governance boundary [x]
 
-- [ ] TC-272: Data domain created as cluster-scoped governance boundary (scenario) — unimplemented
-- [ ] TC-329: Data domain exit — cluster-scoped governance boundary created (exit-criteria) — unimplemented
+- [x] TC-272: Data domain created as cluster-scoped governance boundary (scenario) — passing
+- [x] TC-329: Data domain exit — cluster-scoped governance boundary created (exit-criteria) — passing
 
 ### FT-066 — data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection [ ]
 
