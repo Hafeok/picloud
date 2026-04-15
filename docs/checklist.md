@@ -653,9 +653,9 @@
 
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-078 — event-store resource type — managed event log + aggregate streams per Product [ ]
+### FT-078 — event-store resource type — managed event log + aggregate streams per Product [x]
 
-- [ ] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — unimplemented
+- [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
 
 ### FT-079 — Product event schema IRIs served from platform HTTP layer [ ]
 
@@ -664,7 +664,7 @@
 
 ### FT-080 — Automatic RDF projection of Product aggregate events into Product graph [ ]
 
-- [ ] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — unimplemented
+- [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
 
 ### FT-081 — Event replay — shadow projection, atomic swap, marked replay events [ ]
 

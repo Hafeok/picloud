@@ -818,6 +818,58 @@ impl OxigraphProjector {
             }
         }
 
+        // Project EventStore-specific triples (ADR-032, FT-078)
+        if resource_type == "EventStore" || resource_type == "event-store" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("EventStore").into(),
+            )?;
+            // Project aggregate definitions as blank-node-like sub-resources
+            if let Some(aggregates) = event.payload["aggregates"].as_array() {
+                for agg in aggregates {
+                    if let Some(agg_type) = agg["aggregate_type"].as_str() {
+                        // Link event store to aggregate type
+                        self.insert_triple(
+                            resource_iri_str,
+                            &format!("{PICLOUD_NS}aggregateType"),
+                            Literal::new_simple_literal(agg_type).into(),
+                        )?;
+                    }
+                    if let Some(schema_file) = agg["schema_file"].as_str() {
+                        self.insert_triple(
+                            resource_iri_str,
+                            &format!("{PICLOUD_NS}aggregateSchemaFile"),
+                            Literal::new_simple_literal(schema_file).into(),
+                        )?;
+                    }
+                }
+            }
+            // Also insert into named graph if product-scoped
+            if let Some(product) = event.payload["product"].as_str() {
+                let graph_iri = self.iri_builder.product_graph(product);
+                self.insert_triple_in_graph(
+                    resource_iri_str,
+                    RDF_TYPE,
+                    picloud_term("EventStore").into(),
+                    graph_iri.as_str(),
+                )?;
+                // Project aggregate types into the named graph too
+                if let Some(aggregates) = event.payload["aggregates"].as_array() {
+                    for agg in aggregates {
+                        if let Some(agg_type) = agg["aggregate_type"].as_str() {
+                            self.insert_triple_in_graph(
+                                resource_iri_str,
+                                &format!("{PICLOUD_NS}aggregateType"),
+                                Literal::new_simple_literal(agg_type).into(),
+                                graph_iri.as_str(),
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
         // Project EventSubscription-specific triples (ADR-018)
         // Project rdf-store-specific triples (ADR-019, FT-051)
         if resource_type == "RdfStore" || resource_type == "rdf-store" {
@@ -1293,6 +1345,132 @@ impl OxigraphProjector {
         }
 
         debug!(product_iri = product_iri_str, "projected ProductDeleted");
+        Ok(())
+    }
+
+    /// Project a ProductEventAppended event (ADR-032, FT-078).
+    ///
+    /// When a product appends an event to its event store, this projector
+    /// creates RDF triples in the product's named graph representing the
+    /// event and its payload properties.
+    fn project_product_event_appended(&self, event: &EventEnvelope) -> Result<()> {
+        let product_name = event.product.as_deref().ok_or_else(|| {
+            PiCloudError::Internal("ProductEventAppended missing product scope".to_string())
+        })?;
+        let graph_iri = self.iri_builder.product_graph(product_name);
+
+        // The event IRI is the aggregate stream address for this event
+        let event_iri = event.payload["event_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let aggregate_type = event.payload["aggregate_type"]
+            .as_str()
+            .unwrap_or("Unknown");
+        let aggregate_id = event.payload["aggregate_id"]
+            .as_str()
+            .unwrap_or("unknown");
+        let product_event_type = event.payload["product_event_type"]
+            .as_str()
+            .unwrap_or("Event");
+
+        // Insert into default graph
+        self.insert_triple(
+            event_iri,
+            RDF_TYPE,
+            picloud_term("ProductEvent").into(),
+        )?;
+        self.insert_triple(
+            event_iri,
+            &format!("{PICLOUD_NS}aggregateType"),
+            Literal::new_simple_literal(aggregate_type).into(),
+        )?;
+        self.insert_triple(
+            event_iri,
+            &format!("{PICLOUD_NS}aggregateId"),
+            Literal::new_simple_literal(aggregate_id).into(),
+        )?;
+        self.insert_triple(
+            event_iri,
+            &format!("{PICLOUD_NS}productEventType"),
+            Literal::new_simple_literal(product_event_type).into(),
+        )?;
+        self.insert_triple(
+            event_iri,
+            &format!("{PICLOUD_NS}product"),
+            Literal::new_simple_literal(product_name).into(),
+        )?;
+
+        // Project payload data properties into the graph
+        if let Some(data) = event.payload.get("data") {
+            if let Some(obj) = data.as_object() {
+                for (key, value) in obj {
+                    let literal_value = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        _ => serde_json::to_string(value).unwrap_or_default(),
+                    };
+                    self.insert_triple(
+                        event_iri,
+                        &format!("{PICLOUD_NS}{key}"),
+                        Literal::new_simple_literal(&literal_value).into(),
+                    )?;
+                }
+            }
+        }
+
+        // Insert into product named graph
+        self.insert_triple_in_graph(
+            event_iri,
+            RDF_TYPE,
+            picloud_term("ProductEvent").into(),
+            graph_iri.as_str(),
+        )?;
+        self.insert_triple_in_graph(
+            event_iri,
+            &format!("{PICLOUD_NS}aggregateType"),
+            Literal::new_simple_literal(aggregate_type).into(),
+            graph_iri.as_str(),
+        )?;
+        self.insert_triple_in_graph(
+            event_iri,
+            &format!("{PICLOUD_NS}aggregateId"),
+            Literal::new_simple_literal(aggregate_id).into(),
+            graph_iri.as_str(),
+        )?;
+        self.insert_triple_in_graph(
+            event_iri,
+            &format!("{PICLOUD_NS}productEventType"),
+            Literal::new_simple_literal(product_event_type).into(),
+            graph_iri.as_str(),
+        )?;
+
+        // Project payload data into product named graph too
+        if let Some(data) = event.payload.get("data") {
+            if let Some(obj) = data.as_object() {
+                for (key, value) in obj {
+                    let literal_value = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        _ => serde_json::to_string(value).unwrap_or_default(),
+                    };
+                    self.insert_triple_in_graph(
+                        event_iri,
+                        &format!("{PICLOUD_NS}{key}"),
+                        Literal::new_simple_literal(&literal_value).into(),
+                        graph_iri.as_str(),
+                    )?;
+                }
+            }
+        }
+
+        debug!(
+            product = product_name,
+            aggregate_type = aggregate_type,
+            aggregate_id = aggregate_id,
+            "projected ProductEventAppended"
+        );
         Ok(())
     }
 
@@ -3463,6 +3641,8 @@ impl StateProjector for OxigraphProjector {
                 debug!(event_type = %event.event_type, "data product lifecycle event — recorded");
                 Ok(())
             }
+            // Product event store events (ADR-032, FT-078)
+            "ProductEventAppended" => self.project_product_event_appended(event),
             // Telemetry events (ADR-045) — no RDF projection needed
             "TelemetryAggregated" => {
                 debug!("TelemetryAggregated event — no RDF projection");
