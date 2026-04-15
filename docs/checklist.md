@@ -686,10 +686,10 @@
 - [x] TC-283: Platform routes events between products via subscription (scenario) — passing
 - [x] TC-340: Event routing exit — platform routes events between products (exit-criteria) — passing
 
-### FT-085 — Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products [ ]
+### FT-085 — Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products [x]
 
-- [ ] TC-284: Cluster SPARQL query returns all products, events, ontologies (scenario) — unimplemented
-- [ ] TC-341: Discoverability exit — SPARQL returns all products and ontologies (exit-criteria) — unimplemented
+- [x] TC-284: Cluster SPARQL query returns all products, events, ontologies (scenario) — passing
+- [x] TC-341: Discoverability exit — SPARQL returns all products and ontologies (exit-criteria) — passing
 
 ### FT-086 — SDK generator — Rust, TypeScript, .NET generated from platform ontology [ ]
 
