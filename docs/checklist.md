@@ -676,10 +676,10 @@
 - [x] TC-281: Aggregate-scoped replay replays events for single aggregate (scenario) — passing
 - [x] TC-338: Scoped replay exit — single aggregate replay completes (exit-criteria) — passing
 
-### FT-083 — event-subscription resource type [ ]
+### FT-083 — event-subscription resource type [x]
 
-- [ ] TC-282: Event subscription resource type receives filtered events (scenario) — unimplemented
-- [ ] TC-339: Event subscription exit — subscription receives filtered events (exit-criteria) — unimplemented
+- [x] TC-282: Event subscription resource type receives filtered events (scenario) — passing
+- [x] TC-339: Event subscription exit — subscription receives filtered events (exit-criteria) — passing
 
 ### FT-084 — Platform-managed event routing between Products [ ]
 
