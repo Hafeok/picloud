@@ -507,15 +507,15 @@
 
 ## Phase 3
 
-### FT-010 — SDK Model [~]
+### FT-010 — SDK Model [x]
 
 - [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
 - [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
-- [!] TC-097: sdk_generation (scenario) — failing
-- [!] TC-098: sdk_publish (scenario) — failing
-- [!] TC-099: sdk_ontology_sync (scenario) — failing
-- [!] TC-218: SDKs published to package registries (exit-criteria) — failing
+- [x] TC-097: sdk_generation (scenario) — passing
+- [x] TC-098: sdk_publish (scenario) — passing
+- [x] TC-099: sdk_ontology_sync (scenario) — passing
+- [x] TC-218: SDKs published to package registries (exit-criteria) — passing
 
 ### FT-051 — rdf-store resource type — managed Oxigraph per Product [ ]
 

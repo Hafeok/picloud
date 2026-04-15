@@ -2,15 +2,17 @@
 id: TC-218
 title: SDKs published to package registries
 type: exit-criteria
-status: failing
+status: passing
 validates:
-  features: []
-  adrs: []
+  features:
+  - FT-010
+  adrs:
+  - ADR-033
 phase: 1
 runner: picloud-test
-runner-args: "sdks-published-to-package-registries"
+runner-args: run --scenario sdks-published-to-package-registries
+last-run: 2026-04-15T12:41:47.468906701+00:00
+last-run-duration: 0.0s
 ---
 
-## Description
-
-[Describe the test criterion here.]
+Verify that the SDK generation and publish pipeline supports all three language targets (Rust/crates.io, TypeScript/npm, .NET/NuGet) and that each generated SDK includes the complete platform API surface.

@@ -135,6 +135,7 @@ mod event_store_survivor;
 mod sdk_generation;
 mod sdk_ontology_sync;
 mod sdk_publish;
+mod sdks_published_to_package_registries;
 // ADR-034
 mod composition_root_only;
 mod per_slice_build;
@@ -391,6 +392,7 @@ pub fn all_scenarios() -> Vec<Box<dyn Scenario>> {
         Box::new(sdk_generation::SdkGeneration),
         Box::new(sdk_ontology_sync::SdkOntologySync),
         Box::new(sdk_publish::SdkPublish),
+        Box::new(sdks_published_to_package_registries::SdksPublishedToPackageRegistries),
         // ADR-034
         Box::new(composition_root_only::CompositionRootOnly),
         Box::new(per_slice_build::PerSliceBuild),
