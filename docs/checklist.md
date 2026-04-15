@@ -600,7 +600,7 @@
 - [x] TC-273: Freshness monitor emits DataProductStale when maxAge exceeded (scenario) — passing
 - [x] TC-330: Freshness exit — DataProductStale emitted when maxAge breached (exit-criteria) — passing
 
-### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [ ]
+### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [x]
 
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
