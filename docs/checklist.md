@@ -730,10 +730,10 @@
 - [x] TC-286: Storage intent tier quorum replicates to majority of nodes (scenario) — passing
 - [x] TC-343: Storage tiers exit — quorum tier replicates to majority (exit-criteria) — passing
 
-### FT-091 — Workload resource constraints (CPU/memory limits) [ ]
+### FT-091 — Workload resource constraints (CPU/memory limits) [x]
 
-- [ ] TC-287: Workload CPU and memory limits enforced by container runtime (scenario) — unimplemented
-- [ ] TC-344: Resource limits exit — CPU and memory limits enforced (exit-criteria) — unimplemented
+- [x] TC-287: Workload CPU and memory limits enforced by container runtime (scenario) — passing
+- [x] TC-344: Resource limits exit — CPU and memory limits enforced (exit-criteria) — passing
 
 ### FT-092 — Node drain and graceful workload migration [ ]
 

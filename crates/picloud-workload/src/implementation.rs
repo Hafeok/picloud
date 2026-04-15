@@ -352,18 +352,42 @@ impl ProcessScheduler {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        // Resource limits (ADR-020) — set RLIMIT_AS for memory before exec
-        if let Some(memory_mb) = spec.resources.memory_mb {
-            let memory_bytes = (memory_mb as u64) * 1024 * 1024;
+        // Resource limits (ADR-020, FT-091) — enforce CPU and memory via rlimits before exec
+        let memory_bytes = spec.resources.memory_as_bytes();
+        let cpu_millicores = spec.resources.cpu_millicores;
+        if memory_bytes.is_some() || cpu_millicores.is_some() {
             unsafe {
                 cmd.pre_exec(move || {
-                    let limit = libc::rlimit {
-                        rlim_cur: memory_bytes,
-                        rlim_max: memory_bytes,
-                    };
-                    if libc::setrlimit(libc::RLIMIT_AS, &limit) != 0 {
-                        return Err(std::io::Error::last_os_error());
+                    // Memory: RLIMIT_AS (address space) — hard cap on virtual memory
+                    if let Some(bytes) = memory_bytes {
+                        let limit = libc::rlimit {
+                            rlim_cur: bytes,
+                            rlim_max: bytes,
+                        };
+                        if libc::setrlimit(libc::RLIMIT_AS, &limit) != 0 {
+                            return Err(std::io::Error::last_os_error());
+                        }
                     }
+
+                    // CPU: RLIMIT_CPU (cumulative CPU seconds) — safety backstop
+                    // Maps millicores to a generous CPU-seconds cap:
+                    // e.g. 500m for a 1-hour workload ≈ 1800 CPU-seconds.
+                    // We set a 1-hour ceiling scaled by the CPU fraction.
+                    if let Some(milli) = cpu_millicores {
+                        let cpu_fraction = milli as f64 / 1000.0;
+                        // Allow 1 hour of wall-clock time at the given CPU fraction,
+                        // plus a 10% buffer to avoid premature SIGXCPU.
+                        let cpu_seconds = (3600.0 * cpu_fraction * 1.1) as u64;
+                        let cpu_seconds = cpu_seconds.max(1); // at least 1 second
+                        let limit = libc::rlimit {
+                            rlim_cur: cpu_seconds,
+                            rlim_max: cpu_seconds,
+                        };
+                        if libc::setrlimit(libc::RLIMIT_CPU, &limit) != 0 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                    }
+
                     Ok(())
                 });
             }
@@ -792,6 +816,16 @@ impl WorkloadScheduler for ProcessScheduler {
         spec: &WorkloadSpec,
     ) -> Result<WorkloadHandle> {
         let key = workload_iri.as_str().to_string();
+
+        // FT-091: Validate resource limits before scheduling
+        let limits = match spec {
+            WorkloadSpec::Binary(s) => &s.resources,
+            WorkloadSpec::Container(s) => &s.resources,
+        };
+        if let Err(reason) = limits.validate() {
+            return Err(PiCloudError::InvalidResourceLimits { reason });
+        }
+
         let mut workloads = self.workloads.write().await;
 
         if workloads.contains_key(&key) {

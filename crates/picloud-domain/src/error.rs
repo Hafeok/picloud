@@ -66,6 +66,9 @@ pub enum PiCloudError {
     #[error("Workload {name} failed to start: {reason}")]
     WorkloadStartFailed { name: String, reason: String },
 
+    #[error("Invalid resource limits: {reason}")]
+    InvalidResourceLimits { reason: String },
+
     // --- Cluster identity errors (ADR-042) ---
     #[error("Node join rejected: {reason}")]
     NodeJoinRejected { reason: String },
