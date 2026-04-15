@@ -500,10 +500,10 @@
 - [x] TC-262: Telemetry retention policy deletes data older than configured TTL (scenario) — passing
 - [x] TC-319: Retention policy exit — expired telemetry data deleted (exit-criteria) — passing
 
-### FT-050 — CLI: events stream, graph query, identity token, telemetry query [ ]
+### FT-050 — CLI: events stream, graph query, identity token, telemetry query [x]
 
-- [ ] TC-263: CLI events stream and graph query return expected results (scenario) — unimplemented
-- [ ] TC-320: CLI events exit — events stream and graph query functional (exit-criteria) — unimplemented
+- [x] TC-263: CLI events stream and graph query return expected results (scenario) — passing
+- [x] TC-320: CLI events exit — events stream and graph query functional (exit-criteria) — passing
 
 ## Phase 3
 

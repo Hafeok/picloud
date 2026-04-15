@@ -2,7 +2,7 @@
 id: FT-050
 title: 'CLI: events stream, graph query, identity token, telemetry query'
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

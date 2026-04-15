@@ -12,6 +12,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
+use picloud_cli::commands;
 use picloud_cli::tracer::{self, CliTracer};
 use serde_json::json;
 use tracing::{error, info};
@@ -1537,16 +1538,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             match resp.json::<serde_json::Value>().await {
                                 Ok(flow) => {
-                                    let device_code = flow["device_code"]
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_string();
-                                    let verification_url = flow["verification_url"]
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_string();
-                                    let interval = flow["interval_secs"].as_u64().unwrap_or(5);
-                                    let expires_in = flow["expires_in_secs"].as_u64().unwrap_or(600);
+                                    let (device_code, verification_url, interval, expires_in) =
+                                        commands::parse_device_flow_begin(&flow);
 
                                     println!();
                                     println!("Open the following URL in your browser to authenticate:");
@@ -1663,24 +1656,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 product,
                 correlation_id,
             } => {
-                // Build the SSE endpoint path
-                let path = if let Some(ref p) = product {
-                    let mut url = format!("/products/{}/events", p);
-                    if let Some(ref c) = correlation_id {
-                        url = format!("{}?correlation_id={}", url, c);
-                    }
-                    url
-                } else {
-                    let mut url = "/api/events/stream".to_string();
-                    let mut params = vec![];
-                    if let Some(ref c) = correlation_id {
-                        params.push(format!("correlation_id={}", c));
-                    }
-                    if !params.is_empty() {
-                        url = format!("{}?{}", url, params.join("&"));
-                    }
-                    url
-                };
+                let path = commands::events_stream_path(
+                    product.as_deref(),
+                    correlation_id.as_deref(),
+                );
 
                 println!("Subscribing to event stream...");
                 if let Some(ref p) = product {
@@ -1700,22 +1679,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Graph { command } => match command {
             GraphCommands::Query { sparql, product } => {
-                let path = if let Some(ref p) = product {
-                    format!(
-                        "/products/{}/graph?query={}",
-                        p,
-                        urlencoding(&sparql)
-                    )
-                } else {
-                    format!("/graph?query={}", urlencoding(&sparql))
-                };
+                let path = commands::graph_query_path(&sparql, product.as_deref());
 
                 match client.get(&path).await {
                     Ok(body) => {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&body).unwrap_or_default()
-                        );
+                        println!("{}", commands::format_graph_results(&body));
                     }
                     Err(e) => eprintln!("Query failed: {}", e),
                 }
@@ -1990,10 +1958,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 // When --sql is provided, use the DataFusion SQL endpoint (FT-045)
                 if let Some(ref sql_str) = sql {
-                    let body = serde_json::json!({
-                        "signal": signal,
-                        "sql": sql_str,
-                    });
+                    let body = commands::telemetry_sql_body(&signal, sql_str);
                     match client.post_json("/api/telemetry/query", body).await {
                         Ok(result) => {
                             println!(
@@ -2005,30 +1970,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 } else {
                     // Legacy filter-based query
-                    let endpoint = match signal.as_str() {
-                        "traces" | "spans" => "/telemetry/spans",
-                        "metrics" => "/telemetry/metrics",
-                        _ => {
+                    let path = match commands::telemetry_query_path(
+                        &signal,
+                        from.as_deref(),
+                        to.as_deref(),
+                        service.as_deref(),
+                    ) {
+                        Some(p) => p,
+                        None => {
                             eprintln!("Unknown signal type: {}. Use 'traces' or 'metrics'.", signal);
                             std::process::exit(1);
                         }
-                    };
-
-                    let mut params = Vec::new();
-                    if let Some(ref f) = from {
-                        params.push(format!("from={}", urlencoding(f)));
-                    }
-                    if let Some(ref t) = to {
-                        params.push(format!("to={}", urlencoding(t)));
-                    }
-                    if let Some(ref s) = service {
-                        params.push(format!("service={}", urlencoding(s)));
-                    }
-
-                    let path = if params.is_empty() {
-                        endpoint.to_string()
-                    } else {
-                        format!("{}?{}", endpoint, params.join("&"))
                     };
 
                     match client.get(&path).await {
@@ -3052,83 +3004,14 @@ fn parse_sdk_language(s: &str) -> Option<picloud_sdk_gen::SdkLanguage> {
 
 /// Simple URL encoding for query parameters
 fn urlencoding(s: &str) -> String {
-    s.replace(' ', "%20")
-        .replace('#', "%23")
-        .replace('&', "%26")
-        .replace('?', "%3F")
-        .replace('{', "%7B")
-        .replace('}', "%7D")
+    commands::urlencoding(s)
 }
 
 /// Parse a simple SQL WHERE clause into field-value pairs.
-///
-/// Supports patterns like:
-///   SELECT * FROM traces WHERE product = 'photo-app' AND duration_ms > 100
-///
-/// Extracts `field = 'value'` and `field > number` conditions from the WHERE clause.
-/// Returns a vec of (field_name, value_string) pairs.
+/// Delegates to `commands::parse_sql_where_clause`.
+#[cfg(test)]
 fn parse_sql_where_clause(sql: &str) -> Vec<(String, String)> {
-    let mut results = Vec::new();
-
-    // Find the WHERE clause (case-insensitive)
-    let sql_upper = sql.to_uppercase();
-    let where_pos = match sql_upper.find("WHERE") {
-        Some(pos) => pos + 5,
-        None => return results,
-    };
-
-    let where_clause = &sql[where_pos..];
-
-    // Split on AND (case-insensitive) to get individual conditions
-    let mut parts = Vec::new();
-    let mut remaining = where_clause.trim();
-    loop {
-        let upper = remaining.to_uppercase();
-        if let Some(pos) = upper.find(" AND ") {
-            parts.push(remaining[..pos].trim());
-            remaining = remaining[pos + 5..].trim();
-        } else {
-            if !remaining.is_empty() {
-                parts.push(remaining.trim());
-            }
-            break;
-        }
-    }
-
-    for part in parts {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-
-        // Try to parse: field = 'value'
-        // or: field = value
-        // or: field > number
-        // or: field >= number
-
-        // Find the operator
-        let (field, value) = if let Some(pos) = part.find(">=") {
-            let field = part[..pos].trim();
-            let val = part[pos + 2..].trim().trim_matches('\'').trim_matches('"');
-            (field, val)
-        } else if let Some(pos) = part.find('>') {
-            let field = part[..pos].trim();
-            let val = part[pos + 1..].trim().trim_matches('\'').trim_matches('"');
-            (field, val)
-        } else if let Some(pos) = part.find('=') {
-            let field = part[..pos].trim();
-            let val = part[pos + 1..].trim().trim_matches('\'').trim_matches('"');
-            (field, val)
-        } else {
-            continue;
-        };
-
-        if !field.is_empty() && !value.is_empty() {
-            results.push((field.to_lowercase(), value.to_string()));
-        }
-    }
-
-    results
+    commands::parse_sql_where_clause(sql)
 }
 
 #[cfg(test)]
