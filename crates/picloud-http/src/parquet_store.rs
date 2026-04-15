@@ -4,6 +4,10 @@
 /// This is the columnar storage backend described in ADR-046, replacing the
 /// JSONL store with efficient, self-describing Parquet files on each node's NVMe.
 ///
+/// DataFusion SQL queries are supported via `query_sql()` — all Parquet files
+/// for the requested signal are loaded into an in-memory table and the SQL
+/// statement is executed by the DataFusion query engine.
+///
 /// Directory layout (per ADR-046):
 ///   {base_path}/
 ///     traces/
@@ -19,11 +23,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use arrow::array::{Array, Float64Array, StringArray, UInt64Array};
+use arrow::array::{
+    Array, BooleanArray, Float64Array, Int64Array, StringArray, UInt64Array,
+};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use datafusion::datasource::MemTable;
+use datafusion::prelude::SessionContext;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -527,6 +535,52 @@ impl ParquetTelemetryStore {
         files
     }
 
+    /// Collect ALL Parquet files for a given signal (across all hourly partitions).
+    fn all_signal_files(&self, signal: &str) -> Vec<PathBuf> {
+        let signal_dir = self.base_path.join(signal);
+        if !signal_dir.exists() {
+            return Vec::new();
+        }
+
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&signal_dir) {
+            for entry in entries.flatten() {
+                let part_dir = entry.path();
+                if part_dir.is_dir() {
+                    if let Ok(parts) = std::fs::read_dir(&part_dir) {
+                        for part in parts.flatten() {
+                            let path = part.path();
+                            if path.extension().map_or(false, |e| e == "parquet") {
+                                files.push(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    /// Read RecordBatches directly from a list of Parquet files.
+    fn read_record_batches(files: &[PathBuf]) -> Vec<RecordBatch> {
+        let mut batches = Vec::new();
+        for path in files {
+            if let Ok(file) = std::fs::File::open(path) {
+                if let Ok(builder) = ParquetRecordBatchReaderBuilder::try_new(file) {
+                    if let Ok(reader) = builder.build() {
+                        for batch_result in reader {
+                            if let Ok(batch) = batch_result {
+                                batches.push(batch);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        batches
+    }
+
     /// Start the retention cleanup loop as a background task.
     /// Runs every hour and deletes partition directories older than the retention window.
     pub fn start_retention_cleanup(&self) -> tokio::task::JoinHandle<()> {
@@ -730,6 +784,125 @@ impl TelemetryStore for ParquetTelemetryStore {
             .collect();
 
         Ok(filtered)
+    }
+
+    /// Execute a SQL query via DataFusion over the Parquet store (ADR-046 / FT-045).
+    ///
+    /// All Parquet files for the given signal are loaded into an in-memory
+    /// DataFusion table, then the SQL is executed. The table is registered as
+    /// "traces" or "metrics" depending on the signal.
+    async fn query_sql(
+        &self,
+        sql: &str,
+        signal: &str,
+    ) -> Result<(Vec<String>, Vec<serde_json::Value>)> {
+        let ctx = SessionContext::new();
+
+        // Determine canonical signal name and schema
+        let (table_name, schema) = match signal {
+            "traces" | "spans" => ("traces", Arc::new(traces_schema())),
+            "metrics" => ("metrics", Arc::new(metrics_schema())),
+            _ => ("traces", Arc::new(traces_schema())),
+        };
+
+        let canonical_signal = if signal == "spans" { "traces" } else { signal };
+
+        // Collect and read all Parquet files for this signal
+        let files = self.all_signal_files(canonical_signal);
+        let batches = Self::read_record_batches(&files);
+
+        // Build the in-memory table — DataFusion requires Vec<Vec<RecordBatch>>
+        let partitions = if batches.is_empty() {
+            vec![vec![]]
+        } else {
+            vec![batches]
+        };
+
+        let table = MemTable::try_new(schema, partitions).map_err(|e| {
+            PiCloudError::TelemetryQueryFailed {
+                reason: format!("Failed to create in-memory table: {e}"),
+            }
+        })?;
+
+        ctx.register_table(table_name, Arc::new(table))
+            .map_err(|e| PiCloudError::TelemetryQueryFailed {
+                reason: format!("Failed to register table '{table_name}': {e}"),
+            })?;
+
+        // Execute SQL
+        let df = ctx.sql(sql).await.map_err(|e| {
+            PiCloudError::TelemetryQueryFailed {
+                reason: format!("SQL execution failed: {e}"),
+            }
+        })?;
+
+        let result_batches = df.collect().await.map_err(|e| {
+            PiCloudError::TelemetryQueryFailed {
+                reason: format!("Failed to collect query results: {e}"),
+            }
+        })?;
+
+        // Extract column names from the result schema
+        let columns: Vec<String> = if let Some(batch) = result_batches.first() {
+            batch
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // Convert result RecordBatches → JSON rows
+        let mut rows = Vec::new();
+        for batch in &result_batches {
+            for i in 0..batch.num_rows() {
+                let mut row = serde_json::Map::new();
+                for (j, field) in batch.schema().fields().iter().enumerate() {
+                    let col = batch.column(j);
+                    let value = arrow_value_to_json(col.as_ref(), i);
+                    row.insert(field.name().clone(), value);
+                }
+                rows.push(serde_json::Value::Object(row));
+            }
+        }
+
+        debug!(
+            sql = sql,
+            columns = columns.len(),
+            rows = rows.len(),
+            "DataFusion SQL query completed"
+        );
+
+        Ok((columns, rows))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Arrow value → JSON conversion
+// ---------------------------------------------------------------------------
+
+/// Convert a single cell from an Arrow array into a `serde_json::Value`.
+fn arrow_value_to_json(col: &dyn Array, row: usize) -> serde_json::Value {
+    if col.is_null(row) {
+        return serde_json::Value::Null;
+    }
+
+    if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+        serde_json::Value::String(arr.value(row).to_string())
+    } else if let Some(arr) = col.as_any().downcast_ref::<UInt64Array>() {
+        serde_json::json!(arr.value(row))
+    } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
+        serde_json::json!(arr.value(row))
+    } else if let Some(arr) = col.as_any().downcast_ref::<Float64Array>() {
+        serde_json::json!(arr.value(row))
+    } else if let Some(arr) = col.as_any().downcast_ref::<BooleanArray>() {
+        serde_json::Value::Bool(arr.value(row))
+    } else {
+        // Fallback: use the Debug representation
+        let array_data = col.to_data();
+        serde_json::Value::String(format!("unsupported({:?})", array_data.data_type()))
     }
 }
 

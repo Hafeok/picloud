@@ -475,10 +475,10 @@
 - [x] TC-257: Parquet time-series store writes hourly partitioned trace files (scenario) — passing
 - [x] TC-314: Parquet store exit — hourly partitioned trace files written (exit-criteria) — passing
 
-### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [ ]
+### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [x]
 
-- [ ] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — unimplemented
-- [ ] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — unimplemented
+- [x] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — passing
+- [x] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — passing
 
 ### FT-046 — Metric aggregator — OTel stream to MetricRecorded events every 15s [ ]
 

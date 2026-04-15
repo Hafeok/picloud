@@ -357,7 +357,7 @@ enum TelemetryCommands {
         /// Filter by service name
         #[arg(long)]
         service: Option<String>,
-        /// SQL query (future: parsed server-side; for now, ignored)
+        /// SQL query executed via DataFusion over the Parquet store (FT-045)
         #[arg(long)]
         sql: Option<String>,
     },
@@ -825,6 +825,32 @@ impl ClusterClient {
             .client
             .get(format!("{}{}", self.base_url, path))
             .header("Accept", "application/json");
+
+        if let Some(ref token) = self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("HTTP {} — {}", status, text).into());
+        }
+        let body = response.json::<serde_json::Value>().await?;
+        Ok(body)
+    }
+
+    /// Send a POST request with a JSON body and return the response.
+    async fn post_json(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let mut request = self
+            .client
+            .post(format!("{}{}", self.base_url, path))
+            .header("Accept", "application/json")
+            .json(&body);
 
         if let Some(ref token) = self.token {
             request = request.header("Authorization", format!("Bearer {}", token));
@@ -1922,63 +1948,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 service,
                 sql,
             } => {
-                let endpoint = match signal.as_str() {
-                    "traces" | "spans" => "/telemetry/spans",
-                    "metrics" => "/telemetry/metrics",
-                    _ => {
-                        eprintln!("Unknown signal type: {}. Use 'traces' or 'metrics'.", signal);
-                        std::process::exit(1);
-                    }
-                };
-
-                let mut params = Vec::new();
-                if let Some(ref f) = from {
-                    params.push(format!("from={}", urlencoding(f)));
-                }
-                if let Some(ref t) = to {
-                    params.push(format!("to={}", urlencoding(t)));
-                }
-                if let Some(ref s) = service {
-                    params.push(format!("service={}", urlencoding(s)));
-                }
-
-                // Parse SQL WHERE clause if provided
+                // When --sql is provided, use the DataFusion SQL endpoint (FT-045)
                 if let Some(ref sql_str) = sql {
-                    let sql_params = parse_sql_where_clause(sql_str);
-                    for (key, value) in &sql_params {
-                        // Map SQL field names to query param names
-                        let param_name = match key.as_str() {
-                            "service" | "service_name" => "service",
-                            "operation" | "operation_name" => "operation",
-                            "metric_name" | "name" => "metric_name",
-                            "duration_ms" | "min_duration_ms" => "min_duration_ms",
-                            "product" => "service", // product maps to service filter
-                            other => {
-                                eprintln!("Warning: unknown SQL field '{}' — skipping", other);
-                                continue;
-                            }
-                        };
-                        // Avoid duplicates if --service was also passed
-                        if !params.iter().any(|p| p.starts_with(&format!("{}=", param_name))) {
-                            params.push(format!("{}={}", param_name, urlencoding(value)));
+                    let body = serde_json::json!({
+                        "signal": signal,
+                        "sql": sql_str,
+                    });
+                    match client.post_json("/api/telemetry/query", body).await {
+                        Ok(result) => {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&result).unwrap_or_default()
+                            );
                         }
+                        Err(e) => eprintln!("SQL telemetry query failed: {}", e),
                     }
-                }
-
-                let path = if params.is_empty() {
-                    endpoint.to_string()
                 } else {
-                    format!("{}?{}", endpoint, params.join("&"))
-                };
+                    // Legacy filter-based query
+                    let endpoint = match signal.as_str() {
+                        "traces" | "spans" => "/telemetry/spans",
+                        "metrics" => "/telemetry/metrics",
+                        _ => {
+                            eprintln!("Unknown signal type: {}. Use 'traces' or 'metrics'.", signal);
+                            std::process::exit(1);
+                        }
+                    };
 
-                match client.get(&path).await {
-                    Ok(body) => {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&body).unwrap_or_default()
-                        );
+                    let mut params = Vec::new();
+                    if let Some(ref f) = from {
+                        params.push(format!("from={}", urlencoding(f)));
                     }
-                    Err(e) => eprintln!("Telemetry query failed: {}", e),
+                    if let Some(ref t) = to {
+                        params.push(format!("to={}", urlencoding(t)));
+                    }
+                    if let Some(ref s) = service {
+                        params.push(format!("service={}", urlencoding(s)));
+                    }
+
+                    let path = if params.is_empty() {
+                        endpoint.to_string()
+                    } else {
+                        format!("{}?{}", endpoint, params.join("&"))
+                    };
+
+                    match client.get(&path).await {
+                        Ok(body) => {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&body).unwrap_or_default()
+                            );
+                        }
+                        Err(e) => eprintln!("Telemetry query failed: {}", e),
+                    }
                 }
             }
         },

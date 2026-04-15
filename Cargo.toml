@@ -93,9 +93,10 @@ hickory-proto = "0.25"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# Columnar / Parquet (ADR-046)
+# Columnar / Parquet / SQL (ADR-046)
 arrow              = { version = "53", default-features = false, features = ["json"] }
 parquet            = { version = "53", default-features = false, features = ["arrow", "snap"] }
+datafusion         = "43"
 
 # CLI
 clap         = { version = "4", features = ["derive", "env"] }

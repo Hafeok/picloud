@@ -506,6 +506,21 @@ pub trait TelemetryStore: Send + Sync {
         to: DateTime<Utc>,
         filter: TelemetryFilter,
     ) -> Result<Vec<MetricRecord>>;
+
+    /// Execute an arbitrary SQL query against the telemetry store (ADR-046).
+    ///
+    /// Returns `(column_names, rows)` where each row is a JSON object.
+    /// The `signal` hint ("traces" or "metrics") tells the backend which
+    /// table(s) to register. Backends that do not support SQL return an error.
+    async fn query_sql(
+        &self,
+        _sql: &str,
+        _signal: &str,
+    ) -> Result<(Vec<String>, Vec<serde_json::Value>)> {
+        Err(crate::error::PiCloudError::TelemetryQueryFailed {
+            reason: "SQL queries not supported by this telemetry backend".to_string(),
+        })
+    }
 }
 
 // ---- Certificate Authority (ADR-053) ----

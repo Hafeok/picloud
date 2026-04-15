@@ -2680,7 +2680,21 @@ async fn handle_admin_reset(
 // Telemetry query/export handlers (ADR-046 / C9)
 // ---------------------------------------------------------------------------
 
-/// POST /api/telemetry/query — query telemetry data with SQL-like interface.
+/// POST /api/telemetry/query — query telemetry data with SQL or filter interface.
+///
+/// When the request body contains a `"sql"` field, the query is executed via
+/// DataFusion over the Parquet store (FT-045, ADR-046). Otherwise the legacy
+/// filter-based path is used.
+///
+/// Request body (SQL mode):
+/// ```json
+/// { "signal": "traces", "sql": "SELECT * FROM traces WHERE service_name = 'api-server'" }
+/// ```
+///
+/// Response:
+/// ```json
+/// { "columns": [...], "rows": [...], "results": { "total": N } }
+/// ```
 async fn handle_telemetry_query(
     axum::extract::State(state): axum::extract::State<AppState>,
     body: Option<Json<serde_json::Value>>,
@@ -2699,6 +2713,34 @@ async fn handle_telemetry_query(
         .and_then(|v| v.as_str())
         .unwrap_or("traces");
 
+    // ----- SQL mode (FT-045): delegate to DataFusion -----
+    if let Some(sql) = body.as_ref().and_then(|b| b.get("sql")).and_then(|v| v.as_str()) {
+        if !sql.is_empty() {
+            match store.query_sql(sql, signal).await {
+                Ok((columns, rows)) => {
+                    let total = rows.len();
+                    return (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "columns": columns,
+                            "rows": rows,
+                            "results": { "total": total },
+                        })),
+                    )
+                        .into_response();
+                }
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": format!("SQL query failed: {e}") })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    // ----- Legacy filter mode -----
     let now = chrono::Utc::now();
     let from = now - chrono::Duration::hours(24);
     let filter = picloud_domain::events::TelemetryFilter {
