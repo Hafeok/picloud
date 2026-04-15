@@ -586,13 +586,13 @@
 - [x] TC-272: Data domain created as cluster-scoped governance boundary (scenario) — passing
 - [x] TC-329: Data domain exit — cluster-scoped governance boundary created (exit-criteria) — passing
 
-### FT-066 — data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection [ ]
+### FT-066 — data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection [x]
 
-- [ ] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — unimplemented
+- [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
 ### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [ ]
 
-- [ ] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — unimplemented
+- [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
 ### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [ ]
 
@@ -601,7 +601,7 @@
 
 ### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [ ]
 
-- [ ] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — unimplemented
+- [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
 ### FT-070 — Data product lifecycle events [ ]
 
