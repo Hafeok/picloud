@@ -666,10 +666,10 @@
 
 - [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
 
-### FT-081 — Event replay — shadow projection, atomic swap, marked replay events [ ]
+### FT-081 — Event replay — shadow projection, atomic swap, marked replay events [x]
 
-- [ ] TC-280: Event replay creates shadow projection and swaps atomically (scenario) — unimplemented
-- [ ] TC-337: Event replay exit — shadow projection created and swapped atomically (exit-criteria) — unimplemented
+- [x] TC-280: Event replay creates shadow projection and swaps atomically (scenario) — passing
+- [x] TC-337: Event replay exit — shadow projection created and swapped atomically (exit-criteria) — passing
 
 ### FT-082 — Aggregate-scoped replay (single and batch up to 1000) [ ]
 

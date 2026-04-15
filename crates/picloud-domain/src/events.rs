@@ -33,6 +33,11 @@ pub struct EventEnvelope {
     /// Example: `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traceparent: Option<String>,
+    /// Replay metadata — present only when this event was re-emitted during
+    /// a replay operation (ADR-035). Subscribers inspect this field to decide
+    /// whether to apply side-effects or treat the event as informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ReplayMetadata>,
     pub payload: serde_json::Value,
 }
 
@@ -55,6 +60,7 @@ impl EventEnvelope {
             correlation_id,
             idempotency_key: None,
             traceparent: None,
+            replay: None,
             payload,
         }
     }
@@ -67,6 +73,12 @@ impl EventEnvelope {
     /// Attach a W3C traceparent header to this event (FT-048).
     pub fn with_traceparent(mut self, traceparent: impl Into<String>) -> Self {
         self.traceparent = Some(traceparent.into());
+        self
+    }
+
+    /// Attach replay metadata to mark this event as a replayed event (ADR-035).
+    pub fn with_replay_metadata(mut self, metadata: ReplayMetadata) -> Self {
+        self.replay = Some(metadata);
         self
     }
 }

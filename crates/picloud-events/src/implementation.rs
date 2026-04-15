@@ -646,6 +646,7 @@ mod tests {
             correlation_id,
             idempotency_key: None,
             traceparent: None,
+            replay: None,
             payload: serde_json::json!({}),
         }
     }
