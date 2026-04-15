@@ -6,11 +6,11 @@ status: passing
 runner: cargo-test
 runner-args: "tc228_inference_rule_automatically_assigns_user_to_group_on_tag_change"
 validates:
-  features: [FT-055]
+  features: [FT-055, FT-057]
   adrs: []
 phase: 3
-last-run: 2026-04-15T13:28:29.613323137+00:00
-last-run-duration: 0.5s
+last-run: 2026-04-15T13:41:21.129043292+00:00
+last-run-duration: 0.6s
 ---
 
 ## Description
