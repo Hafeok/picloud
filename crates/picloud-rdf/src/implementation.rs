@@ -2645,6 +2645,25 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_capability_consumer_added(&self, event: &EventEnvelope) -> Result<()> {
+        let capability_iri = event.payload["capability_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let product_iri = event.payload["product_iri"].as_str().unwrap_or_default();
+        let product_name = event.payload["product_name"].as_str().unwrap_or_default();
+
+        self.insert_triple(
+            capability_iri,
+            &format!("{PICLOUD_NS}consumedBy"),
+            NamedNode::new(product_iri)
+                .map_err(|e| PiCloudError::Internal(format!("invalid product IRI: {e}")))?
+                .into(),
+        )?;
+
+        debug!(capability_iri = capability_iri, product = product_name, "projected CapabilityConsumerAdded");
+        Ok(())
+    }
+
     fn project_capability_deleted(&self, event: &EventEnvelope) -> Result<()> {
         let capability_iri = event.payload["capability_iri"]
             .as_str()
@@ -3337,11 +3356,12 @@ impl StateProjector for OxigraphProjector {
                 debug!("RegistryAuthFailed event — no RDF projection");
                 Ok(())
             }
-            // Capability events (ADR-055)
+            // Capability events (ADR-055, FT-062)
             "CapabilityDeclared" => self.project_capability_declared(event),
             "CapabilityReady" => self.project_capability_ready(event),
             "CapabilityImplementorAdded" => self.project_capability_implementor_added(event),
             "CapabilityImplementorRemoved" => self.project_capability_implementor_removed(event),
+            "CapabilityConsumerAdded" => self.project_capability_consumer_added(event),
             "CapabilityDeleted" => self.project_capability_deleted(event),
             "CapabilityUnfulfilled" | "CapabilityRoutingFailed" => {
                 debug!(event_type = %event.event_type, "capability lifecycle event — recorded");

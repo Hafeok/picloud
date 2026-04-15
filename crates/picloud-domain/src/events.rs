@@ -178,11 +178,12 @@ pub enum PlatformEvent {
     RegistryGCCompleted(RegistryGCCompletedPayload),
     RegistryAuthFailed(RegistryAuthFailedPayload),
 
-    // --- Capability events (ADR-055) ---
+    // --- Capability events (ADR-055, FT-062) ---
     CapabilityDeclared(CapabilityDeclaredPayload),
     CapabilityReady(CapabilityReadyPayload),
     CapabilityImplementorAdded(CapabilityImplementorAddedPayload),
     CapabilityImplementorRemoved(CapabilityImplementorRemovedPayload),
+    CapabilityConsumerAdded(CapabilityConsumerAddedPayload),
     CapabilityUnfulfilled(CapabilityUnfulfilledPayload),
     CapabilityDeleted(CapabilityDeletedPayload),
     CapabilityRoutingFailed(CapabilityRoutingFailedPayload),
@@ -1071,6 +1072,17 @@ pub struct CapabilityImplementorRemovedPayload {
     pub capability_name: String,
     pub product_iri: ResourceIri,
     pub product_name: String,
+}
+
+/// Payload for CapabilityConsumerAdded event (ADR-055, FT-062).
+/// Emitted when a Product declares a dependency on an existing capability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityConsumerAddedPayload {
+    pub capability_iri: ResourceIri,
+    pub capability_name: String,
+    pub product_iri: ResourceIri,
+    pub product_name: String,
+    pub min_version: String,
 }
 
 /// Payload for CapabilityUnfulfilled event (ADR-055).

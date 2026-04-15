@@ -566,10 +566,10 @@
 
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
-### FT-062 — Capability lifecycle events [ ]
+### FT-062 — Capability lifecycle events [x]
 
-- [ ] TC-269: Capability lifecycle events emitted on declare, implement, consume (scenario) — unimplemented
-- [ ] TC-326: Capability events exit — declare, implement, consume events emitted (exit-criteria) — unimplemented
+- [x] TC-269: Capability lifecycle events emitted on declare, implement, consume (scenario) — passing
+- [x] TC-326: Capability events exit — declare, implement, consume events emitted (exit-criteria) — passing
 
 ### FT-063 — Capability-aware event routing — platform resolves implementing Product at dispatch time [ ]
 
