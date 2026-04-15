@@ -554,17 +554,17 @@
 
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
-### FT-059 — capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types [ ]
+### FT-059 — capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types [x]
 
-- [ ] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+- [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
 ### FT-060 — implements field on product — structural SHACL conformance validated at resource apply time [ ]
 
-- [ ] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+- [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
 ### FT-061 — capabilities field on product — resolution validated at resource apply time [ ]
 
-- [ ] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — unimplemented
+- [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
 ### FT-062 — Capability lifecycle events [ ]
 

@@ -2,7 +2,7 @@
 id: FT-059
 title: capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:
