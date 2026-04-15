@@ -464,10 +464,11 @@
 - [x] TC-255: OTLP endpoint accepts traces and metrics at picloud.local/otel (scenario) — passing
 - [x] TC-312: OTLP endpoint exit — traces and metrics accepted at /otel (exit-criteria) — passing
 
-### FT-043 — OTel event stream — in-process pub/sub for traces, metrics, logs [ ]
+### FT-043 — OTel event stream — in-process pub/sub for traces, metrics, logs [x]
 
-- [ ] TC-256: OTel event stream delivers traces to in-process subscriber (scenario) — unimplemented
-- [ ] TC-313: OTel stream exit — traces delivered to in-process subscriber (exit-criteria) — unimplemented
+- [x] ADR-045: OpenTelemetry as the Observability Standard (accepted)
+- [x] TC-256: OTel event stream delivers traces to in-process subscriber (scenario) — passing
+- [x] TC-313: OTel stream exit — traces delivered to in-process subscriber (exit-criteria) — passing
 
 ### FT-044 — Parquet time-series store — traces, metrics, logs with hourly partitioning [ ]
 
