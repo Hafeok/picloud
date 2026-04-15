@@ -8,3 +8,6 @@ pub mod implementation;
 
 pub use implementation::ProcessScheduler;
 pub use implementation::ContainerRuntime;
+
+// Re-export W3C trace context utilities (FT-048)
+pub use implementation::ProcessScheduler as TraceparentGenerator;

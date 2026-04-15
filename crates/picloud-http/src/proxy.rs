@@ -150,12 +150,25 @@ async fn forward_to_upstream(
     );
 
     // Forward relevant headers (skip host — we're proxying to upstream)
+    let mut has_traceparent = false;
     for (name, value) in headers.iter() {
         if name != header::HOST && name != header::TRANSFER_ENCODING {
             if let Ok(v) = value.to_str() {
                 proxy_req = proxy_req.header(name.as_str(), v);
+                if name.as_str().eq_ignore_ascii_case("traceparent") {
+                    has_traceparent = true;
+                }
             }
         }
+    }
+
+    // FT-048: If no traceparent header was present on the incoming request,
+    // generate one so that workloads always receive trace context.
+    if !has_traceparent {
+        let trace_id = uuid::Uuid::new_v4();
+        let parent_id: u64 = rand::random();
+        let traceparent = format!("00-{}-{:016x}-01", trace_id.as_simple(), parent_id);
+        proxy_req = proxy_req.header("traceparent", &traceparent);
     }
 
     // Forward the body

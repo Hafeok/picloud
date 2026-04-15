@@ -258,6 +258,69 @@ impl ProcessScheduler {
         ]
     }
 
+    /// Generate a W3C traceparent header value (FT-048).
+    ///
+    /// Format: `{version}-{trace-id}-{parent-id}-{trace-flags}`
+    /// - version: "00" (current W3C spec version)
+    /// - trace-id: 32 lowercase hex chars (128-bit random)
+    /// - parent-id: 16 lowercase hex chars (64-bit random)
+    /// - trace-flags: "01" (sampled)
+    ///
+    /// See: <https://www.w3.org/TR/trace-context/#traceparent-header>
+    pub fn generate_traceparent() -> String {
+        let trace_id = Uuid::new_v4();
+        let parent_id: u64 = rand::random();
+        format!(
+            "00-{}-{:016x}-01",
+            trace_id.as_simple(),
+            parent_id,
+        )
+    }
+
+    /// Validate a W3C traceparent header string.
+    ///
+    /// Returns true if the string matches the W3C traceparent format:
+    /// `{version}-{trace-id}-{parent-id}-{trace-flags}` where:
+    /// - version is 2 lowercase hex chars
+    /// - trace-id is 32 lowercase hex chars (non-zero)
+    /// - parent-id is 16 lowercase hex chars (non-zero)
+    /// - trace-flags is 2 lowercase hex chars
+    pub fn is_valid_traceparent(value: &str) -> bool {
+        let parts: Vec<&str> = value.split('-').collect();
+        if parts.len() != 4 {
+            return false;
+        }
+        let version = parts[0];
+        let trace_id = parts[1];
+        let parent_id = parts[2];
+        let trace_flags = parts[3];
+
+        // Version must be 2 hex chars
+        if version.len() != 2 || !version.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+        // trace-id must be 32 hex chars and non-zero
+        if trace_id.len() != 32
+            || !trace_id.chars().all(|c| c.is_ascii_hexdigit())
+            || trace_id.chars().all(|c| c == '0')
+        {
+            return false;
+        }
+        // parent-id must be 16 hex chars and non-zero
+        if parent_id.len() != 16
+            || !parent_id.chars().all(|c| c.is_ascii_hexdigit())
+            || parent_id.chars().all(|c| c == '0')
+        {
+            return false;
+        }
+        // trace-flags must be 2 hex chars
+        if trace_flags.len() != 2 || !trace_flags.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+
+        true
+    }
+
     /// Spawn a binary workload as a child process.
     async fn spawn_binary(&self, spec: &BinarySpec, workload_iri: &ResourceIri) -> Result<(Child, u32)> {
         let mut cmd = Command::new(&spec.executable);
@@ -275,6 +338,9 @@ impl ProcessScheduler {
         for (key, value) in self.otel_env_vars(workload_iri) {
             cmd.env(key, value);
         }
+
+        // Inject W3C TRACEPARENT env var for distributed trace correlation (FT-048)
+        cmd.env("TRACEPARENT", Self::generate_traceparent());
 
         // Inject PICLOUD_PRODUCT_VERSION (FT-040)
         if let Some(ref version) = spec.product_version {
@@ -353,6 +419,9 @@ impl ProcessScheduler {
         for (key, value) in self.otel_env_vars(workload_iri) {
             env_vars.push(format!("{}={}", key, value));
         }
+
+        // Inject W3C TRACEPARENT env var for distributed trace correlation (FT-048)
+        env_vars.push(format!("TRACEPARENT={}", Self::generate_traceparent()));
 
         // Inject PICLOUD_PRODUCT_VERSION (FT-040)
         if let Some(ref version) = spec.product_version {
@@ -501,6 +570,9 @@ impl ProcessScheduler {
         for (key, value) in self.otel_env_vars(workload_iri) {
             cmd.args(["-e", &format!("{}={}", key, value)]);
         }
+
+        // Inject W3C TRACEPARENT env var for distributed trace correlation (FT-048)
+        cmd.args(["-e", &format!("TRACEPARENT={}", Self::generate_traceparent())]);
 
         // Inject PICLOUD_PRODUCT_VERSION (FT-040)
         if let Some(ref version) = spec.product_version {

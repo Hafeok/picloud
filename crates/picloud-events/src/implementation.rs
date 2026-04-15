@@ -645,6 +645,7 @@ mod tests {
             product: product.map(|s| s.to_string()),
             correlation_id,
             idempotency_key: None,
+            traceparent: None,
             payload: serde_json::json!({}),
         }
     }

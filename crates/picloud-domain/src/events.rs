@@ -28,6 +28,11 @@ pub struct EventEnvelope {
     pub correlation_id: Uuid,
     /// Client-supplied idempotency key (ADR-015)
     pub idempotency_key: Option<String>,
+    /// W3C traceparent header for distributed trace correlation (FT-048).
+    /// Format: `{version}-{trace-id}-{parent-id}-{trace-flags}`
+    /// Example: `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traceparent: Option<String>,
     pub payload: serde_json::Value,
 }
 
@@ -49,12 +54,19 @@ impl EventEnvelope {
             product,
             correlation_id,
             idempotency_key: None,
+            traceparent: None,
             payload,
         }
     }
 
     pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
         self.idempotency_key = Some(key.into());
+        self
+    }
+
+    /// Attach a W3C traceparent header to this event (FT-048).
+    pub fn with_traceparent(mut self, traceparent: impl Into<String>) -> Self {
+        self.traceparent = Some(traceparent.into());
         self
     }
 }

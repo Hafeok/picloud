@@ -490,10 +490,10 @@
 - [x] TC-260: CLI command produces OTel trace with correct span hierarchy (scenario) — passing
 - [x] TC-317: CLI traces exit — CLI commands produce OTel traces (exit-criteria) — passing
 
-### FT-048 — W3C trace context propagation — platform to workload correlation [ ]
+### FT-048 — W3C trace context propagation — platform to workload correlation [x]
 
-- [ ] TC-261: W3C traceparent header propagated from platform to workload (scenario) — unimplemented
-- [ ] TC-318: Trace propagation exit — traceparent header flows to workloads (exit-criteria) — unimplemented
+- [x] TC-261: W3C traceparent header propagated from platform to workload (scenario) — passing
+- [x] TC-318: Trace propagation exit — traceparent header flows to workloads (exit-criteria) — passing
 
 ### FT-049 — Telemetry retention policy — configurable per signal type [ ]
 

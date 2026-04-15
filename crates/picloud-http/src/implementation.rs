@@ -1060,6 +1060,7 @@ struct CommandPayload {
 
 async fn handle_command(
     axum::extract::State(state): axum::extract::State<AppState>,
+    headers: HeaderMap,
     Json(cmd): Json<CommandPayload>,
 ) -> impl IntoResponse {
     let Some(ref event_log) = state.event_log else {
@@ -1093,6 +1094,14 @@ async fn handle_command(
     );
     envelope.idempotency_key = cmd.idempotency_key;
 
+    // FT-048: Extract W3C traceparent header from the incoming request.
+    // If present, propagate it into the event envelope for distributed trace
+    // correlation across platform and workload boundaries.
+    envelope.traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
     match event_log.append(envelope).await {
         Ok(()) => (
             StatusCode::ACCEPTED,
@@ -1114,6 +1123,7 @@ async fn handle_command(
 /// Handle resource apply — parses a ResourceFile, emits events for each resource.
 async fn handle_apply(
     axum::extract::State(state): axum::extract::State<AppState>,
+    headers: HeaderMap,
     Json(resource_file): Json<ResourceFile>,
 ) -> impl IntoResponse {
     let Some(ref event_log) = state.event_log else {
@@ -1412,7 +1422,13 @@ async fn handle_apply(
             decl.resource_name(),
             correlation_id
         );
-        let envelope = EventEnvelope::new(
+        // FT-048: Extract traceparent from incoming request headers
+        let traceparent = headers
+            .get("traceparent")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let mut envelope = EventEnvelope::new(
             schema,
             event_type,
             resource_iri,
@@ -1421,6 +1437,7 @@ async fn handle_apply(
             payload,
         )
         .with_idempotency_key(idempotency_key);
+        envelope.traceparent = traceparent;
 
         match event_log.append(envelope).await {
             Ok(()) => {
