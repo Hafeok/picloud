@@ -26,14 +26,28 @@ struct AlertKey {
     resource_iri: String,
 }
 
+/// Per-alert tracking state for firing status and dampening.
+#[derive(Debug, Clone)]
+struct AlertState {
+    /// Whether the alert is currently firing.
+    is_firing: bool,
+    /// When the alert was last resolved (for dampening window).
+    resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// The built-in alert evaluator checks metrics against threshold-based rules
 /// and emits AlertFired / AlertResolved actions.
+///
+/// Supports a configurable dampening window (ADR-041): after an alert resolves,
+/// the same alert on the same resource cannot re-fire for `dampening_secs`
+/// seconds to prevent alert storms from rapid fire/resolve cycles.
 pub struct BuiltInAlertEvaluator {
     rules: Vec<BuiltInAlertRule>,
     iri_builder: IriBuilder,
-    /// Tracks which alerts are currently firing.
-    /// Key: (rule_name, resource_iri) -> true if firing
-    firing: Mutex<HashMap<AlertKey, bool>>,
+    /// Tracks alert state per (rule_name, resource_iri).
+    state: Mutex<HashMap<AlertKey, AlertState>>,
+    /// Minimum seconds to wait after resolving before re-firing (default: 60).
+    dampening_secs: u64,
 }
 
 impl BuiltInAlertEvaluator {
@@ -41,8 +55,15 @@ impl BuiltInAlertEvaluator {
         Self {
             rules,
             iri_builder,
-            firing: Mutex::new(HashMap::new()),
+            state: Mutex::new(HashMap::new()),
+            dampening_secs: 60,
         }
+    }
+
+    /// Create an evaluator with a custom dampening window (useful for testing).
+    pub fn with_dampening_secs(mut self, secs: u64) -> Self {
+        self.dampening_secs = secs;
+        self
     }
 }
 
@@ -54,8 +75,9 @@ impl AlertEvaluator for BuiltInAlertEvaluator {
         metrics: &[MetricEntry],
     ) -> Result<Vec<AlertAction>> {
         let mut actions = Vec::new();
-        let mut firing = self.firing.lock().unwrap();
+        let mut state_map = self.state.lock().unwrap();
         let now = Utc::now();
+        let dampening = chrono::Duration::seconds(self.dampening_secs as i64);
 
         for rule in &self.rules {
             let key = AlertKey {
@@ -75,9 +97,19 @@ impl AlertEvaluator for BuiltInAlertEvaluator {
             };
 
             let exceeds_threshold = value > rule.threshold;
-            let was_firing = firing.get(&key).copied().unwrap_or(false);
+            let current_state = state_map.get(&key);
+            let was_firing = current_state.map(|s| s.is_firing).unwrap_or(false);
+            let resolved_at = current_state.and_then(|s| s.resolved_at);
 
             if exceeds_threshold && !was_firing {
+                // Check dampening window: suppress re-fire if recently resolved
+                if let Some(resolved_time) = resolved_at {
+                    if now.signed_duration_since(resolved_time) < dampening {
+                        // Within dampening window — suppress re-fire
+                        continue;
+                    }
+                }
+
                 // Transition: OK → FIRING
                 let rule_iri = self.iri_builder.inference_rule(rule.name);
                 let message = rule
@@ -94,7 +126,10 @@ impl AlertEvaluator for BuiltInAlertEvaluator {
                     fired_at: now,
                 }));
 
-                firing.insert(key, true);
+                state_map.insert(key, AlertState {
+                    is_firing: true,
+                    resolved_at: None,
+                });
             } else if !exceeds_threshold && was_firing {
                 // Transition: FIRING → OK (resolved)
                 let rule_iri = self.iri_builder.inference_rule(rule.name);
@@ -106,7 +141,10 @@ impl AlertEvaluator for BuiltInAlertEvaluator {
                     resolved_at: now,
                 }));
 
-                firing.insert(key, false);
+                state_map.insert(key, AlertState {
+                    is_firing: false,
+                    resolved_at: Some(now),
+                });
             }
             // If exceeds && was_firing → still firing, no new event (dampening)
             // If !exceeds && !was_firing → still OK, no event

@@ -633,8 +633,20 @@
 
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-076 — Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure) [ ]
+### FT-076 — Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure) [x]
 
+- [x] ADR-041: Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events (accepted)
+- [x] ADR-040: Platform Metrics Agent — Hardware Telemetry as Events (accepted)
+- [x] TC-123: metrics_collection_interval (scenario) — passing
+- [x] TC-124: metrics_rdf_projection (scenario) — passing
+- [x] TC-125: metrics_upsert (scenario) — passing
+- [x] TC-126: MetricRecorded (scenario) — passing
+- [x] TC-127: alert_fired (scenario) — passing
+- [x] TC-128: alert_resolved (scenario) — passing
+- [x] TC-129: alert_dampening (scenario) — passing
+- [x] TC-130: all_builtin_rules (scenario) — passing
+- [x] TC-131: AlertFired (scenario) — passing
+- [x] TC-132: AlertResolved (scenario) — passing
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
 ### FT-077 — AlertFired / AlertResolved events [ ]

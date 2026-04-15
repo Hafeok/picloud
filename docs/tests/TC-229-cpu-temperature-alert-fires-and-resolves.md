@@ -3,14 +3,18 @@ id: TC-229
 title: CPU temperature alert fires and resolves
 type: exit-criteria
 status: passing
-runner: cargo-test
-runner-args: "tc229_cpu_temperature_alert_fires_and_resolves"
 validates:
-  features: [FT-075]
-  adrs: [ADR-040, ADR-041]
+  features:
+  - FT-075
+  - FT-076
+  adrs:
+  - ADR-040
+  - ADR-041
 phase: 3
-last-run: 2026-04-15T16:31:06.715206723+00:00
-last-run-duration: 2.5s
+runner: cargo-test
+runner-args: tc229_cpu_temperature_alert_fires_and_resolves
+last-run: 2026-04-15T16:42:19.518785515+00:00
+last-run-duration: 2.6s
 ---
 
 ## Description
