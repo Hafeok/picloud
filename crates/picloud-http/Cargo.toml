@@ -39,4 +39,5 @@ datafusion     = { workspace = true }
 http             = "1"
 picloud-events   = { workspace = true }
 picloud-rdf      = { workspace = true }
+picloud-iam      = { workspace = true }
 async-trait      = { workspace = true }

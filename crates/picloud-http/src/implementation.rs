@@ -898,26 +898,22 @@ async fn handle_graph(
     Path(name): Path<String>,
     Query(params): Query<GraphQuery>,
 ) -> Response {
-    // Product-scoped SPARQL requires authentication (ADR-051)
-    if let Some(auth) = headers.get(header::AUTHORIZATION) {
-        let auth_str = auth.to_str().unwrap_or("");
-        if let Some(token) = auth_str.strip_prefix("Bearer ") {
-            // Validate the token if IAM is available
-            if let Some(ref iam) = state.iam {
-                if iam.validate_token(token).await.is_err() {
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(serde_json::json!({"error": "invalid or expired token"})),
-                    ).into_response();
-                }
+    // FT-052 / ADR-051: Product-scoped SPARQL requires authentication.
+    // When IAM is configured, every request MUST carry a valid bearer token
+    // whose audience matches this product.
+    if state.iam.is_some() {
+        match validate_product_audience(&headers, &state, &name).await {
+            Some(Ok(_identity)) => { /* authenticated & authorised — proceed */ }
+            Some(Err(rejection)) => return rejection,
+            None => {
+                // No bearer token supplied — reject with 401
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    [(header::WWW_AUTHENTICATE, "Bearer realm=\"picloud\"")],
+                    Json(serde_json::json!({"error": "authentication required for product SPARQL endpoint"})),
+                ).into_response();
             }
         }
-    } else if state.iam.is_some() {
-        // IAM is configured but no token provided — require authentication
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "authentication required for product graph access"})),
-        ).into_response();
     }
 
     let iri_builder = IriBuilder::new(state.cluster_domain.clone());
@@ -7126,5 +7122,176 @@ mod tests {
         // Without a projector, falls back to JSON with turtle content type
         let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
         assert!(ct.contains("text/turtle") || ct.contains("application/json"));
+    }
+
+    // -- FT-052: IAM-gated SPARQL endpoint per Product --
+
+    /// Helper: build a server with IAM configured so auth is enforced on the
+    /// SPARQL endpoint.
+    fn test_server_with_iam() -> (PiCloudHttpServer, Arc<picloud_iam::LocalIdentityProvider>) {
+        let iam = Arc::new(picloud_iam::LocalIdentityProvider::new(
+            b"test-key-material-for-sparql-tests",
+            ClusterDomain::default(),
+        ));
+        let mut server = test_server();
+        server.iam = Some(iam.clone() as Arc<dyn picloud_domain::traits::IdentityProvider>);
+        (server, iam)
+    }
+
+    /// TC-322: Unauthenticated requests to the product SPARQL endpoint are
+    /// rejected with HTTP 401 when IAM is configured.
+    #[tokio::test]
+    async fn tc322_sparql_auth_exit_unauthenticated_requests_rejected_with_401() {
+        let (server, _iam) = test_server_with_iam();
+        let app = server.build_router();
+
+        // Request without any Authorization header
+        let req = Request::builder()
+            .uri("/products/photo-app/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated SPARQL request must return 401"
+        );
+
+        // Verify WWW-Authenticate header is present (RFC 6750)
+        let www_auth = resp.headers().get("www-authenticate");
+        assert!(
+            www_auth.is_some(),
+            "401 response must include WWW-Authenticate header"
+        );
+        let www_auth_str = www_auth.unwrap().to_str().unwrap();
+        assert!(
+            www_auth_str.contains("Bearer"),
+            "WWW-Authenticate must indicate Bearer scheme"
+        );
+
+        // Body should contain an error message
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            json["error"].as_str().unwrap().contains("authentication"),
+            "error body should mention authentication"
+        );
+    }
+
+    /// TC-265: SPARQL endpoint rejects unauthenticated and unauthorized requests.
+    ///
+    /// Scenarios exercised:
+    /// 1. No token → 401
+    /// 2. Invalid / expired token → 401
+    /// 3. Valid token with wrong audience → 403
+    /// 4. Valid token with correct audience → success (not 401/403)
+    #[tokio::test]
+    async fn tc265_sparql_endpoint_rejects_unauthenticated_and_unauthorized_requests() {
+        use picloud_domain::iri::ResourceIri;
+
+        let (server, iam) = test_server_with_iam();
+        let app = server.build_router();
+
+        let sparql_uri =
+            "/products/photo-app/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D";
+
+        // ---- Scenario 1: No token → 401 ----
+        let req = Request::builder()
+            .uri(sparql_uri)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "scenario 1: missing token must return 401"
+        );
+
+        // ---- Scenario 2: Invalid token → 401 ----
+        let req = Request::builder()
+            .uri(sparql_uri)
+            .header(header::AUTHORIZATION, "Bearer this-is-not-a-valid-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "scenario 2: invalid token must return 401"
+        );
+
+        // ---- Scenario 3: Valid token, wrong audience → 403 ----
+        let identity_iri = ResourceIri("https://picloud.local/identities/alice".to_string());
+        iam.register_identity(identity_iri.clone(), vec!["viewer".to_string()])
+            .await;
+        // Issue token scoped to a *different* product
+        let wrong_aud_token = iam
+            .issue_token_with_audience(
+                &identity_iri,
+                "https://picloud.local/products/other-app",
+                vec!["read".to_string()],
+            )
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .uri(sparql_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", wrong_aud_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "scenario 3: wrong audience must return 403"
+        );
+
+        // ---- Scenario 4: Valid token, correct audience → allowed (not 401/403) ----
+        let correct_token = iam
+            .issue_token_with_audience(
+                &identity_iri,
+                "https://picloud.local/products/photo-app",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .uri(sparql_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", correct_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert!(
+            resp.status() != StatusCode::UNAUTHORIZED && resp.status() != StatusCode::FORBIDDEN,
+            "scenario 4: valid token with correct audience must not be rejected (got {})",
+            resp.status()
+        );
+    }
+
+    /// FT-052: When IAM is NOT configured, SPARQL endpoint remains accessible
+    /// (backward compatibility for clusters without IAM).
+    #[tokio::test]
+    async fn sparql_endpoint_accessible_without_iam() {
+        let app = test_server().build_router();
+
+        let req = Request::builder()
+            .uri("/products/photo-app/graph")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // Without IAM the endpoint should not return 401 or 403
+        assert!(
+            resp.status() != StatusCode::UNAUTHORIZED && resp.status() != StatusCode::FORBIDDEN,
+            "without IAM, SPARQL endpoint should be accessible (got {})",
+            resp.status()
+        );
     }
 }

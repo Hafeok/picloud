@@ -522,10 +522,10 @@
 - [x] TC-264: Per-product Oxigraph instance created and serves SPARQL (scenario) — passing
 - [x] TC-321: RDF store exit — per-product Oxigraph created and serves SPARQL (exit-criteria) — passing
 
-### FT-052 — IAM-gated SPARQL endpoint per Product [ ]
+### FT-052 — IAM-gated SPARQL endpoint per Product [x]
 
-- [ ] TC-265: SPARQL endpoint rejects unauthenticated and unauthorized requests (scenario) — unimplemented
-- [ ] TC-322: SPARQL auth exit — unauthenticated requests rejected with 401 (exit-criteria) — unimplemented
+- [x] TC-265: SPARQL endpoint rejects unauthenticated and unauthorized requests (scenario) — passing
+- [x] TC-322: SPARQL auth exit — unauthenticated requests rejected with 401 (exit-criteria) — passing
 
 ### FT-053 — Ontology resource type — .ttl and .shacl files bound to Product version [ ]
 
