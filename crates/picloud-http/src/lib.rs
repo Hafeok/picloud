@@ -4,6 +4,7 @@
 //! Depends only on picloud-domain — never on other slices.
 //! Slices communicate at runtime via the event log.
 
+pub mod alerts;
 pub mod capability;
 pub mod data_product_monitor;
 pub mod implementation;
@@ -19,6 +20,7 @@ pub mod router;
 pub mod telemetry_store;
 pub mod tls;
 
+pub use alerts::BuiltInAlertEvaluator;
 pub use capability::CapabilityResolverImpl;
 pub use data_product_monitor::RdfDataProductSLOMonitor;
 pub use implementation::{ContentType, IngressRoute, IngressTable, PiCloudHttpServer, new_ingress_table, resource_response};

@@ -629,17 +629,17 @@
 - [x] TC-278: Cross-product graph access returns 403 for non-owner non-admin (scenario) — passing
 - [x] TC-335: Graph isolation exit — cross-product access returns 403 (exit-criteria) — passing
 
-### FT-075 — Platform metrics agent — MetricRecorded events at 15s interval per node [ ]
+### FT-075 — Platform metrics agent — MetricRecorded events at 15s interval per node [x]
 
-- [ ] TC-229: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
+- [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
 ### FT-076 — Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure) [ ]
 
-- [ ] TC-229: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
+- [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
 ### FT-077 — AlertFired / AlertResolved events [ ]
 
-- [ ] TC-229: CPU temperature alert fires and resolves (exit-criteria) — unimplemented
+- [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
 ### FT-078 — event-store resource type — managed event log + aggregate streams per Product [ ]
 

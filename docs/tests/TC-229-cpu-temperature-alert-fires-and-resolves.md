@@ -2,13 +2,20 @@
 id: TC-229
 title: CPU temperature alert fires and resolves
 type: exit-criteria
-status: unimplemented
+status: passing
+runner: cargo-test
+runner-args: "tc229_cpu_temperature_alert_fires_and_resolves"
 validates:
-  features: []
-  adrs: []
-phase: 1
+  features: [FT-075]
+  adrs: [ADR-040, ADR-041]
+phase: 3
+last-run: 2026-04-15T16:31:06.715206723+00:00
+last-run-duration: 2.5s
 ---
 
 ## Description
 
-[Describe the test criterion here.]
+Verify that the platform metrics agent with built-in alert evaluation correctly fires
+AlertFired events when CPU temperature exceeds the critical threshold (>80 C) and emits
+AlertResolved events when the temperature drops back below all thresholds. Also verifies
+alert dampening (no duplicate fires while the condition persists).

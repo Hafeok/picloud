@@ -30,7 +30,7 @@ use picloud_rdf::{OxigraphProjector, OxigraphDataProductProjector};
 use picloud_registry::LocalRegistryBackend;
 use picloud_storage::{LocalStorageBackend, StorageReplicator};
 use picloud_workload::ProcessScheduler;
-use picloud_http::{CapabilityResolverImpl, InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner, RdfDataProductSLOMonitor};
+use picloud_http::{BuiltInAlertEvaluator, CapabilityResolverImpl, InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner, RdfDataProductSLOMonitor};
 
 /// CLI arguments — only `--config` is supported; everything else
 /// comes from the TOML file or environment variables.
@@ -934,22 +934,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 10d. Start metrics agent (ADR-040)
+    // 10d. Start metrics agent with alert evaluation (ADR-040, ADR-041)
     {
         let metrics_interval_secs: u64 = std::env::var("PICLOUD_METRICS_INTERVAL")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(15);
         let iri_builder = picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone());
+        let alert_evaluator: Arc<dyn picloud_domain::traits::AlertEvaluator> = Arc::new(
+            picloud_http::BuiltInAlertEvaluator::new(
+                picloud_domain::resources::builtin_alert_rules(),
+                picloud_domain::iri::IriBuilder::new(config.cluster_domain.clone()),
+            ),
+        );
         let agent = MetricsAgent::new(
             event_log_trait.clone(),
             iri_builder,
             node_iri.clone(),
-        );
+        )
+        .with_alert_evaluator(alert_evaluator);
         agent.start(metrics_interval_secs);
         info!(
             interval_secs = metrics_interval_secs,
-            "Metrics agent started"
+            "Metrics agent started with alert evaluation"
         );
     }
 

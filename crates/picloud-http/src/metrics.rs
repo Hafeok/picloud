@@ -11,13 +11,15 @@ use uuid::Uuid;
 
 use picloud_domain::events::{EventEnvelope, MetricEntry};
 use picloud_domain::iri::{IriBuilder, ResourceIri};
-use picloud_domain::traits::EventLog;
+use picloud_domain::traits::{AlertAction, AlertEvaluator, EventLog};
 
 /// The metrics agent collects hardware telemetry and emits MetricRecorded events.
+/// Optionally evaluates alert rules after each collection cycle.
 pub struct MetricsAgent {
     event_log: Arc<dyn EventLog>,
     iri_builder: IriBuilder,
     node_iri: ResourceIri,
+    alert_evaluator: Option<Arc<dyn AlertEvaluator>>,
 }
 
 impl MetricsAgent {
@@ -30,7 +32,14 @@ impl MetricsAgent {
             event_log,
             iri_builder,
             node_iri,
+            alert_evaluator: None,
         }
+    }
+
+    /// Attach an alert evaluator to run after each metric collection.
+    pub fn with_alert_evaluator(mut self, evaluator: Arc<dyn AlertEvaluator>) -> Self {
+        self.alert_evaluator = Some(evaluator);
+        self
     }
 
     /// Start the metrics collection loop as a background task.
@@ -53,27 +62,118 @@ impl MetricsAgent {
                     continue;
                 }
 
-                let payload = serde_json::json!({
-                    "node_iri": self.node_iri.as_str(),
-                    "metrics": metrics,
-                });
-
-                let event = EventEnvelope::new(
-                    self.iri_builder.event_schema("MetricRecorded", 1),
-                    "MetricRecorded",
-                    self.node_iri.clone(),
-                    None, // platform-level event, no product scope
-                    Uuid::new_v4(),
-                    payload,
-                );
-
-                if let Err(e) = self.event_log.append(event).await {
-                    error!("Failed to emit MetricRecorded event: {e}");
-                } else {
-                    debug!(node_iri = %self.node_iri, "MetricRecorded event emitted");
-                }
+                self.emit_metric_recorded(&metrics).await;
+                self.evaluate_alerts(&metrics).await;
             }
         })
+    }
+
+    /// Start a metrics collection loop driven by an external metric source.
+    /// This is useful for testing where metrics are injected programmatically.
+    pub fn start_with_source<F>(
+        self,
+        interval_secs: u64,
+        metric_source: F,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        F: Fn() -> Vec<MetricEntry> + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let interval = tokio::time::Duration::from_secs(interval_secs);
+            tracing::info!(
+                interval_secs = interval_secs,
+                node_iri = %self.node_iri,
+                "Metrics agent started (custom source)"
+            );
+
+            loop {
+                tokio::time::sleep(interval).await;
+
+                let metrics = metric_source();
+                if metrics.is_empty() {
+                    warn!("No metrics collected — skipping emission");
+                    continue;
+                }
+
+                self.emit_metric_recorded(&metrics).await;
+                self.evaluate_alerts(&metrics).await;
+            }
+        })
+    }
+
+    /// Emit a MetricRecorded event for the given metrics.
+    async fn emit_metric_recorded(&self, metrics: &[MetricEntry]) {
+        let payload = serde_json::json!({
+            "node_iri": self.node_iri.as_str(),
+            "metrics": metrics,
+        });
+
+        let event = EventEnvelope::new(
+            self.iri_builder.event_schema("MetricRecorded", 1),
+            "MetricRecorded",
+            self.node_iri.clone(),
+            None, // platform-level event, no product scope
+            Uuid::new_v4(),
+            payload,
+        );
+
+        if let Err(e) = self.event_log.append(event).await {
+            error!("Failed to emit MetricRecorded event: {e}");
+        } else {
+            debug!(node_iri = %self.node_iri, "MetricRecorded event emitted");
+        }
+    }
+
+    /// Evaluate alert rules and emit AlertFired / AlertResolved events.
+    async fn evaluate_alerts(&self, metrics: &[MetricEntry]) {
+        let Some(evaluator) = &self.alert_evaluator else {
+            return;
+        };
+
+        match evaluator.evaluate(&self.node_iri, metrics).await {
+            Ok(actions) => {
+                for action in actions {
+                    let event = match &action {
+                        AlertAction::Fire(payload) => {
+                            debug!(
+                                alert_type = %payload.alert_type,
+                                severity = %payload.severity,
+                                "Alert fired"
+                            );
+                            EventEnvelope::new(
+                                self.iri_builder.event_schema("AlertFired", 1),
+                                "AlertFired",
+                                self.node_iri.clone(),
+                                None,
+                                Uuid::new_v4(),
+                                serde_json::to_value(payload).unwrap_or_default(),
+                            )
+                        }
+                        AlertAction::Resolve(payload) => {
+                            debug!(
+                                alert_type = %payload.alert_type,
+                                "Alert resolved"
+                            );
+                            EventEnvelope::new(
+                                self.iri_builder.event_schema("AlertResolved", 1),
+                                "AlertResolved",
+                                self.node_iri.clone(),
+                                None,
+                                Uuid::new_v4(),
+                                serde_json::to_value(payload).unwrap_or_default(),
+                            )
+                        }
+                    };
+
+                    if let Err(e) = self.event_log.append(event).await {
+                        error!("Failed to emit alert event: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Alert evaluation failed: {e}");
+            }
+        }
     }
 }
 
