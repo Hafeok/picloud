@@ -592,6 +592,87 @@ pub struct TelemetryFilter {
     pub min_duration_ms: Option<u64>,
 }
 
+// --- Telemetry retention policy types (FT-049 / ADR-046) ---
+
+/// Telemetry signal type — each signal can have its own retention TTL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TelemetrySignalType {
+    /// Distributed traces / spans.
+    Traces,
+    /// Time-series metrics (counters, gauges, histograms).
+    Metrics,
+    /// Structured log records.
+    Logs,
+}
+
+impl std::fmt::Display for TelemetrySignalType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Traces => write!(f, "traces"),
+            Self::Metrics => write!(f, "metrics"),
+            Self::Logs => write!(f, "logs"),
+        }
+    }
+}
+
+/// Per-signal retention policy configuration (ADR-046 defaults).
+///
+/// Each signal type has its own TTL in hours:
+/// - Traces: 168 h (7 days)
+/// - Metrics: 720 h (30 days)
+/// - Logs: 168 h (7 days)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelemetryRetentionPolicy {
+    /// Retention TTL for trace spans in hours.
+    pub traces_hours: u64,
+    /// Retention TTL for metrics in hours.
+    pub metrics_hours: u64,
+    /// Retention TTL for logs in hours.
+    pub logs_hours: u64,
+}
+
+impl Default for TelemetryRetentionPolicy {
+    fn default() -> Self {
+        Self {
+            traces_hours: 168,  // 7 days
+            metrics_hours: 720, // 30 days
+            logs_hours: 168,    // 7 days
+        }
+    }
+}
+
+impl TelemetryRetentionPolicy {
+    /// Get the retention TTL in hours for a given signal type.
+    pub fn ttl_hours(&self, signal: TelemetrySignalType) -> u64 {
+        match signal {
+            TelemetrySignalType::Traces => self.traces_hours,
+            TelemetrySignalType::Metrics => self.metrics_hours,
+            TelemetrySignalType::Logs => self.logs_hours,
+        }
+    }
+
+    /// Set the retention TTL in hours for a given signal type.
+    pub fn set_ttl_hours(&mut self, signal: TelemetrySignalType, hours: u64) {
+        match signal {
+            TelemetrySignalType::Traces => self.traces_hours = hours,
+            TelemetrySignalType::Metrics => self.metrics_hours = hours,
+            TelemetrySignalType::Logs => self.logs_hours = hours,
+        }
+    }
+}
+
+/// Result of enforcing a retention policy for a single signal type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionEnforcementResult {
+    /// Which signal type was cleaned up.
+    pub signal: TelemetrySignalType,
+    /// Number of partition directories deleted.
+    pub partitions_deleted: u64,
+    /// The cutoff timestamp — data older than this was deleted.
+    pub cutoff: DateTime<Utc>,
+}
+
 // --- Replay payloads (ADR-035) ---
 
 /// Metadata attached to replayed events to distinguish them from live events.

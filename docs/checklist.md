@@ -495,10 +495,10 @@
 - [x] TC-261: W3C traceparent header propagated from platform to workload (scenario) — passing
 - [x] TC-318: Trace propagation exit — traceparent header flows to workloads (exit-criteria) — passing
 
-### FT-049 — Telemetry retention policy — configurable per signal type [ ]
+### FT-049 — Telemetry retention policy — configurable per signal type [x]
 
-- [ ] TC-262: Telemetry retention policy deletes data older than configured TTL (scenario) — unimplemented
-- [ ] TC-319: Retention policy exit — expired telemetry data deleted (exit-criteria) — unimplemented
+- [x] TC-262: Telemetry retention policy deletes data older than configured TTL (scenario) — passing
+- [x] TC-319: Retention policy exit — expired telemetry data deleted (exit-criteria) — passing
 
 ### FT-050 — CLI: events stream, graph query, identity token, telemetry query [ ]
 

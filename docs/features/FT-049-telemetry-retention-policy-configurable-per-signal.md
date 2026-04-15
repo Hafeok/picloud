@@ -2,7 +2,7 @@
 id: FT-049
 title: Telemetry retention policy — configurable per signal type
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

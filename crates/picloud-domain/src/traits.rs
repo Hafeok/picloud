@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use crate::error::Result;
-use crate::events::{CertType, EventEnvelope, MetricRecord, SpanRecord, TelemetryFilter};
+use crate::events::{CertType, EventEnvelope, MetricRecord, RetentionEnforcementResult, SpanRecord, TelemetryFilter, TelemetryRetentionPolicy};
 use crate::iri::ResourceIri;
 use crate::resources::VolumeType;
 
@@ -520,6 +520,29 @@ pub trait TelemetryStore: Send + Sync {
         Err(crate::error::PiCloudError::TelemetryQueryFailed {
             reason: "SQL queries not supported by this telemetry backend".to_string(),
         })
+    }
+
+    /// Return the current per-signal retention policy (FT-049).
+    async fn get_retention_policy(&self) -> Result<TelemetryRetentionPolicy> {
+        Ok(TelemetryRetentionPolicy::default())
+    }
+
+    /// Update the per-signal retention policy (FT-049).
+    ///
+    /// This does NOT retroactively delete data — call `enforce_retention` to
+    /// apply the policy immediately.
+    async fn set_retention_policy(&self, _policy: TelemetryRetentionPolicy) -> Result<()> {
+        Err(crate::error::PiCloudError::TelemetryWriteFailed {
+            reason: "Retention policy updates not supported by this backend".to_string(),
+        })
+    }
+
+    /// Enforce the retention policy immediately — delete all data older than
+    /// the configured TTL for each signal type (FT-049).
+    ///
+    /// Returns one result per signal type that was cleaned.
+    async fn enforce_retention(&self) -> Result<Vec<RetentionEnforcementResult>> {
+        Ok(vec![])
     }
 }
 

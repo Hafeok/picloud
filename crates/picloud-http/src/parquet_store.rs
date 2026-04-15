@@ -40,7 +40,10 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use picloud_domain::error::{PiCloudError, Result};
-use picloud_domain::events::{MetricRecord, SpanRecord, TelemetryFilter};
+use picloud_domain::events::{
+    MetricRecord, RetentionEnforcementResult, SpanRecord, TelemetryFilter,
+    TelemetryRetentionPolicy, TelemetrySignalType,
+};
 use picloud_domain::traits::TelemetryStore;
 
 // ---------------------------------------------------------------------------
@@ -405,8 +408,8 @@ pub struct ParquetTelemetryStore {
     part_counter: AtomicU32,
     /// Mutex to serialize writes within the same process.
     write_lock: Arc<Mutex<()>>,
-    /// Retention period in hours (default: 168 = 7 days).
-    retention_hours: u64,
+    /// Per-signal retention policy (FT-049).
+    retention_policy: Arc<Mutex<TelemetryRetentionPolicy>>,
 }
 
 impl ParquetTelemetryStore {
@@ -420,13 +423,25 @@ impl ParquetTelemetryStore {
             base_path,
             part_counter: AtomicU32::new(1),
             write_lock: Arc::new(Mutex::new(())),
-            retention_hours: 168,
+            retention_policy: Arc::new(Mutex::new(TelemetryRetentionPolicy::default())),
         }
     }
 
-    /// Set the retention period in hours.
-    pub fn with_retention_hours(mut self, hours: u64) -> Self {
-        self.retention_hours = hours;
+    /// Set a uniform retention period in hours (applies to all signal types).
+    pub fn with_retention_hours(self, hours: u64) -> Self {
+        // Block on the mutex to set — this is a builder method called once
+        let policy = TelemetryRetentionPolicy {
+            traces_hours: hours,
+            metrics_hours: hours,
+            logs_hours: hours,
+        };
+        *self.retention_policy.blocking_lock() = policy;
+        self
+    }
+
+    /// Set a per-signal retention policy (FT-049).
+    pub fn with_retention_policy(self, policy: TelemetryRetentionPolicy) -> Self {
+        *self.retention_policy.blocking_lock() = policy;
         self
     }
 
@@ -581,59 +596,118 @@ impl ParquetTelemetryStore {
         batches
     }
 
+    /// Delete all partition directories for a signal that are older than the cutoff.
+    ///
+    /// Returns the number of partition directories deleted.
+    fn delete_expired_partitions(base_path: &Path, signal: &str, cutoff: DateTime<Utc>) -> u64 {
+        let cutoff_str = cutoff.format("%Y-%m-%dT%H").to_string();
+        let dir = base_path.join(signal);
+        if !dir.exists() {
+            return 0;
+        }
+
+        let mut deleted = 0u64;
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let dirname = entry.file_name();
+                    let name = dirname.to_string_lossy();
+                    if name.as_ref() < cutoff_str.as_str() {
+                        if let Err(e) = std::fs::remove_dir_all(entry.path()) {
+                            warn!(
+                                dir = %entry.path().display(),
+                                error = %e,
+                                "Failed to remove expired partition"
+                            );
+                        } else {
+                            debug!(
+                                signal = signal,
+                                dir = %entry.path().display(),
+                                "Removed expired Parquet partition"
+                            );
+                            deleted += 1;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    dir = %dir.display(),
+                    error = %e,
+                    "Failed to read telemetry directory for cleanup"
+                );
+            }
+        }
+        deleted
+    }
+
+    /// Enforce the retention policy now — delete expired partitions for all
+    /// signal types according to the per-signal TTL (FT-049).
+    ///
+    /// Returns one `RetentionEnforcementResult` per signal type.
+    pub async fn enforce_retention_now(&self) -> Vec<RetentionEnforcementResult> {
+        let policy = self.retention_policy.lock().await.clone();
+        let now = Utc::now();
+
+        let signals = [
+            (TelemetrySignalType::Traces, "traces", policy.traces_hours),
+            (TelemetrySignalType::Metrics, "metrics", policy.metrics_hours),
+            (TelemetrySignalType::Logs, "logs", policy.logs_hours),
+        ];
+
+        let mut results = Vec::new();
+        for (signal_type, signal_dir, ttl_hours) in &signals {
+            let cutoff = now - chrono::Duration::hours(*ttl_hours as i64);
+            let deleted = Self::delete_expired_partitions(&self.base_path, signal_dir, cutoff);
+            info!(
+                signal = %signal_type,
+                ttl_hours = ttl_hours,
+                cutoff = %cutoff.to_rfc3339(),
+                partitions_deleted = deleted,
+                "Retention policy enforced"
+            );
+            results.push(RetentionEnforcementResult {
+                signal: *signal_type,
+                partitions_deleted: deleted,
+                cutoff,
+            });
+        }
+        results
+    }
+
     /// Start the retention cleanup loop as a background task.
-    /// Runs every hour and deletes partition directories older than the retention window.
+    /// Runs every hour and deletes partition directories older than the
+    /// per-signal retention window (FT-049).
     pub fn start_retention_cleanup(&self) -> tokio::task::JoinHandle<()> {
         let base_path = self.base_path.clone();
-        let retention_hours = self.retention_hours;
+        let retention_policy = self.retention_policy.clone();
 
         tokio::spawn(async move {
             let interval = tokio::time::Duration::from_secs(3600);
-            info!(
-                retention_hours = retention_hours,
-                "Parquet telemetry retention cleanup started"
-            );
+            info!("Parquet telemetry retention cleanup started (per-signal TTL)");
 
             loop {
                 tokio::time::sleep(interval).await;
 
-                let cutoff = Utc::now() - chrono::Duration::hours(retention_hours as i64);
-                let cutoff_str = cutoff.format("%Y-%m-%dT%H").to_string();
+                let policy = retention_policy.lock().await.clone();
+                let now = Utc::now();
 
-                for signal in &["traces", "metrics"] {
-                    let dir = base_path.join(signal);
-                    if !dir.exists() {
-                        continue;
-                    }
+                let signals = [
+                    ("traces", policy.traces_hours),
+                    ("metrics", policy.metrics_hours),
+                    ("logs", policy.logs_hours),
+                ];
 
-                    match std::fs::read_dir(&dir) {
-                        Ok(entries) => {
-                            for entry in entries.flatten() {
-                                let dirname = entry.file_name();
-                                let name = dirname.to_string_lossy();
-                                if name.as_ref() < cutoff_str.as_str() {
-                                    if let Err(e) = std::fs::remove_dir_all(entry.path()) {
-                                        warn!(
-                                            dir = %entry.path().display(),
-                                            error = %e,
-                                            "Failed to remove expired partition"
-                                        );
-                                    } else {
-                                        debug!(
-                                            dir = %entry.path().display(),
-                                            "Removed expired Parquet partition"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                dir = %dir.display(),
-                                error = %e,
-                                "Failed to read telemetry directory for cleanup"
-                            );
-                        }
+                for (signal, ttl_hours) in &signals {
+                    let cutoff = now - chrono::Duration::hours(*ttl_hours as i64);
+                    let deleted = Self::delete_expired_partitions(&base_path, signal, cutoff);
+                    if deleted > 0 {
+                        info!(
+                            signal = signal,
+                            ttl_hours = ttl_hours,
+                            partitions_deleted = deleted,
+                            "Retention cleanup: deleted expired partitions"
+                        );
                     }
                 }
             }
@@ -876,6 +950,25 @@ impl TelemetryStore for ParquetTelemetryStore {
         );
 
         Ok((columns, rows))
+    }
+
+    async fn get_retention_policy(&self) -> Result<TelemetryRetentionPolicy> {
+        Ok(self.retention_policy.lock().await.clone())
+    }
+
+    async fn set_retention_policy(&self, policy: TelemetryRetentionPolicy) -> Result<()> {
+        info!(
+            traces_hours = policy.traces_hours,
+            metrics_hours = policy.metrics_hours,
+            logs_hours = policy.logs_hours,
+            "Telemetry retention policy updated"
+        );
+        *self.retention_policy.lock().await = policy;
+        Ok(())
+    }
+
+    async fn enforce_retention(&self) -> Result<Vec<RetentionEnforcementResult>> {
+        Ok(self.enforce_retention_now().await)
     }
 }
 
