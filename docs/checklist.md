@@ -550,7 +550,7 @@
 
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
-### FT-058 — Group membership rules via inference engine [ ]
+### FT-058 — Group membership rules via inference engine [x]
 
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
