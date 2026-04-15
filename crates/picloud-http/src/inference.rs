@@ -102,18 +102,9 @@ impl InferenceEngine {
 
         let mut current_triples = HashSet::new();
         for binding in &result.bindings {
-            let subject = binding.get("s")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let predicate = binding.get("p")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let object = binding.get("o")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
+            let subject = extract_binding_value(binding, "s");
+            let predicate = extract_binding_value(binding, "p");
+            let object = extract_binding_value(binding, "o");
 
             if !subject.is_empty() && !predicate.is_empty() && !object.is_empty() {
                 current_triples.insert(ProducedTriple { subject, predicate, object });
@@ -324,6 +315,24 @@ impl InferenceEngine {
             }
         });
     }
+}
+
+/// Extract a string value from a SPARQL binding variable.
+///
+/// Handles two formats:
+/// - Simple string: `"https://..."` (from mock projectors)
+/// - SPARQL JSON result: `{"type": "uri", "value": "https://..."}` (from OxigraphProjector)
+fn extract_binding_value(binding: &serde_json::Value, var: &str) -> String {
+    binding
+        .get(var)
+        .and_then(|v| {
+            // Try simple string first (mock projector format)
+            v.as_str().map(|s| s.to_string()).or_else(|| {
+                // Try SPARQL JSON result format: {"type": "...", "value": "..."}
+                v.get("value").and_then(|inner| inner.as_str()).map(|s| s.to_string())
+            })
+        })
+        .unwrap_or_default()
 }
 
 /// Transform a SPARQL CONSTRUCT query into a SELECT query that returns

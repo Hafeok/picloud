@@ -537,9 +537,9 @@
 - [x] TC-267: RDFS/OWL inference derives transitive triples in product graph (scenario) — passing
 - [x] TC-324: Inference exit — RDFS/OWL transitive triples derived (exit-criteria) — passing
 
-### FT-055 — Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources [ ]
+### FT-055 — Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources [x]
 
-- [ ] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — unimplemented
+- [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
 ### FT-056 — group resource type — roles assignable to groups, users inherit [ ]
 
@@ -548,11 +548,11 @@
 
 ### FT-057 — inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation [ ]
 
-- [ ] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — unimplemented
+- [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
 ### FT-058 — Group membership rules via inference engine [ ]
 
-- [ ] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — unimplemented
+- [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
 ### FT-059 — capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types [ ]
 
