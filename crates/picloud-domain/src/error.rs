@@ -127,6 +127,10 @@ pub enum PiCloudError {
     #[error("Capability routing failed for '{capability}': {reason}")]
     CapabilityRoutingFailed { capability: String, reason: String },
 
+    // --- Event routing errors (ADR-022, FT-084) ---
+    #[error("Event routing failed for subscription '{subscription}': {reason}")]
+    EventRoutingFailed { subscription: String, reason: String },
+
     // --- Data Product / Domain errors (ADR-056) ---
     #[error("Data domain not found: {name}")]
     DataDomainNotFound { name: String },

@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::error::Result;
 use crate::events::{CertType, EventEnvelope, MetricRecord, RetentionEnforcementResult, SpanRecord, TelemetryFilter, TelemetryRetentionPolicy};
 use crate::iri::ResourceIri;
-use crate::resources::VolumeType;
+use crate::resources::{EventSubscription, VolumeType};
 
 // ---- Event Log ----
 
@@ -835,4 +835,62 @@ pub struct RegistryStats {
     pub total_blobs: u64,
     pub total_repositories: u64,
     pub storage_used_bytes: u64,
+}
+
+// ---- Event Router (ADR-022, FT-084) ----
+
+/// Platform-managed event routing between Products.
+///
+/// When a Product declares an EventSubscription resource (source product +
+/// event_type + handler), the platform registers the subscription with the
+/// EventRouter. The router watches for matching events from the source
+/// product and re-emits them as `SubscriptionEventRouted` events scoped to
+/// the subscriber product. This enables hermetic inter-product communication
+/// through the event bus without Products calling each other directly.
+///
+/// Implemented by: picloud-events
+#[async_trait]
+pub trait EventRouter: Send + Sync {
+    /// Register an active subscription for cross-product event routing.
+    /// The router begins forwarding matching events from the source product
+    /// to the subscriber product's event scope.
+    async fn register_subscription(&self, subscription: &EventSubscription) -> Result<()>;
+
+    /// Remove an active subscription, stopping event routing for it.
+    async fn unregister_subscription(&self, subscription_iri: &ResourceIri) -> Result<()>;
+
+    /// Route an incoming event through all active subscriptions.
+    /// For each subscription that matches (source product + event_type),
+    /// the router emits a `SubscriptionEventRouted` event scoped to the
+    /// subscriber product.
+    async fn route_event(&self, event: &EventEnvelope) -> Result<Vec<RoutedEventInfo>>;
+
+    /// List all currently active subscriptions.
+    async fn active_subscriptions(&self) -> Result<Vec<ActiveSubscriptionInfo>>;
+}
+
+/// Information about a successfully routed event.
+#[derive(Debug, Clone)]
+pub struct RoutedEventInfo {
+    /// The subscription that triggered the routing
+    pub subscription_iri: ResourceIri,
+    /// The subscriber product that received the routed event
+    pub subscriber_product: String,
+    /// The handler name in the subscriber product
+    pub handler_name: String,
+}
+
+/// Information about an active subscription in the router.
+#[derive(Debug, Clone)]
+pub struct ActiveSubscriptionInfo {
+    /// IRI of the EventSubscription resource
+    pub subscription_iri: ResourceIri,
+    /// The source product to match events from
+    pub source_product: String,
+    /// The event type to match
+    pub event_type: String,
+    /// The subscriber product
+    pub subscriber_product: String,
+    /// The handler in the subscriber product
+    pub handler_name: String,
 }

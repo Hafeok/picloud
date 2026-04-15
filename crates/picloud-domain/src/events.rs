@@ -216,6 +216,9 @@ pub enum PlatformEvent {
 
     // --- Ontology events (ADR-023, FT-053) ---
     OntologyLoaded(OntologyLoadedPayload),
+
+    // --- Subscription event routing (ADR-022, FT-084) ---
+    SubscriptionEventRouted(SubscriptionEventRoutedPayload),
 }
 
 // --- Payload types ---
@@ -1264,6 +1267,30 @@ pub struct OntologyLoadedPayload {
     pub content: String,
     /// File format: "turtle" or "shacl"
     pub format: String,
+}
+
+// --- Subscription event routing payloads (ADR-022, FT-084) ---
+
+/// Payload for SubscriptionEventRouted event (ADR-022, FT-084).
+/// Emitted when the platform routes an event from a source product to a
+/// subscriber product based on an active EventSubscription resource.
+/// The subscriber receives this event scoped to its own product namespace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionEventRoutedPayload {
+    /// IRI of the EventSubscription resource that triggered this routing
+    pub subscription_iri: ResourceIri,
+    /// Name of the source product that emitted the original event
+    pub source_product: String,
+    /// Name of the subscriber product receiving the routed event
+    pub subscriber_product: String,
+    /// The handler (container/binary) in the subscriber product that should process this
+    pub handler_name: String,
+    /// The original event type that was matched
+    pub original_event_type: String,
+    /// The original event ID
+    pub original_event_id: Uuid,
+    /// The original event's payload, preserved verbatim
+    pub original_payload: serde_json::Value,
 }
 
 #[cfg(test)]

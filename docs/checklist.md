@@ -681,10 +681,10 @@
 - [x] TC-282: Event subscription resource type receives filtered events (scenario) — passing
 - [x] TC-339: Event subscription exit — subscription receives filtered events (exit-criteria) — passing
 
-### FT-084 — Platform-managed event routing between Products [ ]
+### FT-084 — Platform-managed event routing between Products [x]
 
-- [ ] TC-283: Platform routes events between products via subscription (scenario) — unimplemented
-- [ ] TC-340: Event routing exit — platform routes events between products (exit-criteria) — unimplemented
+- [x] TC-283: Platform routes events between products via subscription (scenario) — passing
+- [x] TC-340: Event routing exit — platform routes events between products (exit-criteria) — passing
 
 ### FT-085 — Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products [ ]
 

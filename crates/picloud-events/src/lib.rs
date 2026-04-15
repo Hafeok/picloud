@@ -5,5 +5,7 @@
 //! Slices communicate at runtime via the event log.
 
 pub mod implementation;
+pub mod router;
 
 pub use implementation::{InMemoryEventLog, PersistentEventLog, ProductEventStore, WriteCallback, WriteThroughEventLog};
+pub use router::PlatformEventRouter;
