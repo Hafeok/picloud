@@ -394,6 +394,15 @@ fn extract_product_name(iri: &str) -> &str {
         .unwrap_or(iri)
 }
 
+/// Extract the last segment of an IRI path.
+///
+/// Given `https://picloud.local/data-domains/geospatial`, returns `geospatial`.
+/// Given `https://picloud.local/identity/alice`, returns `alice`.
+/// If the IRI doesn't contain `/`, returns the full string.
+fn extract_last_segment(iri: &str) -> &str {
+    iri.rsplit('/').next().unwrap_or(iri)
+}
+
 /// Format capability list rows into a human-readable table.
 ///
 /// Columns: NAME, VERSION, FULFILLED, IMPLEMENTORS, CONSUMERS
@@ -426,6 +435,187 @@ pub fn format_capability_table(rows: &[CapabilityListRow]) -> String {
         output.push_str(&format!(
             "{:<25} {:<10} {:<12} {:<30} {:<30}",
             row.name, row.version, fulfilled_str, implementors_str, consumers_str,
+        ));
+    }
+
+    output
+}
+
+// ---------------------------------------------------------------------------
+// Data-domain list (FT-073)
+// ---------------------------------------------------------------------------
+
+/// A single row in the data-domain list output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataDomainListRow {
+    pub name: String,
+    pub steward: String,
+    pub sensitivity: String,
+}
+
+/// Build the SPARQL query for listing all data domains with steward and
+/// sensitivity level.
+pub fn data_domain_list_sparql() -> &'static str {
+    "PREFIX picloud: <https://picloud.local/ontology#> \
+     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> \
+     SELECT ?domain ?name ?steward ?sensitivity \
+     WHERE { \
+     ?domain rdf:type picloud:DataDomain . \
+     ?domain picloud:name ?name . \
+     ?domain picloud:steward ?steward . \
+     ?domain picloud:sensitivity ?sensitivity . \
+     } ORDER BY ?name"
+}
+
+/// Parse the JSON response body from a SPARQL data-domain list query into
+/// structured rows.
+///
+/// Expects the standard SPARQL JSON results format with a top-level
+/// `"bindings"` array (possibly nested under `"results"`).
+pub fn parse_data_domain_list(body: &Value) -> Vec<DataDomainListRow> {
+    let bindings = body
+        .get("results")
+        .and_then(|r| r.get("bindings"))
+        .and_then(|b| b.as_array())
+        .or_else(|| body.get("bindings").and_then(|b| b.as_array()));
+
+    let bindings = match bindings {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    bindings
+        .iter()
+        .map(|row| {
+            let name = binding_str(row, "name").to_string();
+            let steward_raw = binding_str(row, "steward");
+            let steward = extract_last_segment(steward_raw).to_string();
+            let sensitivity = binding_str(row, "sensitivity").to_string();
+
+            DataDomainListRow {
+                name,
+                steward,
+                sensitivity,
+            }
+        })
+        .collect()
+}
+
+/// Format data-domain list rows into a human-readable table.
+///
+/// Columns: NAME, STEWARD, SENSITIVITY
+pub fn format_data_domain_table(rows: &[DataDomainListRow]) -> String {
+    if rows.is_empty() {
+        return "No data domains declared.".to_string();
+    }
+
+    let mut output = format!(
+        "{:<25} {:<25} {:<15}",
+        "NAME", "STEWARD", "SENSITIVITY"
+    );
+    output.push('\n');
+    output.push_str(&"-".repeat(65));
+
+    for row in rows {
+        output.push('\n');
+        output.push_str(&format!(
+            "{:<25} {:<25} {:<15}",
+            row.name, row.steward, row.sensitivity,
+        ));
+    }
+
+    output
+}
+
+// ---------------------------------------------------------------------------
+// Data-product list (FT-073)
+// ---------------------------------------------------------------------------
+
+/// A single row in the data-product list output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataProductListRow {
+    pub name: String,
+    pub product: String,
+    pub domain: String,
+    pub version: String,
+    pub status: String,
+}
+
+/// Build the SPARQL query for listing all data products with product, domain,
+/// version, and lifecycle status.
+pub fn data_product_list_sparql() -> &'static str {
+    "PREFIX picloud: <https://picloud.local/ontology#> \
+     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> \
+     SELECT ?dp ?name ?product ?domain ?version ?status \
+     WHERE { \
+     ?dp rdf:type picloud:DataProduct . \
+     ?dp picloud:name ?name . \
+     ?dp picloud:product ?product . \
+     ?dp picloud:domain ?domain . \
+     ?dp picloud:version ?version . \
+     ?dp picloud:status ?status . \
+     } ORDER BY ?product ?name"
+}
+
+/// Parse the JSON response body from a SPARQL data-product list query into
+/// structured rows.
+///
+/// Expects the standard SPARQL JSON results format with a top-level
+/// `"bindings"` array (possibly nested under `"results"`).
+pub fn parse_data_product_list(body: &Value) -> Vec<DataProductListRow> {
+    let bindings = body
+        .get("results")
+        .and_then(|r| r.get("bindings"))
+        .and_then(|b| b.as_array())
+        .or_else(|| body.get("bindings").and_then(|b| b.as_array()));
+
+    let bindings = match bindings {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    bindings
+        .iter()
+        .map(|row| {
+            let name = binding_str(row, "name").to_string();
+            let product_raw = binding_str(row, "product");
+            let product = extract_product_name(product_raw).to_string();
+            let domain_raw = binding_str(row, "domain");
+            let domain = extract_last_segment(domain_raw).to_string();
+            let version = binding_str(row, "version").to_string();
+            let status = binding_str(row, "status").to_string();
+
+            DataProductListRow {
+                name,
+                product,
+                domain,
+                version,
+                status,
+            }
+        })
+        .collect()
+}
+
+/// Format data-product list rows into a human-readable table.
+///
+/// Columns: NAME, PRODUCT, DOMAIN, VERSION, STATUS
+pub fn format_data_product_table(rows: &[DataProductListRow]) -> String {
+    if rows.is_empty() {
+        return "No data products declared.".to_string();
+    }
+
+    let mut output = format!(
+        "{:<25} {:<20} {:<20} {:<10} {:<12}",
+        "NAME", "PRODUCT", "DOMAIN", "VERSION", "STATUS"
+    );
+    output.push('\n');
+    output.push_str(&"-".repeat(87));
+
+    for row in rows {
+        output.push('\n');
+        output.push_str(&format!(
+            "{:<25} {:<20} {:<20} {:<10} {:<12}",
+            row.name, row.product, row.domain, row.version, row.status,
         ));
     }
 

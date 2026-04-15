@@ -619,10 +619,10 @@
 - [x] TC-276: DataProductProjector reflects data products and domains in RDF graph (scenario) — passing
 - [x] TC-333: Data projector exit — RDF graph reflects data products and domains (exit-criteria) — passing
 
-### FT-073 — picloud data-product list and picloud data-domain list [ ]
+### FT-073 — picloud data-product list and picloud data-domain list [x]
 
-- [ ] TC-277: picloud data-product list and data-domain list return expected entries (scenario) — unimplemented
-- [ ] TC-334: Data CLI exit — data-product list and data-domain list work (exit-criteria) — unimplemented
+- [x] TC-277: picloud data-product list and data-domain list return expected entries (scenario) — passing
+- [x] TC-334: Data CLI exit — data-product list and data-domain list work (exit-criteria) — passing
 
 ### FT-074 — Cross-product internal graph access blocked at HTTP layer — 403 for non-owner non-admin [ ]
 

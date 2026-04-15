@@ -2571,28 +2571,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::DataDomain { command } => match command {
             DataDomainCommands::List => {
-                let sparql = "SELECT ?domain ?name ?steward ?sensitivity WHERE { \
-                    ?domain a <https://picloud.local/ontology#DataDomain> . \
-                    ?domain <https://picloud.local/ontology#name> ?name . \
-                    ?domain <https://picloud.local/ontology#steward> ?steward . \
-                    ?domain <https://picloud.local/ontology#sensitivity> ?sensitivity . \
-                } ORDER BY ?name";
+                let sparql = commands::data_domain_list_sparql();
                 match client.get(&format!("/api/graph/query?sparql={}", urlencoding(sparql))).await {
                     Ok(body) => {
-                        if let Some(bindings) = body.get("bindings").and_then(|b| b.as_array()) {
-                            if bindings.is_empty() {
-                                println!("No data domains declared.");
-                            } else {
-                                println!("{:<25} {:<25} {:<15}", "NAME", "STEWARD", "SENSITIVITY");
-                                println!("{}", "-".repeat(65));
-                                for row in bindings {
-                                    let name = row.get("name").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let steward = row.get("steward").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let sensitivity = row.get("sensitivity").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    println!("{:<25} {:<25} {:<15}", name, steward, sensitivity);
-                                }
-                            }
-                        }
+                        let rows = commands::parse_data_domain_list(&body);
+                        println!("{}", commands::format_data_domain_table(&rows));
                     }
                     Err(e) => eprintln!("Failed to list data domains: {e}"),
                 }
@@ -2600,32 +2583,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::DataProduct { command } => match command {
             DataProductCommands::List => {
-                let sparql = "SELECT ?dp ?name ?product ?domain ?version ?status WHERE { \
-                    ?dp a <https://picloud.local/ontology#DataProduct> . \
-                    ?dp <https://picloud.local/ontology#name> ?name . \
-                    ?dp <https://picloud.local/ontology#product> ?product . \
-                    ?dp <https://picloud.local/ontology#domain> ?domain . \
-                    ?dp <https://picloud.local/ontology#version> ?version . \
-                    ?dp <https://picloud.local/ontology#status> ?status . \
-                } ORDER BY ?product ?name";
+                let sparql = commands::data_product_list_sparql();
                 match client.get(&format!("/api/graph/query?sparql={}", urlencoding(sparql))).await {
                     Ok(body) => {
-                        if let Some(bindings) = body.get("bindings").and_then(|b| b.as_array()) {
-                            if bindings.is_empty() {
-                                println!("No data products declared.");
-                            } else {
-                                println!("{:<25} {:<20} {:<20} {:<10} {:<12}", "NAME", "PRODUCT", "DOMAIN", "VERSION", "STATUS");
-                                println!("{}", "-".repeat(87));
-                                for row in bindings {
-                                    let name = row.get("name").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let product = row.get("product").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let domain = row.get("domain").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let version = row.get("version").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    let status = row.get("status").and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("-");
-                                    println!("{:<25} {:<20} {:<20} {:<10} {:<12}", name, product, domain, version, status);
-                                }
-                            }
-                        }
+                        let rows = commands::parse_data_product_list(&body);
+                        println!("{}", commands::format_data_product_table(&rows));
                     }
                     Err(e) => eprintln!("Failed to list data products: {e}"),
                 }
