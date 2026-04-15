@@ -691,17 +691,17 @@
 - [x] TC-284: Cluster SPARQL query returns all products, events, ontologies (scenario) — passing
 - [x] TC-341: Discoverability exit — SPARQL returns all products and ontologies (exit-criteria) — passing
 
-### FT-086 — SDK generator — Rust, TypeScript, .NET generated from platform ontology [ ]
+### FT-086 — SDK generator — Rust, TypeScript, .NET generated from platform ontology [x]
 
-- [ ] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — unimplemented
+- [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
 ### FT-087 — SDK publication — crates.io, npm, NuGet via platform CI [ ]
 
-- [ ] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — unimplemented
+- [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
 ### FT-088 — picloud sdk publish command [ ]
 
-- [ ] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — unimplemented
+- [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
 ### FT-089 — .NET Aspire integration package [ ]
 
