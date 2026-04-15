@@ -192,8 +192,9 @@ pub enum PlatformEvent {
     DataDomainDeclared(DataDomainDeclaredPayload),
     DataDomainDeleted(DataDomainDeletedPayload),
 
-    // --- Data Product events (ADR-056) ---
+    // --- Data Product events (ADR-056, FT-070) ---
     DataProductDeclared(DataProductDeclaredPayload),
+    DataProductUpdated(DataProductUpdatedPayload),
     DataProductReady(DataProductReadyPayload),
     DataProductRefreshed(DataProductRefreshedPayload),
     DataProductSLOBreached(DataProductSLOBreachedPayload),
@@ -1148,6 +1149,26 @@ pub struct DataProductDeclaredPayload {
     /// Stored in the RDF graph so the SLO monitor can detect breaches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_age: Option<String>,
+}
+
+/// Payload for DataProductUpdated event (ADR-056, FT-070).
+/// Emitted when a data product's metadata is modified (version bump,
+/// domain reassignment, description change, freshness SLO update).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductUpdatedPayload {
+    pub data_product_iri: ResourceIri,
+    pub name: String,
+    pub product: String,
+    /// Updated domain — may differ from the original declaration.
+    pub domain: String,
+    /// Updated version string.
+    pub version: String,
+    /// Updated freshness SLO (ISO 8601 duration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_age: Option<String>,
+    /// Human-readable description of the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Payload for DataProductReady event (ADR-056).

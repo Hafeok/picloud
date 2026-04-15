@@ -2744,6 +2744,50 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_data_product_updated(&self, event: &EventEnvelope) -> Result<()> {
+        let dp_iri = event.payload["data_product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let version = event.payload["version"].as_str().unwrap_or_default();
+        let domain = event.payload["domain"].as_str().unwrap_or_default();
+
+        // Replace mutable metadata fields — remove old values, insert new ones.
+        self.remove_triple(dp_iri, &format!("{PICLOUD_NS}version"))?;
+        self.insert_triple(
+            dp_iri,
+            &format!("{PICLOUD_NS}version"),
+            Literal::new_simple_literal(version).into(),
+        )?;
+
+        self.remove_triple(dp_iri, &format!("{PICLOUD_NS}domain"))?;
+        self.insert_triple(
+            dp_iri,
+            &format!("{PICLOUD_NS}domain"),
+            Literal::new_simple_literal(domain).into(),
+        )?;
+
+        // Update domain link
+        self.remove_triple(dp_iri, &format!("{PICLOUD_NS}belongsToDomain"))?;
+        let cluster_root = self.iri_builder.cluster_root();
+        let domain_iri = format!("{}/data-domains/{domain}", cluster_root.as_str().trim_end_matches('/'));
+        if let Ok(domain_node) = NamedNode::new(&domain_iri) {
+            self.insert_triple(dp_iri, &format!("{PICLOUD_NS}belongsToDomain"), domain_node.into())?;
+        }
+
+        // Update freshness SLO if provided
+        self.remove_triple(dp_iri, &format!("{PICLOUD_NS}maxAge"))?;
+        if let Some(max_age) = event.payload["max_age"].as_str() {
+            self.insert_triple(
+                dp_iri,
+                &format!("{PICLOUD_NS}maxAge"),
+                Literal::new_simple_literal(max_age).into(),
+            )?;
+        }
+
+        debug!(data_product = dp_iri, version = version, "projected DataProductUpdated");
+        Ok(())
+    }
+
     fn project_data_product_refreshed(&self, event: &EventEnvelope) -> Result<()> {
         let dp_iri = event.payload["data_product_iri"]
             .as_str()
@@ -3385,6 +3429,7 @@ impl StateProjector for OxigraphProjector {
             "DataDomainDeclared" => self.project_data_domain_declared(event),
             "DataDomainDeleted" => self.project_data_domain_deleted(event),
             "DataProductDeclared" => self.project_data_product_declared(event),
+            "DataProductUpdated" => self.project_data_product_updated(event),
             "DataProductRefreshed" => self.project_data_product_refreshed(event),
             "DataProductDeleted" => self.project_data_product_deleted(event),
             "DataProductReady" | "DataProductSLOBreached" | "DataProductSLORestored" => {

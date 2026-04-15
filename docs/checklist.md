@@ -604,10 +604,10 @@
 
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
-### FT-070 — Data product lifecycle events [~]
+### FT-070 — Data product lifecycle events [x]
 
-- [ ] TC-274: Data product lifecycle events emitted on create, update, delete (scenario) — unimplemented
-- [ ] TC-331: Data product events exit — create, update, delete events emitted (exit-criteria) — unimplemented
+- [x] TC-274: Data product lifecycle events emitted on create, update, delete (scenario) — passing
+- [x] TC-331: Data product events exit — create, update, delete events emitted (exit-criteria) — passing
 
 ### FT-071 — Data domain lifecycle events [ ]
 
