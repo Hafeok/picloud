@@ -1143,6 +1143,11 @@ pub struct DataProductDeclaredPayload {
     pub product: String,
     pub domain: String,
     pub version: String,
+    /// Freshness SLO — maximum allowed age before the data product is
+    /// considered stale (ISO 8601 duration, e.g. "PT15M", "PT1H").
+    /// Stored in the RDF graph so the SLO monitor can detect breaches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_age: Option<String>,
 }
 
 /// Payload for DataProductReady event (ADR-056).

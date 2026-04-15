@@ -97,22 +97,34 @@ impl DataProductSLOMonitor for RdfDataProductSLOMonitor {
         let mut actions = Vec::new();
 
         for binding in &result.bindings {
-            let dp_iri_str = match binding.get("dp").and_then(|v| v.as_str()) {
+            // SPARQL JSON results wrap values as {"type":"uri"|"literal","value":"..."}
+            // so we extract the inner "value" field, falling back to direct string for
+            // projectors that return flat values.
+            let dp_iri_str = match binding
+                .get("dp")
+                .and_then(|v| v.get("value").and_then(|inner| inner.as_str()).or_else(|| v.as_str()))
+            {
                 Some(s) => s.to_owned(),
                 None => continue,
             };
 
-            let last_refreshed_str = match binding.get("lastRefreshed").and_then(|v| v.as_str()) {
-                Some(s) => s,
+            let last_refreshed_str = match binding
+                .get("lastRefreshed")
+                .and_then(|v| v.get("value").and_then(|inner| inner.as_str()).or_else(|| v.as_str()))
+            {
+                Some(s) => s.to_owned(),
                 None => continue,
             };
 
-            let max_age_str = match binding.get("maxAge").and_then(|v| v.as_str()) {
-                Some(s) => s,
+            let max_age_str = match binding
+                .get("maxAge")
+                .and_then(|v| v.get("value").and_then(|inner| inner.as_str()).or_else(|| v.as_str()))
+            {
+                Some(s) => s.to_owned(),
                 None => continue,
             };
 
-            let last_refreshed = match chrono::DateTime::parse_from_rfc3339(last_refreshed_str) {
+            let last_refreshed = match chrono::DateTime::parse_from_rfc3339(&last_refreshed_str) {
                 Ok(dt) => dt.with_timezone(&Utc),
                 Err(e) => {
                     warn!(
@@ -124,12 +136,12 @@ impl DataProductSLOMonitor for RdfDataProductSLOMonitor {
                 }
             };
 
-            let max_age_secs = match Self::parse_max_age_seconds(max_age_str) {
+            let max_age_secs = match Self::parse_max_age_seconds(&max_age_str) {
                 Some(s) => s,
                 None => {
                     warn!(
                         dp = %dp_iri_str,
-                        max_age = max_age_str,
+                        max_age = %max_age_str,
                         "Failed to parse maxAge duration"
                     );
                     continue;
@@ -149,14 +161,14 @@ impl DataProductSLOMonitor for RdfDataProductSLOMonitor {
                     // Newly breached (was not in the set before)
                     info!(
                         dp = %dp_iri_str,
-                        max_age = max_age_str,
+                        max_age = %max_age_str,
                         actual_age_seconds,
                         "Data product SLO breached"
                     );
                     actions.push(DataProductSLOAction::Breach(
                         DataProductSLOBreachedPayload {
                             data_product_iri: ResourceIri(dp_iri_str.clone()),
-                            max_age: max_age_str.to_owned(),
+                            max_age: max_age_str.clone(),
                             actual_age_seconds,
                         },
                     ));

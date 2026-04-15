@@ -595,10 +595,10 @@
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 
-### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [ ]
+### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [x]
 
-- [ ] TC-273: Freshness monitor emits DataProductStale when maxAge exceeded (scenario) — unimplemented
-- [ ] TC-330: Freshness exit — DataProductStale emitted when maxAge breached (exit-criteria) — unimplemented
+- [x] TC-273: Freshness monitor emits DataProductStale when maxAge exceeded (scenario) — passing
+- [x] TC-330: Freshness exit — DataProductStale emitted when maxAge breached (exit-criteria) — passing
 
 ### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [ ]
 

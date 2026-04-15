@@ -2731,6 +2731,15 @@ impl OxigraphProjector {
             self.insert_triple(dp_iri, &format!("{PICLOUD_NS}producedBy"), product_node.into())?;
         }
 
+        // Store freshness SLO (maxAge) so the SLO monitor can detect breaches (FT-068)
+        if let Some(max_age) = event.payload["max_age"].as_str() {
+            self.insert_triple(
+                dp_iri,
+                &format!("{PICLOUD_NS}maxAge"),
+                Literal::new_simple_literal(max_age).into(),
+            )?;
+        }
+
         debug!(data_product = name, product = product, "projected DataProductDeclared");
         Ok(())
     }
@@ -2746,6 +2755,9 @@ impl OxigraphProjector {
             .unwrap_or(&ts_fallback);
 
         self.update_status(dp_iri, "ready", None)?;
+        // Remove previous lastRefreshed / tripleCount so only the latest value remains (FT-068)
+        self.remove_triple(dp_iri, &format!("{PICLOUD_NS}lastRefreshed"))?;
+        self.remove_triple(dp_iri, &format!("{PICLOUD_NS}tripleCount"))?;
         self.insert_triple(
             dp_iri,
             &format!("{PICLOUD_NS}lastRefreshed"),
