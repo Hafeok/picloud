@@ -470,10 +470,10 @@
 - [x] TC-256: OTel event stream delivers traces to in-process subscriber (scenario) — passing
 - [x] TC-313: OTel stream exit — traces delivered to in-process subscriber (exit-criteria) — passing
 
-### FT-044 — Parquet time-series store — traces, metrics, logs with hourly partitioning [ ]
+### FT-044 — Parquet time-series store — traces, metrics, logs with hourly partitioning [x]
 
-- [ ] TC-257: Parquet time-series store writes hourly partitioned trace files (scenario) — unimplemented
-- [ ] TC-314: Parquet store exit — hourly partitioned trace files written (exit-criteria) — unimplemented
+- [x] TC-257: Parquet time-series store writes hourly partitioned trace files (scenario) — passing
+- [x] TC-314: Parquet store exit — hourly partitioned trace files written (exit-criteria) — passing
 
 ### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [ ]
 
