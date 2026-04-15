@@ -713,10 +713,10 @@
 - [x] TC-218: SDKs published to package registries (exit-criteria) — passing
 - [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
-### FT-089 — .NET Aspire integration package [ ]
+### FT-089 — .NET Aspire integration package [x]
 
-- [ ] TC-285: .NET Aspire integration package connects to PiCloud cluster (scenario) — unimplemented
-- [ ] TC-342: Aspire exit — .NET integration package connects to cluster (exit-criteria) — unimplemented
+- [x] TC-285: .NET Aspire integration package connects to PiCloud cluster (scenario) — passing
+- [x] TC-342: Aspire exit — .NET integration package connects to cluster (exit-criteria) — passing
 
 ## Phase 4
 

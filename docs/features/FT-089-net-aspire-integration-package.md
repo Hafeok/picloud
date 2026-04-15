@@ -2,7 +2,7 @@
 id: FT-089
 title: .NET Aspire integration package
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

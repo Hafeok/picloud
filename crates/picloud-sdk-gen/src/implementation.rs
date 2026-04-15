@@ -379,6 +379,286 @@ export class PiCloudClient {{
         })
     }
 
+    /// Generate the .NET Aspire integration package: companion package to
+    /// PiCloud.Sdk that registers PiCloud resources as Aspire hosting
+    /// components.
+    ///
+    /// Generates:
+    /// - `PiCloud.Sdk.Aspire.csproj` (NuGet package with Aspire.Hosting dependency)
+    /// - `PiCloudEventStoreResource.cs` (event store as Aspire resource)
+    /// - `PiCloudSparqlResource.cs` (SPARQL client as Aspire resource)
+    /// - `PiCloudIamResource.cs` (IAM client as Aspire resource)
+    /// - `PiCloudResourceExtensions.cs` (builder extension methods)
+    pub fn generate_aspire_integration(&self) -> Result<SdkGenerationResult> {
+        let base_url = format!("https://{}", self.cluster_domain.0);
+        let aspire_dir = self.output_dir.join("dotnet-aspire");
+        Self::ensure_dir(&aspire_dir)?;
+
+        // -- PiCloud.Sdk.Aspire.csproj --
+        let csproj = r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>PiCloud.Sdk.Aspire</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>PiCloud.Sdk.Aspire</PackageId>
+    <Description>PiCloud .NET Aspire integration — event stores, SPARQL, and IAM as Aspire hosting resources</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Abstractions" Version="8.0.0" />
+    <PackageReference Include="System.Net.Http.Json" Version="8.0.0" />
+  </ItemGroup>
+</Project>
+"#;
+
+        // -- PiCloudEventStoreResource.cs --
+        let event_store_cs = format!(
+            r#"// PiCloud Aspire Integration — Event Store Resource
+// Cluster: {base_url}
+
+namespace PiCloud.Sdk.Aspire;
+
+/// <summary>
+/// Aspire resource representing a PiCloud event store.
+/// Provides connection details for appending and subscribing to events.
+/// </summary>
+public class PiCloudEventStoreResource(string name)
+    : Resource(name), IResourceWithConnectionString
+{{
+    /// <summary>The PiCloud cluster base URL.</summary>
+    public string ClusterUrl {{ get; set; }} = "{base_url}";
+
+    /// <summary>Connection string expression for dependency injection.</summary>
+    public ReferenceExpression ConnectionStringExpression =>
+        ReferenceExpression.Create(
+            $"Endpoint={base_url}/api/events;Store={{Name}}");
+}}
+"#,
+            base_url = base_url,
+        );
+
+        // -- PiCloudSparqlResource.cs --
+        let sparql_cs = format!(
+            r#"// PiCloud Aspire Integration — SPARQL Client Resource
+// Cluster: {base_url}
+
+namespace PiCloud.Sdk.Aspire;
+
+/// <summary>
+/// Aspire resource representing a PiCloud SPARQL query client.
+/// Provides connection details for executing SPARQL queries against the
+/// platform RDF graph or a product's named graph.
+/// </summary>
+public class PiCloudSparqlResource(string name)
+    : Resource(name), IResourceWithConnectionString
+{{
+    /// <summary>The PiCloud cluster base URL.</summary>
+    public string ClusterUrl {{ get; set; }} = "{base_url}";
+
+    /// <summary>Connection string expression for dependency injection.</summary>
+    public ReferenceExpression ConnectionStringExpression =>
+        ReferenceExpression.Create(
+            $"Endpoint={base_url}/api/sparql;Client={{Name}}");
+}}
+"#,
+            base_url = base_url,
+        );
+
+        // -- PiCloudIamResource.cs --
+        let iam_cs = format!(
+            r#"// PiCloud Aspire Integration — IAM Client Resource
+// Cluster: {base_url}
+
+namespace PiCloud.Sdk.Aspire;
+
+/// <summary>
+/// Aspire resource representing a PiCloud IAM client.
+/// Provides connection details for token issuance, validation, and
+/// workload identity via the platform OIDC provider.
+/// </summary>
+public class PiCloudIamResource(string name)
+    : Resource(name), IResourceWithConnectionString
+{{
+    /// <summary>The PiCloud cluster base URL.</summary>
+    public string ClusterUrl {{ get; set; }} = "{base_url}";
+
+    /// <summary>Connection string expression for dependency injection.</summary>
+    public ReferenceExpression ConnectionStringExpression =>
+        ReferenceExpression.Create(
+            $"Endpoint={base_url}/api/iam;Client={{Name}}");
+}}
+"#,
+            base_url = base_url,
+        );
+
+        // -- PiCloudResourceExtensions.cs --
+        let extensions_cs = format!(
+            r#"// PiCloud Aspire Integration — Builder Extension Methods
+// Cluster: {base_url}
+
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+
+namespace PiCloud.Sdk.Aspire;
+
+/// <summary>
+/// Extension methods for adding PiCloud resources to an Aspire
+/// <see cref="IDistributedApplicationBuilder"/>.
+/// </summary>
+public static class PiCloudResourceExtensions
+{{
+    /// <summary>
+    /// Add a PiCloud event store resource to the application model.
+    /// </summary>
+    /// <param name="builder">The distributed application builder.</param>
+    /// <param name="name">A name for the event store resource.</param>
+    /// <returns>A resource builder for further configuration.</returns>
+    /// <example>
+    /// <code>
+    /// var photoStore = builder.AddPiCloudEventStore("photos");
+    /// builder.AddProject&lt;Projects.PhotoApi&gt;("api")
+    ///     .WithReference(photoStore);
+    /// </code>
+    /// </example>
+    public static IResourceBuilder<PiCloudEventStoreResource> AddPiCloudEventStore(
+        this IDistributedApplicationBuilder builder,
+        string name)
+    {{
+        var resource = new PiCloudEventStoreResource(name);
+        return builder.AddResource(resource)
+            .WithInitialState(new CustomResourceSnapshot
+            {{
+                ResourceType = "PiCloud Event Store",
+                State = new ResourceStateSnapshot("Running", KnownResourceStateStyles.Success),
+                Properties = [new("ClusterUrl", "{base_url}")]
+            }});
+    }}
+
+    /// <summary>
+    /// Add a PiCloud SPARQL client resource to the application model.
+    /// </summary>
+    /// <param name="builder">The distributed application builder.</param>
+    /// <param name="name">A name for the SPARQL client resource.</param>
+    /// <returns>A resource builder for further configuration.</returns>
+    /// <example>
+    /// <code>
+    /// var sparql = builder.AddPiCloudSparqlClient("graph");
+    /// builder.AddProject&lt;Projects.QueryService&gt;("queries")
+    ///     .WithReference(sparql);
+    /// </code>
+    /// </example>
+    public static IResourceBuilder<PiCloudSparqlResource> AddPiCloudSparqlClient(
+        this IDistributedApplicationBuilder builder,
+        string name)
+    {{
+        var resource = new PiCloudSparqlResource(name);
+        return builder.AddResource(resource)
+            .WithInitialState(new CustomResourceSnapshot
+            {{
+                ResourceType = "PiCloud SPARQL Client",
+                State = new ResourceStateSnapshot("Running", KnownResourceStateStyles.Success),
+                Properties = [new("ClusterUrl", "{base_url}")]
+            }});
+    }}
+
+    /// <summary>
+    /// Add a PiCloud IAM client resource to the application model.
+    /// </summary>
+    /// <param name="builder">The distributed application builder.</param>
+    /// <param name="name">A name for the IAM client resource.</param>
+    /// <returns>A resource builder for further configuration.</returns>
+    /// <example>
+    /// <code>
+    /// var iam = builder.AddPiCloudIamClient("auth");
+    /// builder.AddProject&lt;Projects.AuthService&gt;("auth-svc")
+    ///     .WithReference(iam);
+    /// </code>
+    /// </example>
+    public static IResourceBuilder<PiCloudIamResource> AddPiCloudIamClient(
+        this IDistributedApplicationBuilder builder,
+        string name)
+    {{
+        var resource = new PiCloudIamResource(name);
+        return builder.AddResource(resource)
+            .WithInitialState(new CustomResourceSnapshot
+            {{
+                ResourceType = "PiCloud IAM Client",
+                State = new ResourceStateSnapshot("Running", KnownResourceStateStyles.Success),
+                Properties = [new("ClusterUrl", "{base_url}")]
+            }});
+    }}
+}}
+"#,
+            base_url = base_url,
+        );
+
+        Self::write_file(&aspire_dir.join("PiCloud.Sdk.Aspire.csproj"), &csproj)?;
+        Self::write_file(&aspire_dir.join("PiCloudEventStoreResource.cs"), &event_store_cs)?;
+        Self::write_file(&aspire_dir.join("PiCloudSparqlResource.cs"), &sparql_cs)?;
+        Self::write_file(&aspire_dir.join("PiCloudIamResource.cs"), &iam_cs)?;
+        Self::write_file(&aspire_dir.join("PiCloudResourceExtensions.cs"), &extensions_cs)?;
+
+        Ok(SdkGenerationResult {
+            language: SdkLanguage::DotNet,
+            output_path: aspire_dir,
+            files_generated: vec![
+                "PiCloud.Sdk.Aspire.csproj".to_string(),
+                "PiCloudEventStoreResource.cs".to_string(),
+                "PiCloudSparqlResource.cs".to_string(),
+                "PiCloudIamResource.cs".to_string(),
+                "PiCloudResourceExtensions.cs".to_string(),
+            ],
+        })
+    }
+
+    /// Publish a previously generated Aspire integration package to NuGet.
+    pub fn publish_aspire_integration(
+        &self,
+        dry_run: bool,
+        registry: Option<&str>,
+    ) -> Result<SdkPublishResult> {
+        let gen_result = self.generate_aspire_integration()?;
+
+        let nupkg_pattern = gen_result.output_path.join("*.nupkg");
+        let mut command = format!(
+            "dotnet nuget push {}",
+            nupkg_pattern.display()
+        );
+        if let Some(reg) = registry {
+            command.push_str(&format!(" --source {}", reg));
+        } else {
+            command.push_str(" --source https://api.nuget.org/v3/index.json");
+        }
+        if dry_run {
+            command.push_str(" # (dry-run — not executed)");
+        }
+
+        if !dry_run {
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .current_dir(&gen_result.output_path)
+                .output()
+                .map_err(|e| PiCloudError::Internal(format!(
+                    "Failed to run Aspire publish command: {}", e
+                )))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(PiCloudError::Internal(format!(
+                    "Aspire publish failed: {}", stderr
+                )));
+            }
+        }
+
+        Ok(SdkPublishResult {
+            language: SdkLanguage::DotNet,
+            output_path: gen_result.output_path,
+            dry_run,
+            command,
+        })
+    }
+
     /// Generate the .NET SDK: `PiCloud.Sdk.csproj` and `PiCloudClient.cs`.
     fn generate_dotnet_sdk(&self) -> Result<SdkGenerationResult> {
         let base_url = format!("https://{}", self.cluster_domain.0);
