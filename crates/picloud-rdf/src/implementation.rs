@@ -817,6 +817,55 @@ impl OxigraphProjector {
         }
 
         // Project EventSubscription-specific triples (ADR-018)
+        // Project rdf-store-specific triples (ADR-019, FT-051)
+        if resource_type == "RdfStore" || resource_type == "rdf-store" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("RdfStore").into(),
+            )?;
+            // sparqlEndpoint — the IRI where SPARQL queries are served
+            if let Some(endpoint) = event.payload["sparql_endpoint"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}sparqlEndpoint"),
+                    NamedNode::new(endpoint)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid SPARQL endpoint IRI: {e}")))?
+                        .into(),
+                )?;
+            } else if let Some(product) = event.payload["product"].as_str() {
+                // Derive the endpoint IRI from the product name
+                let endpoint = self.iri_builder.product_sparql(product);
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}sparqlEndpoint"),
+                    NamedNode::new(endpoint.as_str())
+                        .map_err(|e| PiCloudError::Internal(format!("invalid SPARQL endpoint IRI: {e}")))?
+                        .into(),
+                )?;
+            }
+            // backingVolume — the block volume providing persistence
+            if let Some(volume) = event.payload["backing_volume"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}backingVolume"),
+                    NamedNode::new(volume)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid backing volume IRI: {e}")))?
+                        .into(),
+                )?;
+            }
+            // Also insert into named graph if product-scoped
+            if let Some(product) = event.payload["product"].as_str() {
+                let graph_iri = self.iri_builder.product_graph(product);
+                self.insert_triple_in_graph(
+                    resource_iri_str,
+                    RDF_TYPE,
+                    picloud_term("RdfStore").into(),
+                    graph_iri.as_str(),
+                )?;
+            }
+        }
+
         if resource_type == "EventSubscription" {
             self.insert_triple(
                 resource_iri_str,

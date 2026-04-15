@@ -517,10 +517,10 @@
 - [x] TC-099: sdk_ontology_sync (scenario) — passing
 - [x] TC-218: SDKs published to package registries (exit-criteria) — passing
 
-### FT-051 — rdf-store resource type — managed Oxigraph per Product [ ]
+### FT-051 — rdf-store resource type — managed Oxigraph per Product [x]
 
-- [ ] TC-264: Per-product Oxigraph instance created and serves SPARQL (scenario) — unimplemented
-- [ ] TC-321: RDF store exit — per-product Oxigraph created and serves SPARQL (exit-criteria) — unimplemented
+- [x] TC-264: Per-product Oxigraph instance created and serves SPARQL (scenario) — passing
+- [x] TC-321: RDF store exit — per-product Oxigraph created and serves SPARQL (exit-criteria) — passing
 
 ### FT-052 — IAM-gated SPARQL endpoint per Product [ ]
 

@@ -110,6 +110,14 @@ impl IriBuilder {
         ))
     }
 
+    /// IRI for a product's SPARQL endpoint: /products/{name}/sparql (ADR-019)
+    pub fn product_sparql(&self, product_name: &str) -> ResourceIri {
+        ResourceIri(format!(
+            "https://{}/products/{}/sparql",
+            self.domain.0, product_name
+        ))
+    }
+
     pub fn product_events(&self, product_name: &str) -> ResourceIri {
         ResourceIri(format!(
             "https://{}/products/{}/events",

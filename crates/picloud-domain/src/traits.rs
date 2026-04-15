@@ -687,6 +687,33 @@ pub struct CapabilityStatus {
     pub consumers: Vec<String>,
 }
 
+// ---- Per-Product RDF Store (ADR-019, FT-051) ----
+
+/// Manages per-product Oxigraph instances.
+///
+/// Each Product that declares an `rdf-store` resource gets a dedicated
+/// Oxigraph instance with a SPARQL 1.1 query and update endpoint.
+/// Implemented by: picloud-rdf
+#[async_trait]
+pub trait RdfStoreManager: Send + Sync {
+    /// Create a per-product RDF store (Oxigraph instance).
+    async fn create_store(&self, product_name: &str) -> Result<()>;
+
+    /// Execute a SPARQL SELECT/ASK/CONSTRUCT/DESCRIBE query against a
+    /// product's RDF store.
+    async fn query_store(&self, product_name: &str, sparql: &str) -> Result<QueryResult>;
+
+    /// Execute a SPARQL Update (INSERT DATA / DELETE DATA / etc.) against a
+    /// product's RDF store.
+    async fn update_store(&self, product_name: &str, sparql_update: &str) -> Result<()>;
+
+    /// Check whether a product has a managed RDF store.
+    async fn has_store(&self, product_name: &str) -> Result<bool>;
+
+    /// Drop a product's RDF store and all its data.
+    async fn drop_store(&self, product_name: &str) -> Result<()>;
+}
+
 // ---- Data Product Projection (ADR-056) ----
 
 /// Run SPARQL CONSTRUCT projections and manage data product named graphs.
