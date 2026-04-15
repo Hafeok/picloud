@@ -609,10 +609,10 @@
 - [x] TC-274: Data product lifecycle events emitted on create, update, delete (scenario) — passing
 - [x] TC-331: Data product events exit — create, update, delete events emitted (exit-criteria) — passing
 
-### FT-071 — Data domain lifecycle events [ ]
+### FT-071 — Data domain lifecycle events [x]
 
-- [ ] TC-275: Data domain lifecycle events emitted on create, update, delete (scenario) — unimplemented
-- [ ] TC-332: Data domain events exit — create, update, delete events emitted (exit-criteria) — unimplemented
+- [x] TC-275: Data domain lifecycle events emitted on create, update, delete (scenario) — passing
+- [x] TC-332: Data domain events exit — create, update, delete events emitted (exit-criteria) — passing
 
 ### FT-072 — DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness [ ]
 

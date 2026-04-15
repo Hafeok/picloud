@@ -2693,6 +2693,32 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    fn project_data_domain_updated(&self, event: &EventEnvelope) -> Result<()> {
+        let domain_iri = event.payload["domain_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let steward = event.payload["steward"].as_str().unwrap_or_default();
+        let sensitivity = event.payload["sensitivity"].as_str().unwrap_or("internal");
+
+        // Replace mutable metadata fields — remove old values, insert new ones.
+        self.remove_triple(domain_iri, &format!("{PICLOUD_NS}steward"))?;
+        self.insert_triple(
+            domain_iri,
+            &format!("{PICLOUD_NS}steward"),
+            Literal::new_simple_literal(steward).into(),
+        )?;
+
+        self.remove_triple(domain_iri, &format!("{PICLOUD_NS}sensitivity"))?;
+        self.insert_triple(
+            domain_iri,
+            &format!("{PICLOUD_NS}sensitivity"),
+            Literal::new_simple_literal(sensitivity).into(),
+        )?;
+
+        debug!(domain_iri = domain_iri, steward = steward, sensitivity = sensitivity, "projected DataDomainUpdated");
+        Ok(())
+    }
+
     fn project_data_domain_deleted(&self, event: &EventEnvelope) -> Result<()> {
         let domain_iri = event.payload["domain_iri"]
             .as_str()
@@ -3427,6 +3453,7 @@ impl StateProjector for OxigraphProjector {
             "OntologyLoaded" => self.project_ontology_loaded(event),
             // Data Domain / Data Product events (ADR-056)
             "DataDomainDeclared" => self.project_data_domain_declared(event),
+            "DataDomainUpdated" => self.project_data_domain_updated(event),
             "DataDomainDeleted" => self.project_data_domain_deleted(event),
             "DataProductDeclared" => self.project_data_product_declared(event),
             "DataProductUpdated" => self.project_data_product_updated(event),

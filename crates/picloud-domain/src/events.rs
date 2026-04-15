@@ -188,8 +188,9 @@ pub enum PlatformEvent {
     CapabilityDeleted(CapabilityDeletedPayload),
     CapabilityRoutingFailed(CapabilityRoutingFailedPayload),
 
-    // --- Data Domain events (ADR-056) ---
+    // --- Data Domain events (ADR-056, FT-071) ---
     DataDomainDeclared(DataDomainDeclaredPayload),
+    DataDomainUpdated(DataDomainUpdatedPayload),
     DataDomainDeleted(DataDomainDeletedPayload),
 
     // --- Data Product events (ADR-056, FT-070) ---
@@ -1123,6 +1124,22 @@ pub struct DataDomainDeclaredPayload {
     pub name: String,
     pub steward: String,
     pub sensitivity: String,
+}
+
+/// Payload for DataDomainUpdated event (ADR-056, FT-071).
+/// Emitted when a data domain's governance metadata is modified
+/// (steward reassignment, sensitivity reclassification, description change).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataDomainUpdatedPayload {
+    pub domain_iri: ResourceIri,
+    pub name: String,
+    /// Updated steward — may differ from the original declaration.
+    pub steward: String,
+    /// Updated sensitivity classification.
+    pub sensitivity: String,
+    /// Human-readable description of the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Payload for DataDomainDeleted event (ADR-056).
