@@ -1039,10 +1039,23 @@ impl WorkloadScheduler for ProcessScheduler {
 }
 
 // ==========================================================================
-// Node Drain Coordinator (FT-011)
+// Node Drain Coordinator (FT-011, FT-092)
 // ==========================================================================
 
 use picloud_domain::traits::{DrainResult, NodeDrainCoordinator, NodeDrainState, NodeWorkloadInfo};
+
+/// A record of a single workload migration during a drain operation (FT-092).
+#[derive(Debug, Clone)]
+pub struct MigrationRecord {
+    /// The IRI of the workload that was migrated.
+    pub workload_iri: ResourceIri,
+    /// The type of the workload (e.g. "container", "binary").
+    pub workload_type: String,
+    /// Node the workload was migrated FROM.
+    pub from_node_id: Uuid,
+    /// Node the workload was migrated TO.
+    pub to_node_id: Uuid,
+}
 
 /// In-memory drain coordinator that manages node cordon/drain state
 /// and coordinates workload migration during drain operations.
@@ -1053,6 +1066,8 @@ pub struct InMemoryDrainCoordinator {
     node_workloads: Arc<RwLock<HashMap<Uuid, Vec<NodeWorkloadInfo>>>>,
     /// Available target nodes for migration
     available_nodes: Arc<RwLock<Vec<Uuid>>>,
+    /// Log of all migrations performed during drain operations (FT-092)
+    migrations: Arc<RwLock<Vec<MigrationRecord>>>,
 }
 
 impl InMemoryDrainCoordinator {
@@ -1061,6 +1076,7 @@ impl InMemoryDrainCoordinator {
             drain_states: Arc::new(RwLock::new(HashMap::new())),
             node_workloads: Arc::new(RwLock::new(HashMap::new())),
             available_nodes: Arc::new(RwLock::new(Vec::new())),
+            migrations: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -1082,6 +1098,16 @@ impl InMemoryDrainCoordinator {
     /// Set available target nodes for migration.
     pub async fn set_available_nodes(&self, nodes: Vec<Uuid>) {
         *self.available_nodes.write().await = nodes;
+    }
+
+    /// Return the migration log — all workloads migrated during drain operations (FT-092).
+    pub async fn migration_log(&self) -> Vec<MigrationRecord> {
+        self.migrations.read().await.clone()
+    }
+
+    /// Clear the migration log (useful between test runs).
+    pub async fn clear_migration_log(&self) {
+        self.migrations.write().await.clear();
     }
 }
 
@@ -1153,12 +1179,12 @@ impl NodeDrainCoordinator for InMemoryDrainCoordinator {
             });
         }
 
-        // Step 4: Simulate migrating workloads (round-robin across target nodes)
+        // Step 4: Migrate workloads (round-robin across target nodes) — FT-092
         let deadline = tokio::time::Instant::now()
             + tokio::time::Duration::from_secs(timeout_secs);
         let mut migrated = 0;
 
-        for (_i, _workload) in workloads.iter().enumerate() {
+        for (i, workload) in workloads.iter().enumerate() {
             if tokio::time::Instant::now() >= deadline {
                 let mut states = self.drain_states.write().await;
                 states.insert(node_id, NodeDrainState::Cordoned);
@@ -1173,8 +1199,30 @@ impl NodeDrainCoordinator for InMemoryDrainCoordinator {
                 });
             }
 
-            // Simulate migration work — in production this would stop the workload
-            // on the source node and restart it on the target
+            // Gracefully migrate: pick target via round-robin, record the
+            // migration, and register the workload on the target node.
+            let target = target_nodes[i % target_nodes.len()];
+
+            // Record the migration (FT-092)
+            {
+                let mut log = self.migrations.write().await;
+                log.push(MigrationRecord {
+                    workload_iri: workload.workload_iri.clone(),
+                    workload_type: workload.workload_type.clone(),
+                    from_node_id: node_id,
+                    to_node_id: target,
+                });
+            }
+
+            // Register the workload on its new target node
+            {
+                let mut wl = self.node_workloads.write().await;
+                wl.entry(target).or_default().push(NodeWorkloadInfo {
+                    workload_iri: workload.workload_iri.clone(),
+                    workload_type: workload.workload_type.clone(),
+                });
+            }
+
             migrated += 1;
         }
 

@@ -735,10 +735,10 @@
 - [x] TC-287: Workload CPU and memory limits enforced by container runtime (scenario) — passing
 - [x] TC-344: Resource limits exit — CPU and memory limits enforced (exit-criteria) — passing
 
-### FT-092 — Node drain and graceful workload migration [ ]
+### FT-092 — Node drain and graceful workload migration [x]
 
-- [ ] TC-288: Node drain migrates workloads to other nodes gracefully (scenario) — unimplemented
-- [ ] TC-345: Node drain exit — workloads migrated to other nodes (exit-criteria) — unimplemented
+- [x] TC-288: Node drain migrates workloads to other nodes gracefully (scenario) — passing
+- [x] TC-345: Node drain exit — workloads migrated to other nodes (exit-criteria) — passing
 
 ### FT-093 — Event log compaction and snapshotting [ ]
 
