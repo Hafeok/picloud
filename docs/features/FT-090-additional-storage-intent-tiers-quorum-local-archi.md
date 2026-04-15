@@ -2,7 +2,7 @@
 id: FT-090
 title: Additional storage intent tiers (quorum, local, archive, fast)
 phase: 4
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

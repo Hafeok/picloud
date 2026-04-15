@@ -725,10 +725,10 @@
 - [x] TC-236: Node drain completes and workloads reschedule within timeout (scenario) — passing
 - [x] TC-292: Operational maturity exit — node drain, log compaction, self-monitoring pass (exit-criteria) — passing
 
-### FT-090 — Additional storage intent tiers (quorum, local, archive, fast) [ ]
+### FT-090 — Additional storage intent tiers (quorum, local, archive, fast) [x]
 
-- [ ] TC-286: Storage intent tier quorum replicates to majority of nodes (scenario) — unimplemented
-- [ ] TC-343: Storage tiers exit — quorum tier replicates to majority (exit-criteria) — unimplemented
+- [x] TC-286: Storage intent tier quorum replicates to majority of nodes (scenario) — passing
+- [x] TC-343: Storage tiers exit — quorum tier replicates to majority (exit-criteria) — passing
 
 ### FT-091 — Workload resource constraints (CPU/memory limits) [ ]
 
