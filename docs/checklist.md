@@ -571,10 +571,10 @@
 - [x] TC-269: Capability lifecycle events emitted on declare, implement, consume (scenario) — passing
 - [x] TC-326: Capability events exit — declare, implement, consume events emitted (exit-criteria) — passing
 
-### FT-063 — Capability-aware event routing — platform resolves implementing Product at dispatch time [ ]
+### FT-063 — Capability-aware event routing — platform resolves implementing Product at dispatch time [x]
 
-- [ ] TC-270: Event routed to implementing product resolved by capability IRI (scenario) — unimplemented
-- [ ] TC-327: Capability routing exit — events routed to implementing product (exit-criteria) — unimplemented
+- [x] TC-270: Event routed to implementing product resolved by capability IRI (scenario) — passing
+- [x] TC-327: Capability routing exit — events routed to implementing product (exit-criteria) — passing
 
 ### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [ ]
 
