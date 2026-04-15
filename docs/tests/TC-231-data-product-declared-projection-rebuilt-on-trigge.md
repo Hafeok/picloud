@@ -12,7 +12,7 @@ validates:
 phase: 3
 runner: cargo-test
 runner-args: tc231_data_product_declared_projection_rebuilt_on_trigger_event_second_product_queries_it
-last-run: 2026-04-15T14:32:14.488742744+00:00
+last-run: 2026-04-15T14:41:55.478767323+00:00
 last-run-duration: 0.5s
 ---
 
