@@ -614,10 +614,10 @@
 - [x] TC-275: Data domain lifecycle events emitted on create, update, delete (scenario) — passing
 - [x] TC-332: Data domain events exit — create, update, delete events emitted (exit-criteria) — passing
 
-### FT-072 — DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness [ ]
+### FT-072 — DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness [x]
 
-- [ ] TC-276: DataProductProjector reflects data products and domains in RDF graph (scenario) — unimplemented
-- [ ] TC-333: Data projector exit — RDF graph reflects data products and domains (exit-criteria) — unimplemented
+- [x] TC-276: DataProductProjector reflects data products and domains in RDF graph (scenario) — passing
+- [x] TC-333: Data projector exit — RDF graph reflects data products and domains (exit-criteria) — passing
 
 ### FT-073 — picloud data-product list and picloud data-domain list [ ]
 
