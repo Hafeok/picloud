@@ -480,10 +480,10 @@
 - [x] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — passing
 - [x] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — passing
 
-### FT-046 — Metric aggregator — OTel stream to MetricRecorded events every 15s [ ]
+### FT-046 — Metric aggregator — OTel stream to MetricRecorded events every 15s [x]
 
-- [ ] TC-259: Metric aggregator emits MetricRecorded events every 15 seconds (scenario) — unimplemented
-- [ ] TC-316: Metric aggregator exit — MetricRecorded events emitted on schedule (exit-criteria) — unimplemented
+- [x] TC-259: Metric aggregator emits MetricRecorded events every 15 seconds (scenario) — passing
+- [x] TC-316: Metric aggregator exit — MetricRecorded events emitted on schedule (exit-criteria) — passing
 
 ### FT-047 — CLI traces — every command produces an OTel trace [ ]
 

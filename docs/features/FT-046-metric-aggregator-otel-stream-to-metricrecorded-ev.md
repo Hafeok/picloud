@@ -2,7 +2,7 @@
 id: FT-046
 title: Metric aggregator — OTel stream to MetricRecorded events every 15s
 phase: 2
-status: planned
+status: complete
 depends-on: []
 adrs: []
 tests:

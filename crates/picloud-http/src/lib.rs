@@ -25,7 +25,7 @@ pub use implementation::{ContentType, IngressRoute, IngressTable, PiCloudHttpSer
 pub use inference::InferenceEngine;
 pub use ingress::IngressEventHandler;
 pub use metrics::MetricsAgent;
-pub use otel::{OtelAggregator, OtelDatum, OtelLogRecord, OtelStream, parse_otlp_json};
+pub use otel::{OtelAggregator, OtelDatum, OtelLogRecord, OtelStream, aggregate_otel_metrics, parse_otlp_json};
 pub use parquet_store::ParquetTelemetryStore;
 pub use provisioner::Provisioner;
 pub use router::{IngressRouter, SharedRouter};
