@@ -188,6 +188,14 @@ pub struct ValidatedIdentity {
     pub permissions: Vec<String>,
 }
 
+impl ValidatedIdentity {
+    /// Returns `true` if this identity holds a platform-admin role, which
+    /// grants cross-product graph access (FT-074, ADR-016).
+    pub fn is_platform_admin(&self) -> bool {
+        self.roles.iter().any(|r| r == "admin" || r == "platform-admin")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkloadCertificate {
     pub certificate_pem: String,

@@ -624,10 +624,10 @@
 - [x] TC-277: picloud data-product list and data-domain list return expected entries (scenario) — passing
 - [x] TC-334: Data CLI exit — data-product list and data-domain list work (exit-criteria) — passing
 
-### FT-074 — Cross-product internal graph access blocked at HTTP layer — 403 for non-owner non-admin [ ]
+### FT-074 — Cross-product internal graph access blocked at HTTP layer — 403 for non-owner non-admin [x]
 
-- [ ] TC-278: Cross-product graph access returns 403 for non-owner non-admin (scenario) — unimplemented
-- [ ] TC-335: Graph isolation exit — cross-product access returns 403 (exit-criteria) — unimplemented
+- [x] TC-278: Cross-product graph access returns 403 for non-owner non-admin (scenario) — passing
+- [x] TC-335: Graph isolation exit — cross-product access returns 403 (exit-criteria) — passing
 
 ### FT-075 — Platform metrics agent — MetricRecorded events at 15s interval per node [ ]
 

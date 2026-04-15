@@ -578,8 +578,11 @@ async fn validate_product_audience(
                     "https://{}/products/{}",
                     state.cluster_domain.0, product_name
                 );
+                // FT-074: Allow platform admins to access any product's graph
+                // even when their token is scoped to a different product.
                 if *aud != expected
                     && *aud != format!("https://{}", state.cluster_domain.0)
+                    && !identity.is_platform_admin()
                 {
                     return Some(Err((
                         StatusCode::FORBIDDEN,
@@ -7291,6 +7294,187 @@ mod tests {
         assert!(
             resp.status() != StatusCode::UNAUTHORIZED && resp.status() != StatusCode::FORBIDDEN,
             "without IAM, SPARQL endpoint should be accessible (got {})",
+            resp.status()
+        );
+    }
+
+    // -- FT-074: Cross-product internal graph access blocked at HTTP layer --
+
+    /// TC-278: Cross-product graph access returns 403 for non-owner non-admin.
+    ///
+    /// Scenarios:
+    /// 1. Non-owner non-admin with token scoped to product-A → product-B graph → 403
+    /// 2. Product owner with token scoped to product-B → product-B graph → allowed
+    /// 3. Platform admin with token scoped to product-A → product-B graph → allowed
+    #[tokio::test]
+    async fn tc278_cross_product_graph_access_returns_403_for_non_owner_non_admin() {
+        use picloud_domain::iri::ResourceIri;
+
+        let (server, iam) = test_server_with_iam();
+        let app = server.build_router();
+
+        let target_uri =
+            "/products/photo-app/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D";
+
+        // Register a regular user (non-admin) and an admin user
+        let user_iri = ResourceIri("https://picloud.local/identities/bob".to_string());
+        iam.register_identity(user_iri.clone(), vec!["viewer".to_string()])
+            .await;
+
+        let admin_iri = ResourceIri("https://picloud.local/identities/carol".to_string());
+        iam.register_identity(admin_iri.clone(), vec!["admin".to_string()])
+            .await;
+
+        // ---- Scenario 1: Non-admin with token for different product → 403 ----
+        let cross_token = iam
+            .issue_token_with_audience(
+                &user_iri,
+                "https://picloud.local/products/other-app",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .uri(target_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", cross_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "scenario 1: non-owner non-admin cross-product access must return 403"
+        );
+        // Verify the error body explains the audience mismatch
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["error"].as_str().unwrap(),
+            "invalid_audience",
+            "403 body must contain invalid_audience error code"
+        );
+
+        // ---- Scenario 2: Product owner (matching audience) → allowed ----
+        let owner_token = iam
+            .issue_token_with_audience(
+                &user_iri,
+                "https://picloud.local/products/photo-app",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .uri(target_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", owner_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert!(
+            resp.status() != StatusCode::FORBIDDEN && resp.status() != StatusCode::UNAUTHORIZED,
+            "scenario 2: product owner must not be rejected (got {})",
+            resp.status()
+        );
+
+        // ---- Scenario 3: Platform admin with cross-product token → allowed ----
+        let admin_cross_token = iam
+            .issue_token_with_audience(
+                &admin_iri,
+                "https://picloud.local/products/other-app",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .uri(target_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", admin_cross_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert!(
+            resp.status() != StatusCode::FORBIDDEN && resp.status() != StatusCode::UNAUTHORIZED,
+            "scenario 3: platform admin must not be rejected for cross-product access (got {})",
+            resp.status()
+        );
+    }
+
+    /// TC-335: Graph isolation exit — cross-product access returns 403.
+    ///
+    /// Exit-criteria test that verifies graph isolation holds across multiple
+    /// product boundaries. A non-owner non-admin user must receive 403 for
+    /// every cross-product graph endpoint they try.
+    #[tokio::test]
+    async fn tc335_graph_isolation_exit_cross_product_access_returns_403() {
+        use picloud_domain::iri::ResourceIri;
+
+        let (server, iam) = test_server_with_iam();
+        let app = server.build_router();
+
+        // Register a regular user (non-admin)
+        let user_iri = ResourceIri("https://picloud.local/identities/dave".to_string());
+        iam.register_identity(user_iri.clone(), vec!["viewer".to_string()])
+            .await;
+
+        // Issue a token scoped to "app-alpha"
+        let token = iam
+            .issue_token_with_audience(
+                &user_iri,
+                "https://picloud.local/products/app-alpha",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+
+        // Try accessing the graph endpoint of several *other* products
+        let other_products = ["app-beta", "app-gamma", "app-delta"];
+        for product in &other_products {
+            let uri = format!(
+                "/products/{}/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D",
+                product
+            );
+            let req = Request::builder()
+                .uri(&uri)
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", token),
+                )
+                .body(Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::FORBIDDEN,
+                "cross-product graph access to '{}' must return 403 (got {})",
+                product,
+                resp.status()
+            );
+        }
+
+        // Verify same token works for own product's graph
+        let own_uri =
+            "/products/app-alpha/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D";
+        let req = Request::builder()
+            .uri(own_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert!(
+            resp.status() != StatusCode::FORBIDDEN && resp.status() != StatusCode::UNAUTHORIZED,
+            "own product graph access must not be rejected (got {})",
             resp.status()
         );
     }
