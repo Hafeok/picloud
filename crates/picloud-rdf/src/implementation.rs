@@ -897,6 +897,55 @@ impl OxigraphProjector {
             }
         }
 
+        // Project Ontology-specific triples (ADR-023, FT-053)
+        if resource_type == "Ontology" || resource_type == "ontology" {
+            self.insert_triple(
+                resource_iri_str,
+                RDF_TYPE,
+                picloud_term("Ontology").into(),
+            )?;
+            if let Some(file_path) = event.payload["file_path"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}filePath"),
+                    Literal::new_simple_literal(file_path).into(),
+                )?;
+            }
+            if let Some(format) = event.payload["format"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}format"),
+                    Literal::new_simple_literal(format).into(),
+                )?;
+            }
+            if let Some(served_at) = event.payload["served_at"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}servedAt"),
+                    NamedNode::new(served_at)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid served_at IRI: {e}")))?
+                        .into(),
+                )?;
+            }
+            if let Some(version) = event.payload["version"].as_str() {
+                self.insert_triple(
+                    resource_iri_str,
+                    &format!("{PICLOUD_NS}version"),
+                    Literal::new_simple_literal(version).into(),
+                )?;
+            }
+            // Also insert typed triple into product named graph
+            if let Some(product) = event.payload["product"].as_str() {
+                let graph_iri = self.iri_builder.product_graph(product);
+                self.insert_triple_in_graph(
+                    resource_iri_str,
+                    RDF_TYPE,
+                    picloud_term("Ontology").into(),
+                    graph_iri.as_str(),
+                )?;
+            }
+        }
+
         debug!(resource_iri = resource_iri_str, "projected ResourceDeclared");
         Ok(())
     }
@@ -1082,6 +1131,70 @@ impl OxigraphProjector {
         )?;
 
         debug!(product_iri = product_iri_str, "projected ProductDeployed");
+        Ok(())
+    }
+
+    /// Project an OntologyLoaded event (ADR-023, FT-053).
+    ///
+    /// Loads the ontology file content (Turtle or SHACL) into the product's
+    /// named graph and materialises RDFS inference. Links the ontology
+    /// resource to the versioned ontology IRI.
+    fn project_ontology_loaded(&self, event: &EventEnvelope) -> Result<()> {
+        let ontology_iri_str = event.payload["ontology_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let product = event.payload["product"]
+            .as_str()
+            .unwrap_or_default();
+        let version = event.payload["version"]
+            .as_str()
+            .unwrap_or("0.0.0");
+        let content = event.payload["content"]
+            .as_str()
+            .unwrap_or("");
+        let format = event.payload["format"]
+            .as_str()
+            .unwrap_or("turtle");
+
+        if content.is_empty() {
+            debug!(ontology_iri = ontology_iri_str, "OntologyLoaded with empty content — skipping");
+            return Ok(());
+        }
+
+        // Load content into the product's named graph
+        let graph_iri = self.iri_builder.product_graph(product);
+        self.load_ontology(content, Some(graph_iri.as_str()))?;
+
+        // Also load into default graph so platform-wide queries can find the triples
+        self.load_ontology(content, None)?;
+
+        // Bind ontology to versioned IRI
+        let versioned_iri = self.iri_builder.product_ontology_versioned(product, version);
+        self.insert_triple(
+            ontology_iri_str,
+            &format!("{PICLOUD_NS}boundToVersion"),
+            NamedNode::new(versioned_iri.as_str())
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?
+                .into(),
+        )?;
+
+        // Record the format
+        self.insert_triple(
+            ontology_iri_str,
+            &format!("{PICLOUD_NS}loadedFormat"),
+            Literal::new_simple_literal(format).into(),
+        )?;
+
+        // Mark ontology as loaded (status → ready)
+        self.update_status(ontology_iri_str, "ready", Some(product))?;
+
+        debug!(
+            ontology_iri = ontology_iri_str,
+            product = product,
+            version = version,
+            format = format,
+            "projected OntologyLoaded — content loaded into product graph"
+        );
         Ok(())
     }
 
@@ -3106,6 +3219,8 @@ impl StateProjector for OxigraphProjector {
                 debug!(event_type = %event.event_type, "capability lifecycle event — recorded");
                 Ok(())
             }
+            // Ontology events (ADR-023, FT-053)
+            "OntologyLoaded" => self.project_ontology_loaded(event),
             // Data Domain / Data Product events (ADR-056)
             "DataDomainDeclared" => self.project_data_domain_declared(event),
             "DataDomainDeleted" => self.project_data_domain_deleted(event),

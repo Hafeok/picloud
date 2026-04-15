@@ -194,6 +194,9 @@ pub enum PlatformEvent {
     DataProductSLOBreached(DataProductSLOBreachedPayload),
     DataProductSLORestored(DataProductSLORestoredPayload),
     DataProductDeleted(DataProductDeletedPayload),
+
+    // --- Ontology events (ADR-023, FT-053) ---
+    OntologyLoaded(OntologyLoadedPayload),
 }
 
 // --- Payload types ---
@@ -1125,6 +1128,27 @@ pub struct DataProductDeletedPayload {
     pub data_product_iri: ResourceIri,
     pub name: String,
     pub product: String,
+}
+
+// --- Ontology payloads (ADR-023, FT-053) ---
+
+/// Payload for OntologyLoaded event.
+/// Emitted when an ontology file (.ttl or .shacl) is loaded into the
+/// product's RDF graph. The `content` field carries the Turtle/SHACL
+/// text and `format` indicates the syntax. Triples are loaded into
+/// the product's named graph and RDFS inference is materialised.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OntologyLoadedPayload {
+    /// IRI of the Ontology resource that was loaded
+    pub ontology_iri: ResourceIri,
+    /// Product this ontology belongs to
+    pub product: String,
+    /// Product version the ontology is bound to
+    pub version: String,
+    /// The RDF content (Turtle or SHACL format)
+    pub content: String,
+    /// File format: "turtle" or "shacl"
+    pub format: String,
 }
 
 #[cfg(test)]

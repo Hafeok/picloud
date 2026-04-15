@@ -527,10 +527,10 @@
 - [x] TC-265: SPARQL endpoint rejects unauthenticated and unauthorized requests (scenario) — passing
 - [x] TC-322: SPARQL auth exit — unauthenticated requests rejected with 401 (exit-criteria) — passing
 
-### FT-053 — Ontology resource type — .ttl and .shacl files bound to Product version [ ]
+### FT-053 — Ontology resource type — .ttl and .shacl files bound to Product version [x]
 
-- [ ] TC-266: Ontology .ttl and .shacl files bound to product version and queryable (scenario) — unimplemented
-- [ ] TC-323: Ontology exit — .ttl and .shacl bound to version and queryable (exit-criteria) — unimplemented
+- [x] TC-266: Ontology .ttl and .shacl files bound to product version and queryable (scenario) — passing
+- [x] TC-323: Ontology exit — .ttl and .shacl bound to version and queryable (exit-criteria) — passing
 
 ### FT-054 — RDFS/OWL inference enabled on platform and product graphs [ ]
 
