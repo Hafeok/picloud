@@ -750,8 +750,8 @@
 - [x] TC-290: Platform self-monitoring graph contains node health and workload state (scenario) — passing
 - [x] TC-347: Self-monitoring exit — platform graph contains health data (exit-criteria) — passing
 
-### FT-095 — Multi-node Raft voter configuration tuning [ ]
+### FT-095 — Multi-node Raft voter configuration tuning [x]
 
-- [ ] TC-291: Multi-node Raft voter configuration change completes without downtime (scenario) — unimplemented
-- [ ] TC-348: Voter config exit — Raft voter change completes without downtime (exit-criteria) — unimplemented
+- [x] TC-291: Multi-node Raft voter configuration change completes without downtime (scenario) — passing
+- [x] TC-348: Voter config exit — Raft voter change completes without downtime (exit-criteria) — passing
 

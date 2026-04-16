@@ -8,9 +8,13 @@ use tracing::info;
 use uuid::Uuid;
 
 use picloud_domain::error::{PiCloudError, Result};
+use picloud_domain::events::VoterRole;
 use picloud_domain::iri::{ClusterDomain, IriBuilder};
 use picloud_domain::resources::ClusterIdentity;
-use picloud_domain::traits::{ClusterIdentityStore, ClusterMembership, NodeInfo};
+use picloud_domain::traits::{
+    ClusterIdentityStore, ClusterMembership, NodeInfo, VoterConfigChangeResult,
+    VoterConfigurationManager, VoterInfo,
+};
 
 use crate::discovery::{DiscoveryConfig, MdnsDiscovery};
 use crate::peers::PeerList;
@@ -184,6 +188,212 @@ impl ClusterMembership for MdnsCluster {
 
     async fn local_node_id(&self) -> Uuid {
         self.config.node_id
+    }
+}
+
+#[async_trait]
+impl VoterConfigurationManager for MdnsCluster {
+    async fn add_learner(&self, node_id: Uuid, address: &str) -> Result<()> {
+        let raft = self.raft.as_ref().ok_or(PiCloudError::NotLeader)?;
+        let raft_id = node_id_from_uuid(&node_id);
+        let node = openraft::BasicNode::new(address);
+
+        raft.add_learner(raft_id, node, true)
+            .await
+            .map_err(|e| PiCloudError::VoterConfigChangeFailed {
+                reason: format!("Failed to add learner {}: {}", node_id, e),
+            })?;
+
+        info!(node_id = %node_id, raft_id, address, "Added node as Raft learner");
+        Ok(())
+    }
+
+    async fn promote_to_voter(&self, node_id: Uuid) -> Result<VoterConfigChangeResult> {
+        let raft = self.raft.as_ref().ok_or(PiCloudError::NotLeader)?;
+        let raft_id = node_id_from_uuid(&node_id);
+
+        // Get the current voter set from Raft metrics
+        let metrics = raft.metrics().borrow().clone();
+        let membership = &metrics.membership_config;
+
+        // Collect current voters
+        let mut new_voter_set: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        for node_id_u64 in membership.voter_ids() {
+            new_voter_set.insert(node_id_u64);
+        }
+
+        // Add the new voter
+        new_voter_set.insert(raft_id);
+
+        // Perform membership change via joint consensus
+        raft.change_membership(new_voter_set.clone(), false)
+            .await
+            .map_err(|e| PiCloudError::VoterConfigChangeFailed {
+                reason: format!("Failed to promote {} to voter: {}", node_id, e),
+            })?;
+
+        let new_voters: Vec<Uuid> = new_voter_set
+            .iter()
+            .map(|rid| self.uuid_from_raft_id(*rid))
+            .collect();
+
+        info!(
+            node_id = %node_id,
+            voter_count = new_voter_set.len(),
+            "Promoted node to Raft voter"
+        );
+
+        Ok(VoterConfigChangeResult {
+            voter_count: new_voters.len(),
+            new_voters,
+        })
+    }
+
+    async fn demote_to_learner(&self, node_id: Uuid) -> Result<VoterConfigChangeResult> {
+        let raft = self.raft.as_ref().ok_or(PiCloudError::NotLeader)?;
+        let raft_id = node_id_from_uuid(&node_id);
+
+        // Get the current voter set from Raft metrics
+        let metrics = raft.metrics().borrow().clone();
+        let membership = &metrics.membership_config;
+
+        // Collect current voters, minus the one being demoted
+        let mut new_voter_set: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        for node_id_u64 in membership.voter_ids() {
+            if node_id_u64 != raft_id {
+                new_voter_set.insert(node_id_u64);
+            }
+        }
+
+        if new_voter_set.is_empty() {
+            return Err(PiCloudError::VoterConfigChangeFailed {
+                reason: "Cannot demote the last voter".to_string(),
+            });
+        }
+
+        // Perform membership change via joint consensus
+        raft.change_membership(new_voter_set.clone(), false)
+            .await
+            .map_err(|e| PiCloudError::VoterConfigChangeFailed {
+                reason: format!("Failed to demote {} to learner: {}", node_id, e),
+            })?;
+
+        let new_voters: Vec<Uuid> = new_voter_set
+            .iter()
+            .map(|rid| self.uuid_from_raft_id(*rid))
+            .collect();
+
+        info!(
+            node_id = %node_id,
+            voter_count = new_voter_set.len(),
+            "Demoted node to Raft learner"
+        );
+
+        Ok(VoterConfigChangeResult {
+            voter_count: new_voters.len(),
+            new_voters,
+        })
+    }
+
+    async fn change_voter_set(&self, new_voter_ids: Vec<Uuid>) -> Result<VoterConfigChangeResult> {
+        let raft = self.raft.as_ref().ok_or(PiCloudError::NotLeader)?;
+
+        let new_voter_set: std::collections::BTreeSet<u64> = new_voter_ids
+            .iter()
+            .map(|uuid| node_id_from_uuid(uuid))
+            .collect();
+
+        if new_voter_set.is_empty() {
+            return Err(PiCloudError::VoterConfigChangeFailed {
+                reason: "Voter set cannot be empty".to_string(),
+            });
+        }
+
+        // Perform membership change via joint consensus
+        raft.change_membership(new_voter_set.clone(), false)
+            .await
+            .map_err(|e| PiCloudError::VoterConfigChangeFailed {
+                reason: format!("Failed to change voter set: {}", e),
+            })?;
+
+        let new_voters: Vec<Uuid> = new_voter_set
+            .iter()
+            .map(|rid| self.uuid_from_raft_id(*rid))
+            .collect();
+
+        info!(
+            voter_count = new_voter_set.len(),
+            "Voter configuration changed"
+        );
+
+        Ok(VoterConfigChangeResult {
+            voter_count: new_voters.len(),
+            new_voters,
+        })
+    }
+
+    async fn list_voters(&self) -> Result<Vec<VoterInfo>> {
+        let raft = self.raft.as_ref().ok_or(PiCloudError::NotLeader)?;
+        let metrics = raft.metrics().borrow().clone();
+        let membership = &metrics.membership_config;
+
+        let mut voters = Vec::new();
+
+        // Collect voters
+        for raft_id in membership.voter_ids() {
+            let uuid = self.uuid_from_raft_id(raft_id);
+            let node_name = self.node_name_from_uuid(&uuid);
+            voters.push(VoterInfo {
+                node_id: uuid,
+                node_iri: self.iri_builder.node(&node_name),
+                role: VoterRole::Voter,
+            });
+        }
+
+        // Collect learners
+        for raft_id in membership.membership().learner_ids() {
+            let uuid = self.uuid_from_raft_id(raft_id);
+            let node_name = self.node_name_from_uuid(&uuid);
+            voters.push(VoterInfo {
+                node_id: uuid,
+                node_iri: self.iri_builder.node(&node_name),
+                role: VoterRole::Learner,
+            });
+        }
+
+        Ok(voters)
+    }
+}
+
+impl MdnsCluster {
+    /// Map a Raft u64 ID back to a UUID.
+    ///
+    /// Checks self first, then scans the peer list for a match.
+    fn uuid_from_raft_id(&self, raft_id: u64) -> Uuid {
+        if node_id_from_uuid(&self.config.node_id) == raft_id {
+            return self.config.node_id;
+        }
+        for peer in self.peers.all() {
+            if node_id_from_uuid(&peer.node_id) == raft_id {
+                return peer.node_id;
+            }
+        }
+        // Fallback: generate a deterministic UUID from the raft_id.
+        // This should not happen in normal operation.
+        Uuid::from_u64_pair(0, raft_id)
+    }
+
+    /// Look up a node name from a UUID.
+    fn node_name_from_uuid(&self, uuid: &Uuid) -> String {
+        if *uuid == self.config.node_id {
+            return self.config.node_name.clone();
+        }
+        for peer in self.peers.all() {
+            if peer.node_id == *uuid {
+                return peer.node_name.clone();
+            }
+        }
+        format!("node-{}", &uuid.to_string()[..8])
     }
 }
 

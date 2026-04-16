@@ -228,6 +228,11 @@ pub enum PlatformEvent {
     NodeDrainFailed(NodeDrainFailedPayload),
     WorkloadMigrated(WorkloadMigratedPayload),
 
+    // --- Voter configuration events (FT-095) ---
+    VoterAdded(VoterAddedPayload),
+    VoterRemoved(VoterRemovedPayload),
+    VoterConfigurationChanged(VoterConfigurationChangedPayload),
+
     // --- Log compaction events (FT-011) ---
     LogCompactionCompleted(LogCompactionCompletedPayload),
 
@@ -695,6 +700,66 @@ pub struct WorkloadMigratedPayload {
     pub from_node_iri: ResourceIri,
     pub to_node_iri: ResourceIri,
     pub reason: String,
+}
+
+// --- Voter configuration payloads (FT-095) ---
+
+/// The role of a node in the Raft cluster.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VoterRole {
+    /// Full voting member — participates in leader election and quorum.
+    Voter,
+    /// Learner (non-voter) — receives replicated log entries but does not vote.
+    Learner,
+}
+
+impl std::fmt::Display for VoterRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VoterRole::Voter => write!(f, "voter"),
+            VoterRole::Learner => write!(f, "learner"),
+        }
+    }
+}
+
+/// Payload for VoterAdded event (FT-095).
+/// Emitted when a node is promoted from learner to voter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoterAddedPayload {
+    /// The node ID that was promoted to voter
+    pub node_id: Uuid,
+    /// The node IRI
+    pub node_iri: ResourceIri,
+    /// The new voter set size after this change
+    pub new_voter_count: usize,
+}
+
+/// Payload for VoterRemoved event (FT-095).
+/// Emitted when a node is demoted from voter to learner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoterRemovedPayload {
+    /// The node ID that was demoted to learner
+    pub node_id: Uuid,
+    /// The node IRI
+    pub node_iri: ResourceIri,
+    /// The new voter set size after this change
+    pub new_voter_count: usize,
+}
+
+/// Payload for VoterConfigurationChanged event (FT-095).
+/// Emitted when the voter set is changed atomically via joint consensus.
+/// This is the completion event — the new configuration is fully committed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoterConfigurationChangedPayload {
+    /// The previous voter set (node IDs)
+    pub previous_voters: Vec<Uuid>,
+    /// The new voter set (node IDs)
+    pub new_voters: Vec<Uuid>,
+    /// Nodes added as voters in this change
+    pub voters_added: Vec<Uuid>,
+    /// Nodes removed from the voter set in this change
+    pub voters_removed: Vec<Uuid>,
 }
 
 // --- Log compaction payloads (FT-011) ---

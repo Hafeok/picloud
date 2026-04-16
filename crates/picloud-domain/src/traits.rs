@@ -279,6 +279,63 @@ pub trait ClusterMembership: Send + Sync {
     async fn local_node_id(&self) -> Uuid;
 }
 
+// ---- Voter Configuration (FT-095) ----
+
+/// Information about a voter or learner in the Raft cluster.
+#[derive(Debug, Clone)]
+pub struct VoterInfo {
+    pub node_id: Uuid,
+    pub node_iri: ResourceIri,
+    pub role: crate::events::VoterRole,
+}
+
+/// Result of a voter configuration change.
+#[derive(Debug, Clone)]
+pub struct VoterConfigChangeResult {
+    /// The new voter set after the change.
+    pub new_voters: Vec<Uuid>,
+    /// Number of voters in the new configuration.
+    pub voter_count: usize,
+}
+
+/// Manage Raft voter configuration — add/remove voters without downtime.
+///
+/// Uses openraft's joint consensus protocol to safely transition between
+/// membership configurations. All operations are submitted to the Raft leader.
+///
+/// Implemented by: picloud-cluster
+#[async_trait]
+pub trait VoterConfigurationManager: Send + Sync {
+    /// Add a node as a Raft learner (non-voter).
+    ///
+    /// The node will receive replicated log entries but will not participate
+    /// in leader election or quorum. This is a prerequisite for promoting
+    /// a node to voter — it must first catch up on the log as a learner.
+    async fn add_learner(&self, node_id: Uuid, address: &str) -> Result<()>;
+
+    /// Promote a learner to a voter.
+    ///
+    /// The node must already be a learner in the cluster. This operation
+    /// uses joint consensus to safely add the node to the voter set without
+    /// disrupting ongoing operations.
+    async fn promote_to_voter(&self, node_id: Uuid) -> Result<VoterConfigChangeResult>;
+
+    /// Demote a voter to a learner.
+    ///
+    /// The node remains in the cluster as a learner but no longer participates
+    /// in leader election or quorum. Uses joint consensus for safe transition.
+    async fn demote_to_learner(&self, node_id: Uuid) -> Result<VoterConfigChangeResult>;
+
+    /// Change the voter set atomically.
+    ///
+    /// All nodes in `new_voter_ids` become voters; all other nodes in the
+    /// cluster become learners. Uses joint consensus for a safe transition.
+    async fn change_voter_set(&self, new_voter_ids: Vec<Uuid>) -> Result<VoterConfigChangeResult>;
+
+    /// List all voters and learners in the current Raft configuration.
+    async fn list_voters(&self) -> Result<Vec<VoterInfo>>;
+}
+
 // ---- Node Drain (FT-011) ----
 
 /// The drain state of a node.

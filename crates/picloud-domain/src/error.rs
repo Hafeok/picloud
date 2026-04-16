@@ -50,6 +50,12 @@ pub enum PiCloudError {
     #[error("Node {node_id} is not a cluster member")]
     UnknownNode { node_id: Uuid },
 
+    #[error("Voter configuration change failed: {reason}")]
+    VoterConfigChangeFailed { reason: String },
+
+    #[error("Not the Raft leader — voter changes must be submitted to the leader")]
+    NotLeader,
+
     // --- Network errors ---
     #[error("TLS certificate error: {reason}")]
     TlsCertificateError { reason: String },
