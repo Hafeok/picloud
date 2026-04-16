@@ -2,13 +2,22 @@
 id: TC-346
 title: Log compaction exit — log size reduced, snapshots preserved
 type: exit-criteria
-status: unimplemented
+status: passing
+runner: cargo-test
+runner-args: "tc346_log_compaction_exit_log_size_reduced_snapshots_preserved"
 validates:
-  features: []
+  features: [FT-093]
   adrs: []
-phase: 1
+phase: 4
+last-run: 2026-04-16T07:14:45.571508972+00:00
+last-run-duration: 1.1s
 ---
 
 ## Description
 
-[Describe the test criterion here.]
+Exit-criteria test for event log compaction. Validates the final invariants
+after a full compaction cycle: (1) the on-disk log file is smaller than before
+compaction, (2) the number of remaining events matches the expected retention
+count, (3) snapshot_offset is correctly persisted in the sidecar `.jsonl.meta`
+file, (4) new events can be appended after compaction and the total logical
+event count is correct, and (5) all of this state survives a restart.

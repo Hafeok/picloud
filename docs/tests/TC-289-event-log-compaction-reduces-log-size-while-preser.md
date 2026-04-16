@@ -2,13 +2,22 @@
 id: TC-289
 title: Event log compaction reduces log size while preserving snapshots
 type: scenario
-status: unimplemented
+status: passing
+runner: cargo-test
+runner-args: "tc289_event_log_compaction_reduces_log_size_while_preserving_snapshots"
 validates:
-  features: []
+  features: [FT-093]
   adrs: []
-phase: 1
+phase: 4
+last-run: 2026-04-16T07:14:45.571508972+00:00
+last-run-duration: 1.4s
 ---
 
 ## Description
 
-[Describe the test criterion here.]
+Scenario test for event log compaction. Verifies that compacting a persistent
+event log reduces the on-disk file size while preserving snapshot metadata
+(snapshot_offset) so that logical offsets remain correct. After compaction,
+events that were retained must still be readable via `events_since()` using
+their original logical offsets, and the snapshot offset must survive a restart
+(re-open) of the persistent log.
