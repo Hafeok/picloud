@@ -2,11 +2,15 @@
 id: ADR-017
 title: Platform as Full OIDC Provider
 status: accepted
-features: [FT-003, FT-026, FT-027]
+features:
+- FT-003
+- FT-026
+- FT-027
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:5d9d65b9c55c91ba29e8e6cc26d2f2e81d99b18878cb1bcd59c3fbebbb9919b3
 ---
 
 **Status:** Accepted

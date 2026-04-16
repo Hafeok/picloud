@@ -2,11 +2,14 @@
 id: ADR-044
 title: Feature Flags as First-Class Product Resources
 status: accepted
-features: [FT-009, FT-039]
+features:
+- FT-009
+- FT-039
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:f74e11137ee6047aab9df27e56be017ba6bcd6e1b11ea5a376b03533ee02dc22
 ---
 
 **Status:** Accepted

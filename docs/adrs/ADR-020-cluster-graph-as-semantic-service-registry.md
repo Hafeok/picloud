@@ -2,11 +2,14 @@
 id: ADR-020
 title: Cluster Graph as Semantic Service Registry
 status: accepted
-features: [FT-005, FT-085]
+features:
+- FT-005
+- FT-085
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:9b8d56689fc868d394ea221f33fa7af4052b13d68ac8858b50e0bb2950c3000b
 ---
 
 **Status:** Accepted

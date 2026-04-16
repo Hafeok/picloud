@@ -2,11 +2,14 @@
 id: ADR-036
 title: Universal Tagging System
 status: accepted
-features: [FT-009, FT-055]
+features:
+- FT-009
+- FT-055
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:d8df830ec234d1ab576616c775a9f3d50c57bc43ce4d0d38a54b1da47931ed1c
 ---
 
 **Status:** Accepted

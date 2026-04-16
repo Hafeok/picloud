@@ -2,11 +2,14 @@
 id: ADR-053
 title: Node Certificate Issuance and Enrollment
 status: accepted
-features: [FT-006, FT-023]
+features:
+- FT-006
+- FT-023
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:a1ce8b3b09cc13881c016e0ac88e025960c6aefbbecd4bd4977cb7299e6ca55c
 ---
 
 **Status:** Accepted

@@ -2,11 +2,15 @@
 id: ADR-012
 title: Mounted and Raw Block Device Support
 status: accepted
-features: [FT-004, FT-019, FT-029]
+features:
+- FT-004
+- FT-019
+- FT-029
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:0c2158e4e70e5f6f61e264a7b9672901907ea34621ee8c9aaf1a42833609f994
 ---
 
 **Status:** Accepted

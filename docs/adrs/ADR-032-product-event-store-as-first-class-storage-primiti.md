@@ -2,11 +2,15 @@
 id: ADR-032
 title: Product Event Store as First-Class Storage Primitive
 status: accepted
-features: [FT-008, FT-078, FT-080]
+features:
+- FT-008
+- FT-078
+- FT-080
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:7a0d646586e3824d86a565714f702add99d74928d389cd645d325d477b23be36
 ---
 
 **Status:** Accepted

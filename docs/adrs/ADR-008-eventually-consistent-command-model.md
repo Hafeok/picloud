@@ -2,11 +2,13 @@
 id: ADR-008
 title: Eventually Consistent Command Model
 status: accepted
-features: [FT-002]
+features:
+- FT-002
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:669c4b1385eef40401199c063fb30b422491da415536652d55ee4bd3d4e2af18
 ---
 
 **Status:** Accepted

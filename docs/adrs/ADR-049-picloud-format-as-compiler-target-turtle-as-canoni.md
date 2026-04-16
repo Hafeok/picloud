@@ -2,11 +2,14 @@
 id: ADR-049
 title: .picloud Format as Compiler Target — Turtle as Canonical IaC
 status: accepted
-features: [FT-007]
-supersedes: [ADR-007]
+features:
+- FT-007
+supersedes:
+- ADR-007
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:da47baf05f31339750b430f22dda728668baf7c9345f70fcbda3013d83de0921
 ---
 
 **Status:** Accepted  

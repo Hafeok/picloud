@@ -2,11 +2,13 @@
 id: ADR-054
 title: Test-Augmented ADR Template
 status: accepted
-features: [FT-009]
+features:
+- FT-009
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:93e6120f09fad6c7a279d2ed24db988e8f2d2cd0cce07d0400ddcecae76b1c71
 ---
 
 **Status:** Accepted

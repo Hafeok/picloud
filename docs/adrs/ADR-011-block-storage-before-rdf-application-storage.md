@@ -2,11 +2,14 @@
 id: ADR-011
 title: Block Storage Before RDF Application Storage
 status: accepted
-features: [FT-004, FT-018]
+features:
+- FT-004
+- FT-018
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:0be00a0212314fd603370a358326a2f001260c9c4c4093036ffcd54d0fadb9c0
 ---
 
 **Status:** Accepted

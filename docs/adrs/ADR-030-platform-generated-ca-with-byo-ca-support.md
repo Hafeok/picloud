@@ -2,11 +2,14 @@
 id: ADR-030
 title: Platform-Generated CA with BYO-CA Support
 status: accepted
-features: [FT-006, FT-023]
+features:
+- FT-006
+- FT-023
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:f92741e13bc72f0b1fe01aa1645e78a25daeb7dc4508534c381aa4d2def50baa
 ---
 
 **Status:** Accepted

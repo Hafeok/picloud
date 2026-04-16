@@ -2,11 +2,15 @@
 id: ADR-024
 title: Storage Intent Model
 status: accepted
-features: [FT-004, FT-018, FT-090]
+features:
+- FT-004
+- FT-018
+- FT-090
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:660e4ea73de91378fc1def85f7fc545288f984a60c957a6742ec3b7ec6829934
 ---
 
 **Status:** Accepted

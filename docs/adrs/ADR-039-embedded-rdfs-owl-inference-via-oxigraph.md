@@ -2,11 +2,14 @@
 id: ADR-039
 title: Embedded RDFS/OWL Inference via Oxigraph
 status: accepted
-features: [FT-009, FT-054]
+features:
+- FT-009
+- FT-054
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:384c6faa8be068a0c254b7be170ab0d50af74e98153cb97300b10290045df09d
 ---
 
 **Status:** Accepted

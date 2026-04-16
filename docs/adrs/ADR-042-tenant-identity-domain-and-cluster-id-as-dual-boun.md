@@ -2,11 +2,14 @@
 id: ADR-042
 title: Tenant Identity — Domain and Cluster ID as Dual Boundary
 status: accepted
-features: [FT-007, FT-040]
+features:
+- FT-007
+- FT-040
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:d36c9b98b9feab4147b7f65ae194b20739d4678499d7ef84fbf691557357c336
 ---
 
 **Status:** Accepted

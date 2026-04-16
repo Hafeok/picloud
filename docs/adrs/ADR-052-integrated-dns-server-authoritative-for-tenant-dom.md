@@ -2,11 +2,14 @@
 id: ADR-052
 title: Integrated DNS Server — Authoritative for Tenant Domain
 status: accepted
-features: [FT-006, FT-021]
+features:
+- FT-006
+- FT-021
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:a897b4248132426e71bee4c014878fb32b326a48b99e515bf0ebc63229fb9ecd
 ---
 
 **Status:** Accepted

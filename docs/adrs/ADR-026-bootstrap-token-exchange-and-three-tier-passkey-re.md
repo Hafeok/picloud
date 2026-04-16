@@ -2,11 +2,13 @@
 id: ADR-026
 title: Bootstrap Token Exchange and Three-Tier Passkey Recovery
 status: accepted
-features: [FT-003]
+features:
+- FT-003
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:e2c162a51ca803a13c4e0b38706de867f597e420a9980a323d302aeb4d429de1
 ---
 
 **Status:** Accepted

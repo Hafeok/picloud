@@ -2,11 +2,15 @@
 id: ADR-037
 title: Groups as IAM Resource with SPARQL CONSTRUCT Membership Rules
 status: accepted
-features: [FT-009, FT-056, FT-058]
+features:
+- FT-009
+- FT-056
+- FT-058
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:efdd5ff9213e0bc29dfd2580dc3a32b925eb93f222b3c097c1390613ada2a4f7
 ---
 
 **Status:** Accepted

@@ -4,7 +4,9 @@ title: Node drain and graceful workload migration
 phase: 4
 status: complete
 depends-on: []
-adrs: []
+adrs:
+- ADR-059
+- ADR-010
 tests:
 - TC-288
 - TC-345

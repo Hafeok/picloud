@@ -2,11 +2,14 @@
 id: ADR-006
 title: Oxigraph as Embedded Triplestore
 status: accepted
-features: [FT-002, FT-016]
+features:
+- FT-002
+- FT-016
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:2b0be98a7f060fd9c6c75bc203219d3ca3dd8e640c6fa056bf070db319f76b27
 ---
 
 **Status:** Accepted

@@ -2,11 +2,16 @@
 id: ADR-010
 title: OCI Containers and Raw Binaries as Workload Primitives
 status: accepted
-features: [FT-005, FT-020, FT-028, FT-091]
+features:
+- FT-005
+- FT-020
+- FT-028
+- FT-091
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:1380b31e309e7aeb302847c1f885aefd370fca1adde0c2f536e5a478e957c884
 ---
 
 **Status:** Accepted

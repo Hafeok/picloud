@@ -2,11 +2,16 @@
 id: ADR-040
 title: Platform Metrics Agent — Hardware Telemetry as Events
 status: accepted
-features: [FT-009, FT-046, FT-075, FT-094]
+features:
+- FT-009
+- FT-046
+- FT-075
+- FT-094
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:f96e975369d79f4da43399d173d61c786afb004d30bf2f70d786b712f66f719e
 ---
 
 **Status:** Accepted

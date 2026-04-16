@@ -2,11 +2,15 @@
 id: ADR-018
 title: Product Event Bus as Only Inter-Product Interface
 status: accepted
-features: [FT-008, FT-032, FT-084]
+features:
+- FT-008
+- FT-032
+- FT-084
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:a597df733e1b946b5a0a4548c6c8fbc47ede72b2534a882b1cb8c4ed366f190a
 ---
 
 **Status:** Accepted

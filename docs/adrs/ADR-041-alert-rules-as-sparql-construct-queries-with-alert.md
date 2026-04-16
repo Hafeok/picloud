@@ -2,11 +2,16 @@
 id: ADR-041
 title: Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events
 status: accepted
-features: [FT-009, FT-036, FT-076, FT-077]
+features:
+- FT-009
+- FT-036
+- FT-076
+- FT-077
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:b0346aedf1f4d49ee1cbf667d00c2fd8e9e2f2a612d0581fd93e6d2b30e422ca
 ---
 
 **Status:** Accepted

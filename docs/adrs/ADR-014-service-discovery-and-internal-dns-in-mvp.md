@@ -2,11 +2,14 @@
 id: ADR-014
 title: Service Discovery and Internal DNS in MVP
 status: accepted
-features: [FT-006, FT-021]
+features:
+- FT-006
+- FT-021
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:c539abf40ecf990d9736da86da4d1924972acf9684242ef378ed2c9b7abcc438
 ---
 
 **Status:** Accepted

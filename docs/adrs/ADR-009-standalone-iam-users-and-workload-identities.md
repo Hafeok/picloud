@@ -2,11 +2,15 @@
 id: ADR-009
 title: Standalone IAM — Users and Workload Identities
 status: accepted
-features: [FT-003, FT-017, FT-030]
+features:
+- FT-003
+- FT-017
+- FT-030
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:19730dd8d50068b83a9aa3b8113159bb92a88d8f72506dccb097321a4e68893a
 ---
 
 **Status:** Accepted

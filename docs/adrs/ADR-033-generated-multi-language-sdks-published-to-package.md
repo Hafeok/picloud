@@ -2,11 +2,17 @@
 id: ADR-033
 title: Generated Multi-Language SDKs Published to Package Registries
 status: accepted
-features: [FT-010, FT-086, FT-087, FT-088, FT-089]
+features:
+- FT-010
+- FT-086
+- FT-087
+- FT-088
+- FT-089
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:08bd338607245aa476f011f0ef7b392581c1ace8be3ebeabb46c1d0c252fe68a
 ---
 
 **Status:** Accepted

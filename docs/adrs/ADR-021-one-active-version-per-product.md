@@ -2,11 +2,14 @@
 id: ADR-021
 title: One Active Version Per Product
 status: accepted
-features: [FT-008, FT-024]
+features:
+- FT-008
+- FT-024
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:66a1197fa4eceffa0429b5e1f3af5f1e33c37a436b8d43d54194884014d5b8cd
 ---
 
 **Status:** Accepted

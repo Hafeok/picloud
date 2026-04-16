@@ -2,11 +2,14 @@
 id: ADR-028
 title: Low Coupling, High Cohesion as a Structural Platform Constraint
 status: accepted
-features: [FT-006, FT-074]
+features:
+- FT-006
+- FT-074
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:c59586fb3607414b6df7e049250f74faa81193d4d9af913caacbf92b8f129efe
 ---
 
 **Status:** Accepted

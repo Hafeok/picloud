@@ -2,11 +2,13 @@
 id: ADR-048
 title: Native Ingress Router in picloud-http
 status: accepted
-features: [FT-006]
+features:
+- FT-006
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:960c354ae5dc3e397fe66dc03ef011825f225a803df5502d918c4aad1f41c7d0
 ---
 
 **Status:** Accepted

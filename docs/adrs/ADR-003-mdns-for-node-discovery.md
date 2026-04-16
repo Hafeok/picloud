@@ -2,11 +2,14 @@
 id: ADR-003
 title: mDNS for Node Discovery
 status: accepted
-features: [FT-006, FT-013]
+features:
+- FT-006
+- FT-013
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:77d574ff20963b0bf52bf1fd235a9e1a3241b4760572e54f49f71cac13f99aa9
 ---
 
 **Status:** Accepted

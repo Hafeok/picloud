@@ -2,11 +2,17 @@
 id: ADR-050
 title: Builder Pattern CLI for Resource Generation
 status: accepted
-features: [FT-007, FT-022, FT-037, FT-047, FT-050]
+features:
+- FT-007
+- FT-022
+- FT-037
+- FT-047
+- FT-050
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:2ddd8d8a9ea280a05bd7570403f039dab1dceb1edcd946be4974527d8b12685a
 ---
 
 **Status:** Accepted

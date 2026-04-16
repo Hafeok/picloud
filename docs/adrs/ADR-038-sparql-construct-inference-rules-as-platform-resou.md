@@ -2,11 +2,15 @@
 id: ADR-038
 title: SPARQL CONSTRUCT Inference Rules as Platform Resources
 status: accepted
-features: [FT-009, FT-057, FT-058]
+features:
+- FT-009
+- FT-057
+- FT-058
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:612cf041882f2027b265c51d4f3ee645fcdaa6bfbe789a038afd8e8c8bcceec2
 ---
 
 **Status:** Accepted

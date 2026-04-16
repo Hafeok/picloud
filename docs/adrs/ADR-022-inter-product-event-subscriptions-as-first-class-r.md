@@ -2,11 +2,15 @@
 id: ADR-022
 title: Inter-Product Event Subscriptions as First-Class Resources
 status: accepted
-features: [FT-005, FT-083, FT-084]
+features:
+- FT-005
+- FT-083
+- FT-084
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:82d683d794b1df17f4fa7648448410bed4020d1a023095e1a7c09d33938126d8
 ---
 
 **Status:** Accepted

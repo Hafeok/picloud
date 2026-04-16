@@ -2,11 +2,14 @@
 id: ADR-043
 title: Product Configuration Store
 status: accepted
-features: [FT-009, FT-038]
+features:
+- FT-009
+- FT-038
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:357eadb6a474c4e457593ec5996cc69944c7f48d8311a034fde200ddb124f0d0
 ---
 
 **Status:** Accepted

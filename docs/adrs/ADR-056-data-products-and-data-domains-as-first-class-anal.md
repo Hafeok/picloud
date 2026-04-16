@@ -2,11 +2,22 @@
 id: ADR-056
 title: Data Products and Data Domains as First-Class Analytical Sharing Primitives
 status: accepted
-features: [FT-009, FT-065, FT-066, FT-067, FT-068, FT-069, FT-070, FT-071, FT-072, FT-073]
+features:
+- FT-009
+- FT-065
+- FT-066
+- FT-067
+- FT-068
+- FT-069
+- FT-070
+- FT-071
+- FT-072
+- FT-073
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:255cab1af7a75092d53e58986c6b4115d7cd9594f5560ea688796a3506b499e3
 ---
 
 **Status:** Accepted

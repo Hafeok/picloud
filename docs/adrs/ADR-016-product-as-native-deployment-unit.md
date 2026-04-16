@@ -2,11 +2,15 @@
 id: ADR-016
 title: Product as Native Deployment Unit
 status: accepted
-features: [FT-001, FT-024, FT-031]
+features:
+- FT-001
+- FT-024
+- FT-031
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:aa053609891270126f4a5242a3891c5966e49a22053cf71a4f89a43cb1f89b25
 ---
 
 **Status:** Accepted

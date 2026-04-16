@@ -2,11 +2,16 @@
 id: ADR-019
 title: Per-Product SPARQL Endpoint and Ontology Exposure
 status: accepted
-features: [FT-008, FT-051, FT-052, FT-074]
+features:
+- FT-008
+- FT-051
+- FT-052
+- FT-074
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:bfb3d676cf2009a88df5db76130874bc1de2f7670db1ba7845ac16509f5d9c3d
 ---
 
 **Status:** Accepted

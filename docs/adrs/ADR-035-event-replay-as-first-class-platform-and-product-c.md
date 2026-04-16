@@ -2,11 +2,15 @@
 id: ADR-035
 title: Event Replay as First-Class Platform and Product Capability
 status: accepted
-features: [FT-002, FT-081, FT-082]
+features:
+- FT-002
+- FT-081
+- FT-082
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:33525a5cae02a60e9118c7b9ce06b408e3fb01e0da4c53eae290a89ce51f4cfa
 ---
 
 **Status:** Accepted

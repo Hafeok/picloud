@@ -2,11 +2,16 @@
 id: ADR-004
 title: Event Sourcing as Platform State Foundation
 status: accepted
-features: [FT-002, FT-015, FT-035, FT-093]
+features:
+- FT-002
+- FT-015
+- FT-035
+- FT-093
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:42e43685e6dfaeedb9e0e07b705f9f4cb4f7c3211431a1b25e6a8292143d3983
 ---
 
 **Status:** Accepted

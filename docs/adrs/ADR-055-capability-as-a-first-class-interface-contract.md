@@ -2,11 +2,19 @@
 id: ADR-055
 title: Capability as a First-Class Interface Contract
 status: accepted
-features: [FT-009, FT-059, FT-060, FT-061, FT-062, FT-063, FT-064]
+features:
+- FT-009
+- FT-059
+- FT-060
+- FT-061
+- FT-062
+- FT-063
+- FT-064
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:e3bab4f2d1e07e130cfdac7809880c9dcb3b21d79d5b476a64f99d79558832bc
 ---
 
 **Status:** Accepted

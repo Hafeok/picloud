@@ -6,6 +6,7 @@ status: complete
 depends-on: []
 adrs:
 - ADR-045
+- ADR-046
 tests:
 - TC-256
 - TC-313

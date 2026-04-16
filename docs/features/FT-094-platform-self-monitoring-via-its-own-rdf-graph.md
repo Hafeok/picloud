@@ -4,7 +4,9 @@ title: Platform self-monitoring via its own RDF graph
 phase: 4
 status: complete
 depends-on: []
-adrs: []
+adrs:
+- ADR-061
+- ADR-040
 tests:
 - TC-290
 - TC-347

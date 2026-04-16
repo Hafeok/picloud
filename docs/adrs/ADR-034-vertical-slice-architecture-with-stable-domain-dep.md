@@ -2,11 +2,13 @@
 id: ADR-034
 title: Vertical Slice Architecture with Stable Domain Dependency
 status: accepted
-features: [FT-001]
+features:
+- FT-001
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:53717852abb147eb6295eebca609cd5420651b299c3fc751fa8e31691c6bbb39
 ---
 
 **Status:** Accepted

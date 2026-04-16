@@ -2,11 +2,15 @@
 id: ADR-005
 title: RDF Graph as Event Projection and Read Model
 status: accepted
-features: [FT-002, FT-016, FT-094]
+features:
+- FT-002
+- FT-016
+- FT-094
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:fb7b06971b7611668b84bada227cf970b8db2b136bf9ccb48ef2c71a39b7213c
 ---
 
 **Status:** Accepted

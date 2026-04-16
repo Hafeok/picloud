@@ -2,11 +2,16 @@
 id: ADR-046
 title: Apache Arrow + Parquet + DataFusion for Time-Series Storage
 status: accepted
-features: [FT-009, FT-044, FT-045, FT-049]
+features:
+- FT-009
+- FT-044
+- FT-045
+- FT-049
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:474a4c84616e476e0c9ebbe8e94c62eea44e0b610fc349a3e8456c9f897ec439
 ---
 
 **Status:** Accepted

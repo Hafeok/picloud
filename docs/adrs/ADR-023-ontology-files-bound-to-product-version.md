@@ -2,11 +2,14 @@
 id: ADR-023
 title: Ontology Files Bound to Product Version
 status: accepted
-features: [FT-008, FT-053]
+features:
+- FT-008
+- FT-053
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:031fbd2cc88a1a2697a96ae9f90122818b1f1d008b5f3302b446622f003477e2
 ---
 
 **Status:** Accepted

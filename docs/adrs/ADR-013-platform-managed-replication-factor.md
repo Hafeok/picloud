@@ -2,11 +2,14 @@
 id: ADR-013
 title: Platform-Managed Replication Factor
 status: accepted
-features: [FT-004, FT-018]
+features:
+- FT-004
+- FT-018
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:695e4f3ccd4601b3a2677bba1e2f9941f7c3456200c0b72bd1c53856650965dc
 ---
 
 **Status:** Accepted

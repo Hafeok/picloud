@@ -2,11 +2,14 @@
 id: ADR-031
 title: Event Schema Versioning via Schema IRIs
 status: accepted
-features: [FT-002, FT-079]
+features:
+- FT-002
+- FT-079
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:88a8bb9a56fe926393c3bed8a9ecaeaa17ef5c1bbd95cea49f360f238a222b59
 ---
 
 **Status:** Accepted

@@ -2,11 +2,15 @@
 id: ADR-015
 title: Imperative API with Idempotent Execution
 status: accepted
-features: [FT-001, FT-007, FT-022]
+features:
+- FT-001
+- FT-007
+- FT-022
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:4df0ebd799f40bc3da7ffb4c30bf7c183267ce3037d8f973fa4bee42d9297220
 ---
 
 **Status:** Accepted

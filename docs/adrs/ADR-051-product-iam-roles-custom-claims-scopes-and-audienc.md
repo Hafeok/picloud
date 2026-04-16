@@ -2,11 +2,15 @@
 id: ADR-051
 title: Product IAM — Roles, Custom Claims, Scopes, and Audience
 status: accepted
-features: [FT-003, FT-025, FT-027]
+features:
+- FT-003
+- FT-025
+- FT-027
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:09d6900c84ee75e862ab5ca55ee059e356964d7a33d1992c4537cd0e75329b34
 ---
 
 **Status:** Accepted

@@ -2,11 +2,18 @@
 id: ADR-047
 title: Volume Snapshots and Offsite Backup as Storage Intent Primitives
 status: accepted
-features: [FT-004, FT-033, FT-034, FT-035, FT-036, FT-037]
+features:
+- FT-004
+- FT-033
+- FT-034
+- FT-035
+- FT-036
+- FT-037
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:7cf430cd7aae734f494bc9f17f74ebab87630d9f2fa2120c024406e35767e54a
 ---
 
 **Status:** Accepted

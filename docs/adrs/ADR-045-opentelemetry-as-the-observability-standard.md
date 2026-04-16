@@ -2,11 +2,19 @@
 id: ADR-045
 title: OpenTelemetry as the Observability Standard
 status: accepted
-features: [FT-009, FT-041, FT-042, FT-043, FT-046, FT-047, FT-048]
+features:
+- FT-009
+- FT-041
+- FT-042
+- FT-043
+- FT-046
+- FT-047
+- FT-048
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:497b1dbad94a030797cc73b3a74f5cc6cd0002871bb00fc49e84fa064cbead03
 ---
 
 **Status:** Accepted

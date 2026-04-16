@@ -2,11 +2,13 @@
 id: ADR-029
 title: IRI-Based Resource Addressing
 status: accepted
-features: [FT-001]
+features:
+- FT-001
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:689e2b3b83bde7aa6a45a623660bf58c13974d216ae42ca7b3d14e79f2411bbf
 ---
 
 **Status:** Accepted
