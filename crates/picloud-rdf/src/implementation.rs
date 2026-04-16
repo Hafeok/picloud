@@ -635,26 +635,29 @@ impl OxigraphProjector {
             .as_str()
             .unwrap_or("unknown");
 
-        // Upsert the selfMonitoringStatus triple
         let s = NamedNode::new(node_iri_str)
             .map_err(|e| PiCloudError::Internal(format!("invalid node IRI: {e}")))?;
-        let pred = format!("{PICLOUD_NS}selfMonitoringStatus");
-        let p = NamedNodeRef::new(&pred)
-            .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
-        let old_quads: Vec<Quad> = self
-            .store
-            .quads_for_pattern(
-                Some(SubjectRef::from(&s)),
-                Some(p),
-                None,
-                Some(GraphNameRef::DefaultGraph),
-            )
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
-        for quad in &old_quads {
-            self.store
-                .remove(quad)
+
+        // --- Upsert selfMonitoringStatus ---
+        {
+            let pred = format!("{PICLOUD_NS}selfMonitoringStatus");
+            let p = NamedNodeRef::new(&pred)
+                .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+            let old_quads: Vec<Quad> = self
+                .store
+                .quads_for_pattern(
+                    Some(SubjectRef::from(&s)),
+                    Some(p),
+                    None,
+                    Some(GraphNameRef::DefaultGraph),
+                )
+                .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            for quad in &old_quads {
+                self.store
+                    .remove(quad)
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
         }
 
         self.insert_triple(
@@ -662,6 +665,114 @@ impl OxigraphProjector {
             &format!("{PICLOUD_NS}selfMonitoringStatus"),
             Literal::new_simple_literal(overall_status).into(),
         )?;
+
+        // --- Upsert selfMonitoringCheckedAt timestamp ---
+        {
+            let pred = format!("{PICLOUD_NS}selfMonitoringCheckedAt");
+            let p = NamedNodeRef::new(&pred)
+                .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+            let old_quads: Vec<Quad> = self
+                .store
+                .quads_for_pattern(
+                    Some(SubjectRef::from(&s)),
+                    Some(p),
+                    None,
+                    Some(GraphNameRef::DefaultGraph),
+                )
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            for quad in &old_quads {
+                self.store
+                    .remove(quad)
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
+        }
+
+        self.insert_triple(
+            node_iri_str,
+            &format!("{PICLOUD_NS}selfMonitoringCheckedAt"),
+            Literal::new_typed_literal(
+                event.timestamp.to_rfc3339(),
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#dateTime")
+                    .expect("valid XSD IRI"),
+            )
+            .into(),
+        )?;
+
+        // --- Remove old hasHealthCheck links and check sub-resources ---
+        {
+            let pred = format!("{PICLOUD_NS}hasHealthCheck");
+            let p = NamedNodeRef::new(&pred)
+                .map_err(|e| PiCloudError::Internal(format!("invalid predicate IRI: {e}")))?;
+            let old_links: Vec<Quad> = self
+                .store
+                .quads_for_pattern(
+                    Some(SubjectRef::from(&s)),
+                    Some(p),
+                    None,
+                    Some(GraphNameRef::DefaultGraph),
+                )
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            for quad in &old_links {
+                // Remove all triples about the old check sub-resource
+                if let Term::NamedNode(check_node) = &quad.object {
+                    self.remove_triples_about(check_node.as_str())?;
+                }
+                self.store
+                    .remove(quad)
+                    .map_err(|e| PiCloudError::Internal(e.to_string()))?;
+            }
+        }
+
+        // --- Project individual health checks as sub-resources ---
+        if let Some(checks) = event.payload["checks"].as_array() {
+            for check in checks {
+                let check_name = check["check_name"].as_str().unwrap_or("unknown");
+                let check_status = check["status"].as_str().unwrap_or("unknown");
+                let check_message = check["message"].as_str().unwrap_or("");
+
+                // Build a deterministic IRI for this check: {node_iri}/checks/{check_name}
+                let check_iri = format!("{node_iri_str}/checks/{check_name}");
+
+                // Link node -> check
+                self.insert_triple(
+                    node_iri_str,
+                    &format!("{PICLOUD_NS}hasHealthCheck"),
+                    NamedNode::new(&check_iri)
+                        .map_err(|e| PiCloudError::Internal(format!("invalid check IRI: {e}")))?
+                        .into(),
+                )?;
+
+                // Type the check
+                self.insert_triple(
+                    &check_iri,
+                    RDF_TYPE,
+                    picloud_term("HealthCheck").into(),
+                )?;
+
+                // Check name
+                self.insert_triple(
+                    &check_iri,
+                    &format!("{PICLOUD_NS}checkName"),
+                    Literal::new_simple_literal(check_name).into(),
+                )?;
+
+                // Check status
+                self.insert_triple(
+                    &check_iri,
+                    &format!("{PICLOUD_NS}checkStatus"),
+                    Literal::new_simple_literal(check_status).into(),
+                )?;
+
+                // Check message
+                self.insert_triple(
+                    &check_iri,
+                    &format!("{PICLOUD_NS}checkMessage"),
+                    Literal::new_simple_literal(check_message).into(),
+                )?;
+            }
+        }
 
         debug!(node_iri = node_iri_str, status = overall_status, "projected SelfMonitoringCheckCompleted");
         Ok(())

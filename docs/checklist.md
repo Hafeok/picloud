@@ -745,10 +745,10 @@
 - [x] TC-289: Event log compaction reduces log size while preserving snapshots (scenario) — passing
 - [x] TC-346: Log compaction exit — log size reduced, snapshots preserved (exit-criteria) — passing
 
-### FT-094 — Platform self-monitoring via its own RDF graph [ ]
+### FT-094 — Platform self-monitoring via its own RDF graph [x]
 
-- [ ] TC-290: Platform self-monitoring graph contains node health and workload state (scenario) — unimplemented
-- [ ] TC-347: Self-monitoring exit — platform graph contains health data (exit-criteria) — unimplemented
+- [x] TC-290: Platform self-monitoring graph contains node health and workload state (scenario) — passing
+- [x] TC-347: Self-monitoring exit — platform graph contains health data (exit-criteria) — passing
 
 ### FT-095 — Multi-node Raft voter configuration tuning [ ]
 
