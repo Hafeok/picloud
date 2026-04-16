@@ -1,12 +1,13 @@
 ---
 id: ADR-058
 title: Workload Resource Constraints via cgroup v2
-status: proposed
+status: accepted
 features: []
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:dcfa9c87e229c2f3f66550a2e2877f872f476f28c2fd257954d840123ccf7943
 ---
 
 **Status:** Accepted

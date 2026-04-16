@@ -5,7 +5,7 @@ type: scenario
 status: failing
 validates:
   features:
-  - FT-009
+  - FT-065
   adrs:
   - ADR-056
 phase: 1

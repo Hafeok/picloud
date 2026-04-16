@@ -43,3 +43,6 @@ phi = { min = 0.30, severity = "warning" }
 
 [mcp]
 write = true
+
+[product]
+responsibility="PiCloud is responsible for turning a cluster of Raspberry Pi 5 nodes into a zero-dependency private cloud — where all platform state flows through a Raft-replicated event log, all state reads are SPARQL queries against an RDF knowledge graph, and every resource is a dereferenceable IRI — delivered as a single binary per node with no external infrastructure."

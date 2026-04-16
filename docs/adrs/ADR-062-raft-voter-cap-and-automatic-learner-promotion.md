@@ -1,12 +1,13 @@
 ---
 id: ADR-062
 title: Raft Voter Cap and Automatic Learner Promotion
-status: proposed
+status: accepted
 features: []
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:da793be2e7fe55cd7790e501094fb49ec6de770ff954f9600b944c3b24c1dce1
 ---
 
 **Status:** Accepted

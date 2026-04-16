@@ -1,12 +1,13 @@
 ---
 id: ADR-060
 title: Event Log Compaction with Snapshot-and-Truncate
-status: proposed
+status: accepted
 features: []
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:8a92ada1647260cb5f71d295f29bef7f5743183ccbc56b8980313ba1bff13325
 ---
 
 **Status:** Accepted

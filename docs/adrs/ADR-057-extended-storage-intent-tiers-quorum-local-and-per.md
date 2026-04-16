@@ -1,12 +1,13 @@
 ---
 id: ADR-057
 title: Extended Storage Intent Tiers — Quorum, Local, and Performance Classes
-status: proposed
+status: accepted
 features: []
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:7675b58ffccfcfc6186516c4977c77e58b3062b73e56cf90ec8f1ea4b0821640
 ---
 
 **Status:** Accepted

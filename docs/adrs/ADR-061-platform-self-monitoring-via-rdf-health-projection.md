@@ -1,12 +1,13 @@
 ---
 id: ADR-061
 title: Platform Self-Monitoring via RDF Health Projection
-status: proposed
+status: accepted
 features: []
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:77a7ff2fb5aee22dfbd33eb068bf8399bae1baf7ec3d7b98d5b270557344b9f6
 ---
 
 **Status:** Accepted

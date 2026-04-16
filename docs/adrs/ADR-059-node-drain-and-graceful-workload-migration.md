@@ -1,12 +1,13 @@
 ---
 id: ADR-059
 title: Node Drain and Graceful Workload Migration
-status: proposed
+status: accepted
 features: []
 supersedes: []
 superseded-by: []
 domains: []
 scope: domain
+content-hash: sha256:b39e8f3f99df941e59731da8a204c8544f4a1529c99840333606371c301ce396
 ---
 
 **Status:** Accepted
