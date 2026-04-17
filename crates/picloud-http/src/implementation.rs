@@ -584,6 +584,15 @@ async fn validate_product_audience(
                     && *aud != format!("https://{}", state.cluster_domain.0)
                     && !identity.is_platform_admin()
                 {
+                    // FT-074 / ADR-056: Emit UnauthorisedGraphAccess audit event
+                    // so cross-product reject attempts are visible in the
+                    // platform log.
+                    emit_unauthorised_graph_access(
+                        state,
+                        &identity.identity_iri,
+                        product_name,
+                    )
+                    .await;
                     return Some(Err((
                         StatusCode::FORBIDDEN,
                         Json(serde_json::json!({
@@ -604,6 +613,45 @@ async fn validate_product_audience(
             Json(serde_json::json!({ "error": "invalid_token" })),
         )
             .into_response())),
+    }
+}
+
+/// FT-074 / ADR-056: Append a `UnauthorisedGraphAccess` audit event to the
+/// platform event log whenever a cross-product graph access is rejected at
+/// the HTTP layer. Silently no-ops if the server is running without an event
+/// log (test configurations without event sourcing).
+async fn emit_unauthorised_graph_access(
+    state: &AppState,
+    caller_iri: &ResourceIri,
+    target_product: &str,
+) {
+    let Some(event_log) = state.event_log.as_ref() else {
+        return;
+    };
+    let iri_builder = IriBuilder::new(state.cluster_domain.clone());
+    let target_graph = iri_builder.product_graph(target_product);
+    let schema = iri_builder.event_schema("UnauthorisedGraphAccess", 1);
+    let rejected_at = chrono::Utc::now().to_rfc3339();
+    let payload = serde_json::json!({
+        "caller_iri": caller_iri.as_str(),
+        "target_graph": target_graph.as_str(),
+        "rejected_at": rejected_at,
+    });
+    let envelope = EventEnvelope::new(
+        schema,
+        "UnauthorisedGraphAccess",
+        caller_iri.clone(),
+        Some(target_product.to_string()),
+        Uuid::new_v4(),
+        payload,
+    );
+    if let Err(e) = event_log.append(envelope).await {
+        warn!(
+            error = %e,
+            caller = %caller_iri.as_str(),
+            target = %target_graph.as_str(),
+            "Failed to append UnauthorisedGraphAccess event"
+        );
     }
 }
 
@@ -7665,6 +7713,132 @@ mod tests {
             resp.status() != StatusCode::FORBIDDEN && resp.status() != StatusCode::UNAUTHORIZED,
             "own product graph access must not be rejected (got {})",
             resp.status()
+        );
+    }
+
+    /// TC-201 (ADR-056): Cross-product internal graph access blocked.
+    ///
+    /// Authenticate as a `maps-app` workload identity. Attempt a SPARQL query
+    /// directly against the `photo-app` internal graph. Assert `403 Forbidden`
+    /// with `UnauthorisedGraphAccess` event emitted. Repeat with a
+    /// platform-admin identity — assert the request is allowed (admin
+    /// exemption verified).
+    #[tokio::test]
+    async fn tc201_cross_product_internal_graph_blocked() {
+        use picloud_domain::iri::ResourceIri;
+        use picloud_domain::traits::EventLog;
+        use picloud_events::InMemoryEventLog;
+
+        // Build server with both IAM and an event log so audit events are
+        // captured on reject.
+        let iam = Arc::new(picloud_iam::LocalIdentityProvider::new(
+            b"tc201-signing-key-material",
+            ClusterDomain::default(),
+        ));
+        let event_log: Arc<dyn EventLog> = Arc::new(InMemoryEventLog::new());
+        let mut server = test_server();
+        server.iam = Some(iam.clone() as Arc<dyn picloud_domain::traits::IdentityProvider>);
+        server.event_log = Some(event_log.clone());
+        let app = server.build_router();
+
+        // Target is photo-app's internal named graph.
+        let target_uri =
+            "/products/photo-app/graph?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D";
+        let target_graph = "https://picloud.local/products/photo-app/graph";
+
+        // ---- Part 1: maps-app workload identity → 403 + audit event ----
+        let worker_iri = ResourceIri(
+            "https://picloud.local/products/maps-app/identities/worker".to_string(),
+        );
+        iam.register_identity(worker_iri.clone(), vec!["viewer".to_string()])
+            .await;
+        let worker_token = iam
+            .issue_token_with_audience(
+                &worker_iri,
+                "https://picloud.local/products/maps-app",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .uri(target_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", worker_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "cross-product access from maps-app worker must return 403"
+        );
+
+        // Verify a `UnauthorisedGraphAccess` event has been appended to the
+        // platform log and carries the required audit payload fields.
+        let events = event_log.events_since(0).await;
+        let audit = events
+            .iter()
+            .find(|e| e.event_type == "UnauthorisedGraphAccess")
+            .expect("UnauthorisedGraphAccess event must be emitted on 403");
+        assert_eq!(
+            audit.payload["caller_iri"].as_str().unwrap(),
+            worker_iri.as_str(),
+            "audit event caller_iri must identify the rejected workload"
+        );
+        assert_eq!(
+            audit.payload["target_graph"].as_str().unwrap(),
+            target_graph,
+            "audit event target_graph must point at the blocked graph"
+        );
+        assert!(
+            audit.payload["rejected_at"].is_string(),
+            "audit event must carry a rejected_at timestamp"
+        );
+
+        // ---- Part 2: platform-admin identity → allowed (admin exemption) ----
+        let admin_iri =
+            ResourceIri("https://picloud.local/identities/root-admin".to_string());
+        iam.register_identity(admin_iri.clone(), vec!["platform-admin".to_string()])
+            .await;
+        // Issue the admin token scoped to a *different* product to prove the
+        // admin role — not the audience — is what grants access.
+        let admin_token = iam
+            .issue_token_with_audience(
+                &admin_iri,
+                "https://picloud.local/products/some-other-product",
+                vec!["query".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let events_before = event_log.events_since(0).await.len();
+        let req = Request::builder()
+            .uri(target_uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", admin_token),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert!(
+            resp.status() != StatusCode::FORBIDDEN
+                && resp.status() != StatusCode::UNAUTHORIZED,
+            "platform-admin must be permitted through cross-product graph access (got {})",
+            resp.status()
+        );
+
+        // No new UnauthorisedGraphAccess audit events should have been
+        // emitted for the admin call — an allowed request is not an audit
+        // event.
+        let events_after = event_log.events_since(0).await;
+        assert_eq!(
+            events_after.len(),
+            events_before,
+            "platform-admin cross-product access must not emit UnauthorisedGraphAccess"
         );
     }
 }
