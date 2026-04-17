@@ -564,7 +564,7 @@
 - [x] ADR-029: IRI-Based Resource Addressing (accepted)
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
-### FT-060 — implements field on product — structural SHACL conformance validated at resource apply time [ ]
+### FT-060 — implements field on product — structural SHACL conformance validated at resource apply time [x]
 
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
