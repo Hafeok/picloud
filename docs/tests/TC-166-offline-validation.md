@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "offline-validation"
-last-run: 2026-04-13T20:16:42.071455645+00:00
+last-run: 2026-04-17T15:53:13.142368276+00:00
+last-run-duration: 0.0s
 ---
 
 run `picloud resource validate` on a valid deployment with no cluster connection. Assert exit code 0 and zero errors.

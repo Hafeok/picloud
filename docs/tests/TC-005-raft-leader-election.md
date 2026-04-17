@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "raft-leader-election"
-last-run: 2026-04-13T20:49:54.762542035+00:00
+last-run: 2026-04-17T15:53:25.405693997+00:00
+last-run-duration: 0.0s
 ---
 
 bootstrap a two-node cluster. Assert exactly one node carries `picloud:hasRole picloud:Leader` in the RDF graph within 10 seconds of init.

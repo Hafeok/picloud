@@ -168,7 +168,7 @@
 - [x] TC-222: DNS server failure — fallback to mDNS (chaos) — passing
 - [x] TC-234: Networking model exit criteria — DNS resolution and HTTP IRI dereferencing functional (exit-criteria) — passing
 
-### FT-007 — IaC & CLI Design [x]
+### FT-007 — IaC & CLI Design [~]
 
 - [x] ADR-015: Imperative API with Idempotent Execution (accepted)
 - [x] ADR-042: Tenant Identity — Domain and Cluster ID as Dual Boundary (accepted)
@@ -189,6 +189,7 @@
 - [x] TC-169: overwrite_protection (scenario) — passing
 - [x] TC-170: auto_validation_failure (scenario) — passing
 - [x] TC-235: IaC and CLI exit criteria — resource apply and status round-trip (exit-criteria) — passing
+- [!] TC-353: E2E test harness cleans up products across runs (scenario) — failing
 
 ### FT-012 — Single binary compiles to ARM64 [x]
 
@@ -201,18 +202,20 @@
 - [x] TC-101: composition_root_only (scenario) — passing
 - [x] TC-102: cargo deny (scenario) — passing
 
-### FT-013 — mDNS node discovery [x]
+### FT-013 — mDNS node discovery [~]
 
 - [x] TC-237: mDNS peer discovery finds all LAN nodes within 5 seconds (scenario) — passing
 - [x] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — passing
+- [!] TC-355: Cluster node listing reflects all mDNS-discovered peers (scenario) — failing
 
-### FT-014 — Raft consensus and leader election (openraft) [x]
+### FT-014 — Raft consensus and leader election (openraft) [~]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
 - [x] TC-005: raft_leader_election (scenario) — passing
 - [x] TC-006: raft_leader_failover (scenario) — passing
 - [x] TC-007: raft_learner_join (scenario) — passing
+- [!] TC-355: Cluster node listing reflects all mDNS-discovered peers (scenario) — failing
 
 ### FT-015 — Append-only event log with Raft replication [x]
 
@@ -287,7 +290,7 @@
 - [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
 - [x] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — passing
 
-### FT-009 — Inference, Metrics & Alerts [x]
+### FT-009 — Inference, Metrics & Alerts [~]
 
 - [x] ADR-036: Universal Tagging System (accepted)
 - [x] ADR-037: Groups as IAM Resource with SPARQL CONSTRUCT Membership Rules (accepted)
@@ -302,22 +305,22 @@
 - [x] ADR-054: Test-Augmented ADR Template (accepted)
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
-- [x] TC-107: tag_add_event (scenario) — passing
-- [x] TC-108: tag_rdf_projection (scenario) — passing
+- [!] TC-107: tag_add_event (scenario) — failing
+- [!] TC-108: tag_rdf_projection (scenario) — failing
 - [x] TC-109: tag_remove (scenario) — passing
-- [x] TC-110: tag_sparql_queryable (scenario) — passing
-- [x] TC-111: picloud tag find (scenario) — passing
-- [x] TC-112: group_membership_via_inference (scenario) — passing
-- [x] TC-113: group_membership_removal (scenario) — passing
-- [x] TC-114: circular_group_rejection (scenario) — passing
-- [x] TC-115: group_role_inheritance (scenario) — passing
-- [x] TC-116: inference_rule_lifecycle (scenario) — passing
-- [x] TC-117: inference_retraction (scenario) — passing
-- [x] TC-118: reconciliation_pass (scenario) — passing
-- [x] TC-119: rule_idempotency (scenario) — passing
-- [x] TC-120: rdfs_subclass_inference (scenario) — passing
-- [x] TC-121: owl_transitivity (scenario) — passing
-- [x] TC-122: ontology_deploy_immediate (scenario) — passing
+- [!] TC-110: tag_sparql_queryable (scenario) — failing
+- [!] TC-111: picloud tag find (scenario) — failing
+- [!] TC-112: group_membership_via_inference (scenario) — failing
+- [!] TC-113: group_membership_removal (scenario) — failing
+- [!] TC-114: circular_group_rejection (scenario) — failing
+- [!] TC-115: group_role_inheritance (scenario) — failing
+- [!] TC-116: inference_rule_lifecycle (scenario) — failing
+- [!] TC-117: inference_retraction (scenario) — failing
+- [!] TC-118: reconciliation_pass (scenario) — failing
+- [!] TC-119: rule_idempotency (scenario) — failing
+- [!] TC-120: rdfs_subclass_inference (scenario) — failing
+- [!] TC-121: owl_transitivity (scenario) — failing
+- [!] TC-122: ontology_deploy_immediate (scenario) — failing
 - [x] TC-123: metrics_collection_interval (scenario) — passing
 - [x] TC-124: metrics_rdf_projection (scenario) — passing
 - [x] TC-125: metrics_upsert (scenario) — passing
@@ -328,43 +331,44 @@
 - [x] TC-130: all_builtin_rules (scenario) — passing
 - [x] TC-131: AlertFired (scenario) — passing
 - [x] TC-132: AlertResolved (scenario) — passing
-- [x] TC-136: config_api_lifecycle (scenario) — passing
-- [x] TC-137: config_live_reload (scenario) — passing
-- [x] TC-138: workload_config_override (scenario) — passing
-- [x] TC-139: config_secret_separation (scenario) — passing
-- [x] TC-140: ConfigChanged (scenario) — passing
-- [x] TC-141: flag_version_evaluation (scenario) — passing
-- [x] TC-142: flag_live_update (scenario) — passing
-- [x] TC-143: flag_version_range (scenario) — passing
-- [x] TC-144: flag_in_process_evaluation (scenario) — passing
-- [x] TC-145: FeatureFlagChanged (scenario) — passing
-- [x] TC-146: otlp_trace_ingestion (scenario) — passing
-- [x] TC-147: cli_trace_propagation (scenario) — passing
-- [x] TC-148: otel_does_not_starve_raft (scenario) — passing
-- [x] TC-149: parquet_write_read (scenario) — passing
-- [x] TC-150: retention_enforcement (scenario) — passing
-- [x] TC-151: datafusion_time_range (scenario) — passing
-- [x] TC-152: parquet_portability (scenario) — passing
-- [x] TC-185: adr_test_coverage_completeness (scenario) — passing
-- [x] TC-186: scenario_catalogue_sync (scenario) — passing
-- [x] TC-187: capability_declaration (scenario) — passing
-- [x] TC-188: capability_implements_shacl_validation (scenario) — passing
-- [x] TC-189: capability_consumer_blocked_without_implementor (scenario) — passing
+- [!] TC-136: config_api_lifecycle (scenario) — failing
+- [!] TC-137: config_live_reload (scenario) — failing
+- [!] TC-138: workload_config_override (scenario) — failing
+- [!] TC-139: config_secret_separation (scenario) — failing
+- [!] TC-140: ConfigChanged (scenario) — failing
+- [!] TC-141: flag_version_evaluation (scenario) — failing
+- [!] TC-142: flag_live_update (scenario) — failing
+- [!] TC-143: flag_version_range (scenario) — failing
+- [!] TC-144: flag_in_process_evaluation (scenario) — failing
+- [!] TC-145: FeatureFlagChanged (scenario) — failing
+- [!] TC-146: otlp_trace_ingestion (scenario) — failing
+- [!] TC-147: cli_trace_propagation (scenario) — failing
+- [!] TC-148: otel_does_not_starve_raft (scenario) — failing
+- [!] TC-149: parquet_write_read (scenario) — failing
+- [!] TC-150: retention_enforcement (scenario) — failing
+- [!] TC-151: datafusion_time_range (scenario) — failing
+- [!] TC-152: parquet_portability (scenario) — failing
+- [!] TC-185: adr_test_coverage_completeness (scenario) — failing
+- [!] TC-186: scenario_catalogue_sync (scenario) — failing
+- [!] TC-187: capability_declaration (scenario) — failing
+- [!] TC-188: capability_implements_shacl_validation (scenario) — failing
+- [!] TC-189: capability_consumer_blocked_without_implementor (scenario) — failing
 - [x] TC-190: capability_routing (scenario) — passing
-- [x] TC-191: capability_version_selection (scenario) — passing
-- [x] TC-192: capability_implementor_removed_unfulfilled (scenario) — passing
-- [x] TC-193: capability_deletion_guard (scenario) — passing
-- [x] TC-194: resource apply (scenario) — passing
-- [x] TC-195: CapabilityUnfulfilled (scenario) — passing
-- [x] TC-213: Inference rule assigns user to group on tag change (exit-criteria) — passing
-- [x] TC-214: CPU temperature alert fires and resolves (exit-criteria) — passing
-- [x] TC-215: Product appends to event store and queries RDF projection (exit-criteria) — passing
-- [x] TC-216: Data product declared, projection rebuilt, second product queries it (exit-criteria) — passing
-- [x] TC-217: Capability declared and fulfilled by implementing product (exit-criteria) — passing
+- [!] TC-191: capability_version_selection (scenario) — failing
+- [!] TC-192: capability_implementor_removed_unfulfilled (scenario) — failing
+- [!] TC-193: capability_deletion_guard (scenario) — failing
+- [!] TC-194: resource apply (scenario) — failing
+- [!] TC-195: CapabilityUnfulfilled (scenario) — failing
+- [!] TC-213: Inference rule assigns user to group on tag change (exit-criteria) — failing
+- [!] TC-214: CPU temperature alert fires and resolves (exit-criteria) — failing
+- [!] TC-215: Product appends to event store and queries RDF projection (exit-criteria) — failing
+- [!] TC-216: Data product declared, projection rebuilt, second product queries it (exit-criteria) — failing
+- [!] TC-217: Capability declared and fulfilled by implementing product (exit-criteria) — failing
 
-### FT-024 — Product resource type with versioning [x]
+### FT-024 — Product resource type with versioning [~]
 
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
+- [!] TC-353: E2E test harness cleans up products across runs (scenario) — failing
 
 ### FT-025 — Product-scoped IAM and role assignment [x]
 
@@ -403,10 +407,11 @@
 
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 
-### FT-033 — Volume snapshots — NAS storage, configurable schedule and retention [x]
+### FT-033 — Volume snapshots — NAS storage, configurable schedule and retention [~]
 
 - [x] TC-246: Volume snapshot created on schedule and restorable to new volume (scenario) — passing
 - [x] TC-303: Volume snapshots exit — snapshot created, listed, and restored (exit-criteria) — passing
+- [!] TC-354: Volume snapshot scheduler test passes in full workspace cargo test run (scenario) — failing
 
 ### FT-034 — Offsite backup — S3-compatible, client-side encryption, incremental deduplication [x]
 

@@ -12,6 +12,6 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: alert_fired
-last-run: 2026-04-17T10:11:32.419130054+00:00
-last-run-duration: 0.7s
+last-run: 2026-04-17T15:53:31.817687922+00:00
+last-run-duration: 1.0s
 ---

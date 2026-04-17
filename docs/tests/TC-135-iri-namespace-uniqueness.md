@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "iri-namespace-uniqueness"
-last-run: 2026-04-13T20:16:42.071455645+00:00
+last-run: 2026-04-17T15:53:13.142368276+00:00
+last-run-duration: 0.0s
 ---
 
 assert that every resource IRI in cluster A contains `picloud.local` and no IRI contains `lab.local`, and vice versa.

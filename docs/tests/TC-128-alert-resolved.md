@@ -12,8 +12,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: alert_resolved
-last-run: 2026-04-17T10:11:32.419130054+00:00
-last-run-duration: 0.7s
+last-run: 2026-04-17T15:53:31.817687922+00:00
+last-run-duration: 0.9s
 ---
 
 after `AlertFired`, inject a subsequent `MetricRecorded` event with `cpu_temp_celsius: 65.0` (below threshold). Assert `AlertResolved` event emitted and `picloud:Alert` triple retracted within 30 seconds.

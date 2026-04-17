@@ -12,7 +12,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "partial-failure-reapply"
-last-run: 2026-04-13T20:16:42.071455645+00:00
+last-run: 2026-04-17T15:53:13.142368276+00:00
+last-run-duration: 0.0s
 ---
 
 kill the cluster midway through a `resource apply`. Re-apply after recovery. Assert the final state is correct and no resources are duplicated.

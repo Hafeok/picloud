@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "cross-cluster-join-rejection"
-last-run: 2026-04-13T20:16:42.071455645+00:00
+last-run: 2026-04-17T15:53:13.142368276+00:00
+last-run-duration: 0.0s
 ---
 
 generate an enrollment token from cluster A. Attempt to use it to join cluster B. Assert a `NodeEnrollmentRejected` event in cluster B's log and the node is not added to cluster B's Raft.

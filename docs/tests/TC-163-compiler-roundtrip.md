@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "compiler-roundtrip"
-last-run: 2026-04-13T20:16:42.071455645+00:00
+last-run: 2026-04-17T15:53:13.142368276+00:00
+last-run-duration: 0.0s
 ---
 
 compile a representative set of `.picloud` files covering all resource types. Assert the output is valid Turtle (parseable by an RDF library), passes SHACL validation, and contains zero blank nodes.

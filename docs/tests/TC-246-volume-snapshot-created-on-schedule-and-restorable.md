@@ -3,13 +3,16 @@ id: TC-246
 title: Volume snapshot created on schedule and restorable to new volume
 type: scenario
 status: passing
-runner: cargo-test
-runner-args: "tc246_volume_snapshot_created_on_schedule_and_restorable_to_new_volume"
 validates:
-  features: [FT-033]
-  adrs: [ADR-047]
+  features:
+  - FT-033
+  adrs:
+  - ADR-047
 phase: 2
-last-run: 2026-04-14T08:11:18.098761566+00:00
+runner: cargo-test
+runner-args: tc246_volume_snapshot_created_on_schedule_and_restorable_to_new_volume
+last-run: 2026-04-17T15:53:18.898927832+00:00
+last-run-duration: 0.9s
 ---
 
 ## Description

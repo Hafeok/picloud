@@ -2,7 +2,7 @@
 id: FT-014
 title: Raft consensus and leader election (openraft)
 phase: 1
-status: complete
+status: in-progress
 depends-on: []
 adrs: []
 tests:
@@ -11,6 +11,7 @@ tests:
 - TC-005
 - TC-006
 - TC-007
+- TC-355
 domains: []
 domains-acknowledged: {}
 ---

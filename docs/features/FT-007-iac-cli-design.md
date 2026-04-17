@@ -2,7 +2,7 @@
 id: FT-007
 title: IaC & CLI Design
 phase: 1
-status: complete
+status: in-progress
 depends-on:
 - FT-001
 adrs:
@@ -26,6 +26,7 @@ tests:
 - TC-169
 - TC-170
 - TC-235
+- TC-353
 domains:
 - api
 domains-acknowledged: {}

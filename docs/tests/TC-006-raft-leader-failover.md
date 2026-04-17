@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "raft-leader-failover"
-last-run: 2026-04-13T20:49:54.762542035+00:00
+last-run: 2026-04-17T15:53:25.405693997+00:00
+last-run-duration: 0.0s
 ---
 
 kill the current Raft leader process via SIGKILL. Assert a new leader is elected and the `picloud:Leader` triple updated within 5 seconds. Assert the cluster continues accepting commands.

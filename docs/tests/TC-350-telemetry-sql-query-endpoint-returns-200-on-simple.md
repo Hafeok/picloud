@@ -3,14 +3,16 @@ id: TC-350
 title: Telemetry SQL query endpoint returns 200 on simple parquet read
 type: scenario
 status: passing
-runner: cargo-test
-runner-args: "tc350_telemetry_sql_query_endpoint_returns_200"
 validates:
-  features: [FT-044, FT-045]
+  features:
+  - FT-044
+  - FT-045
   adrs: []
 phase: 4
-last-run: 2026-04-17T14:25:33.709220581+00:00
-last-run-duration: 0.8s
+runner: cargo-test
+runner-args: tc350_telemetry_sql_query_endpoint_returns_200
+last-run: 2026-04-17T15:54:34.988289774+00:00
+last-run-duration: 1.0s
 ---
 
 ## Description

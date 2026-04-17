@@ -10,8 +10,8 @@ validates:
   - ADR-032
 phase: 1
 runner: scripts/run-tc.sh
-runner-args: "event-store-append-read"
-last-run: 2026-04-17T14:18:42.769141632+00:00
+runner-args: event-store-append-read
+last-run: 2026-04-17T15:53:27.871008242+00:00
 last-run-duration: 0.0s
 ---
 
