@@ -751,7 +751,7 @@
 - [x] ADR-029: IRI-Based Resource Addressing (accepted)
 - [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
-### FT-087 — SDK publication — crates.io, npm, NuGet via platform CI [ ]
+### FT-087 — SDK publication — crates.io, npm, NuGet via platform CI [x]
 
 - [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
 - [x] TC-097: sdk_generation (scenario) — passing

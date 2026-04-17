@@ -13,7 +13,7 @@ validates:
 phase: 1
 runner: picloud-test
 runner-args: run --scenario sdk-publish
-last-run: 2026-04-15T17:47:07.682915978+00:00
+last-run: 2026-04-17T10:20:34.879042085+00:00
 last-run-duration: 0.0s
 ---
 
