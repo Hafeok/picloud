@@ -42,3 +42,4 @@ picloud-rdf      = { workspace = true }
 picloud-iam      = { workspace = true }
 picloud-workload = { workspace = true }
 async-trait      = { workspace = true }
+oxigraph         = { workspace = true }

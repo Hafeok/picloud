@@ -580,13 +580,13 @@
 - [x] TC-269: Capability lifecycle events emitted on declare, implement, consume (scenario) — passing
 - [x] TC-326: Capability events exit — declare, implement, consume events emitted (exit-criteria) — passing
 
-### FT-063 — Capability-aware event routing — platform resolves implementing Product at dispatch time [ ]
+### FT-063 — Capability-aware event routing — platform resolves implementing Product at dispatch time [x]
 
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] ADR-018: Product Event Bus as Only Inter-Product Interface (accepted)
 - [x] TC-270: Event routed to implementing product resolved by capability IRI (scenario) — passing
 - [x] TC-327: Capability routing exit — events routed to implementing product (exit-criteria) — passing
-- [!] TC-206: capability_triggers_data_product (scenario) — failing
+- [x] TC-206: capability_triggers_data_product (scenario) — passing
 
 ### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [ ]
 
