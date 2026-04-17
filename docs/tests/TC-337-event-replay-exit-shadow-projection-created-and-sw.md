@@ -11,7 +11,7 @@ validates:
   adrs:
     - ADR-035
 phase: 3
-last-run: 2026-04-15T17:10:57.028211647+00:00
+last-run: 2026-04-17T10:15:56.069363902+00:00
 last-run-duration: 0.7s
 ---
 

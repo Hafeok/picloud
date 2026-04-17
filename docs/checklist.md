@@ -710,7 +710,7 @@
 - [x] ADR-005: RDF Graph as Event Projection and Read Model (accepted)
 - [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
 
-### FT-081 — Event replay — shadow projection, atomic swap, marked replay events [ ]
+### FT-081 — Event replay — shadow projection, atomic swap, marked replay events [x]
 
 - [x] ADR-035: Event Replay as First-Class Platform and Product Capability (accepted)
 - [x] ADR-031: Event Schema Versioning via Schema IRIs (accepted)

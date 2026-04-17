@@ -2,7 +2,7 @@
 id: FT-081
 title: Event replay — shadow projection, atomic swap, marked replay events
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-035
