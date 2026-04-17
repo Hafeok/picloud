@@ -717,7 +717,7 @@
 - [x] TC-280: Event replay creates shadow projection and swaps atomically (scenario) — passing
 - [x] TC-337: Event replay exit — shadow projection created and swapped atomically (exit-criteria) — passing
 
-### FT-082 — Aggregate-scoped replay (single and batch up to 1000) [ ]
+### FT-082 — Aggregate-scoped replay (single and batch up to 1000) [x]
 
 - [x] ADR-035: Event Replay as First-Class Platform and Product Capability (accepted)
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
