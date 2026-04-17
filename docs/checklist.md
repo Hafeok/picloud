@@ -552,7 +552,7 @@
 - [x] ADR-006: Oxigraph as Embedded Triplestore (accepted)
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
-### FT-058 — Group membership rules via inference engine [ ]
+### FT-058 — Group membership rules via inference engine [x]
 
 - [x] ADR-037: Groups as IAM Resource with SPARQL CONSTRUCT Membership Rules (accepted)
 - [x] ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources (accepted)
