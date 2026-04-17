@@ -9,8 +9,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: "tc287_workload_cpu_and_memory_limits_enforced_by_container_runtime"
-last-run: 2026-04-15T18:19:30.788440518+00:00
-last-run-duration: 0.7s
+last-run: 2026-04-17T10:23:25.835433151+00:00
+last-run-duration: 2.3s
 ---
 
 ## Description

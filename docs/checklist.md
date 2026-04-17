@@ -789,7 +789,7 @@
 - [x] TC-286: Storage intent tier quorum replicates to majority of nodes (scenario) — passing
 - [x] TC-343: Storage tiers exit — quorum tier replicates to majority (exit-criteria) — passing
 
-### FT-091 — Workload resource constraints (CPU/memory limits) [ ]
+### FT-091 — Workload resource constraints (CPU/memory limits) [x]
 
 - [x] ADR-058: Workload Resource Constraints via cgroup v2 (accepted)
 - [x] ADR-010: OCI Containers and Raw Binaries as Workload Primitives (accepted)

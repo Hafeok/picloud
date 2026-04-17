@@ -9,8 +9,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: "tc344_resource_limits_exit_cpu_and_memory_limits_enforced"
-last-run: 2026-04-15T18:19:30.788440518+00:00
-last-run-duration: 0.7s
+last-run: 2026-04-17T10:23:25.835433151+00:00
+last-run-duration: 2.0s
 ---
 
 ## Description
