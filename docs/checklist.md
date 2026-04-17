@@ -519,7 +519,7 @@
 - [x] TC-265: SPARQL endpoint rejects unauthenticated and unauthorized requests (scenario) — passing
 - [x] TC-322: SPARQL auth exit — unauthenticated requests rejected with 401 (exit-criteria) — passing
 
-### FT-053 — Ontology resource type — .ttl and .shacl files bound to Product version [ ]
+### FT-053 — Ontology resource type — .ttl and .shacl files bound to Product version [x]
 
 - [x] ADR-023: Ontology Files Bound to Product Version (accepted)
 - [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
