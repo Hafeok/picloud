@@ -12,8 +12,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "idempotent-apply"
-last-run: 2026-04-17T19:13:00.299404881+00:00
-last-run-duration: 0.1s
+last-run: 2026-04-17T19:13:15.469353382+00:00
+last-run-duration: 0.0s
 ---
 
 apply the same resource file twice in succession. Assert the second apply produces zero new events in the event log (idempotency key deduplicated).
