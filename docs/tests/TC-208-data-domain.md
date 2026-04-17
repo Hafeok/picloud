@@ -2,7 +2,7 @@
 id: TC-208
 title: data-domain
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-065
@@ -11,9 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: data_domain_declaration
-last-run: 2026-04-15T14:29:59.558362753+00:00
-failure-message: No matching test function found (0 tests ran)
-last-run-duration: 0.5s
+last-run: 2026-04-17T09:03:38.439227156+00:00
+last-run-duration: 0.7s
 ---
 
 Declare a `data-domain` resource with steward, sensitivity, and description fields. Assert the domain appears in the cluster RDF graph with correct triples. Assert it has a dereferenceable IRI. Assert a second `data-domain` with the same name is rejected as a duplicate. Assert the domain cannot be deleted while a data product is assigned to it.

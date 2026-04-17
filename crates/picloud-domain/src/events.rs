@@ -1339,6 +1339,9 @@ pub struct DataDomainDeclaredPayload {
     pub name: String,
     pub steward: String,
     pub sensitivity: String,
+    /// Human-readable description of the domain's purpose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Payload for DataDomainUpdated event (ADR-056, FT-071).

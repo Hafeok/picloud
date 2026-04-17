@@ -11,8 +11,8 @@ validates:
 phase: 3
 runner: cargo-test
 runner-args: tc272_data_domain_created_as_cluster_scoped_governance_boundary
-last-run: 2026-04-15T14:29:59.558362753+00:00
-last-run-duration: 0.5s
+last-run: 2026-04-17T09:03:38.439227156+00:00
+last-run-duration: 0.7s
 ---
 
 ## Description

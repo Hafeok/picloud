@@ -414,6 +414,88 @@ impl OxigraphProjector {
         }
     }
 
+    // ---- Governance invariant checks (ADR-056, FT-065) ----
+
+    /// Count the number of data products that belong to a given data domain.
+    ///
+    /// A data product is a member of a domain when its `pc:belongsToDomain`
+    /// triple points to the domain's cluster-scoped IRI.
+    pub fn count_data_domain_members(&self, domain_name: &str) -> Result<usize> {
+        let cluster_root = self.iri_builder.cluster_root();
+        let domain_iri = format!(
+            "{}/data-domains/{domain_name}",
+            cluster_root.as_str().trim_end_matches('/')
+        );
+        let query = format!(
+            "SELECT (COUNT(?dp) AS ?count) WHERE {{ \
+             ?dp <{PICLOUD_NS}belongsToDomain> <{domain_iri}> . \
+             }}"
+        );
+        let result = self.execute_query(&query)?;
+        let count = result
+            .bindings
+            .first()
+            .and_then(|b| b.get("count"))
+            .and_then(|c| c.get("value"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        Ok(count)
+    }
+
+    /// Return `true` if a data domain with this name already exists.
+    ///
+    /// Data domain names are cluster-unique — a second declaration with the
+    /// same name must be rejected as a duplicate (ADR-056, FT-065, TC-208).
+    pub fn data_domain_exists(&self, domain_name: &str) -> Result<bool> {
+        let cluster_root = self.iri_builder.cluster_root();
+        let domain_iri = format!(
+            "{}/data-domains/{domain_name}",
+            cluster_root.as_str().trim_end_matches('/')
+        );
+        let query = format!(
+            "ASK {{ <{domain_iri}> <{RDF_TYPE}> <{PICLOUD_NS}DataDomain> }}"
+        );
+        let result = self.execute_query(&query)?;
+        Ok(result
+            .bindings
+            .first()
+            .and_then(|b| b.get("result"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// Validate that a data domain can be deleted.
+    ///
+    /// Per ADR-056, a data domain cannot be deleted while any data product is
+    /// assigned to it. Returns `DataDomainDeletionBlocked` with the member
+    /// count if any data products still reference the domain.
+    pub fn validate_data_domain_deletion(&self, domain_name: &str) -> Result<()> {
+        let members = self.count_data_domain_members(domain_name)?;
+        if members > 0 {
+            return Err(PiCloudError::DataDomainDeletionBlocked {
+                domain: domain_name.to_string(),
+                members,
+            });
+        }
+        Ok(())
+    }
+
+    /// Validate that a data domain declaration is unique (cluster-scoped).
+    ///
+    /// Returns an error if a data domain with this name already exists.
+    pub fn validate_data_domain_unique(&self, domain_name: &str) -> Result<()> {
+        if self.data_domain_exists(domain_name)? {
+            return Err(PiCloudError::ResourceAlreadyExists {
+                iri: format!(
+                    "{}/data-domains/{domain_name}",
+                    self.iri_builder.cluster_root().as_str().trim_end_matches('/')
+                ),
+            });
+        }
+        Ok(())
+    }
+
     // ---- Event projection handlers ----
 
     fn project_node_joined(&self, event: &EventEnvelope) -> Result<()> {
@@ -3141,6 +3223,17 @@ impl OxigraphProjector {
         self.insert_triple(domain_iri, &format!("{PICLOUD_NS}sensitivity"), Literal::new_simple_literal(sensitivity).into())?;
         self.insert_triple(domain_iri, &format!("{PICLOUD_NS}status"), Literal::new_simple_literal("declared").into())?;
 
+        // Optional human-readable description (ADR-056, FT-065).
+        if let Some(description) = event.payload["description"].as_str() {
+            if !description.is_empty() {
+                self.insert_triple(
+                    domain_iri,
+                    &format!("{PICLOUD_NS}description"),
+                    Literal::new_simple_literal(description).into(),
+                )?;
+            }
+        }
+
         debug!(domain = name, "projected DataDomainDeclared");
         Ok(())
     }
@@ -3166,6 +3259,18 @@ impl OxigraphProjector {
             &format!("{PICLOUD_NS}sensitivity"),
             Literal::new_simple_literal(sensitivity).into(),
         )?;
+
+        // Replace description only when a new value is provided.
+        if let Some(description) = event.payload["description"].as_str() {
+            self.remove_triple(domain_iri, &format!("{PICLOUD_NS}description"))?;
+            if !description.is_empty() {
+                self.insert_triple(
+                    domain_iri,
+                    &format!("{PICLOUD_NS}description"),
+                    Literal::new_simple_literal(description).into(),
+                )?;
+            }
+        }
 
         debug!(domain_iri = domain_iri, steward = steward, sensitivity = sensitivity, "projected DataDomainUpdated");
         Ok(())

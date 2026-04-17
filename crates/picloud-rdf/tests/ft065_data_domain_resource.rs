@@ -62,6 +62,51 @@ fn make_data_domain_declared(
     )
 }
 
+fn make_data_domain_declared_with_description(
+    name: &str,
+    steward: &str,
+    sensitivity: &str,
+    description: &str,
+) -> EventEnvelope {
+    let ib = iri_builder();
+    let domain_iri = ib.cluster_resource("data-domains", name);
+    make_event(
+        "DataDomainDeclared",
+        None,
+        serde_json::json!({
+            "domain_iri": domain_iri.as_str(),
+            "name": name,
+            "steward": steward,
+            "sensitivity": sensitivity,
+            "description": description,
+        }),
+    )
+}
+
+fn make_data_product_declared(
+    name: &str,
+    product: &str,
+    domain: &str,
+    version: &str,
+) -> EventEnvelope {
+    let ib = iri_builder();
+    let dp_iri = format!(
+        "{}/data-products/{name}",
+        ib.product(product).as_str().trim_end_matches('/')
+    );
+    make_event(
+        "DataProductDeclared",
+        Some(product),
+        serde_json::json!({
+            "data_product_iri": dp_iri,
+            "name": name,
+            "product": product,
+            "domain": domain,
+            "version": version,
+        }),
+    )
+}
+
 fn make_data_domain_deleted(name: &str) -> EventEnvelope {
     let ib = iri_builder();
     let domain_iri = ib.cluster_resource("data-domains", name);
@@ -406,4 +451,234 @@ async fn tc329_data_domain_exit_cluster_scoped_governance_boundary_created() {
             "all newly created data domains should have 'declared' status"
         );
     }
+}
+
+// ============================================================================
+// TC-196 / TC-208 — data_domain_declaration (scenario + full lifecycle)
+// ============================================================================
+/// Scenario: declare a `data-domain` resource with steward, sensitivity, and
+/// description fields. Verify:
+///   TC-196:
+///   - `DataDomainDeclared` event projects all governance triples
+///   - `pc:steward`, `pc:sensitivity`, `pc:description` triples are present
+///   TC-208 (end-to-end lifecycle):
+///   - Domain has a dereferenceable cluster-scoped IRI
+///   - A second declaration with the same name is rejected as a duplicate
+///   - The domain cannot be deleted while a data product is assigned
+#[tokio::test]
+async fn data_domain_declaration() {
+    let ib = iri_builder();
+    let projector = OxigraphProjector::new().unwrap();
+
+    // --- TC-196: Declare a data-domain with description ---
+    let declared = make_data_domain_declared_with_description(
+        "geospatial",
+        "https://picloud.local/platform/identities/alice",
+        "internal",
+        "All location and mapping data products across the cluster",
+    );
+    projector.project(&declared).await.unwrap();
+
+    let domain_iri = ib.cluster_resource("data-domains", "geospatial");
+
+    // Verify the domain exists as a pc:DataDomain
+    let ask_type = format!(
+        "ASK {{ <{}> <{RDF_TYPE}> <{PICLOUD_NS}DataDomain> }}",
+        domain_iri.as_str()
+    );
+    let result = projector.query(&ask_type).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], true,
+        "geospatial should exist as a pc:DataDomain"
+    );
+
+    // Verify pc:steward triple
+    let ask_steward = format!(
+        "ASK {{ <{}> <{PICLOUD_NS}steward> \"https://picloud.local/platform/identities/alice\" }}",
+        domain_iri.as_str()
+    );
+    let result = projector.query(&ask_steward).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], true,
+        "data domain should have pc:steward triple"
+    );
+
+    // Verify pc:sensitivity triple
+    let ask_sensitivity = format!(
+        "ASK {{ <{}> <{PICLOUD_NS}sensitivity> \"internal\" }}",
+        domain_iri.as_str()
+    );
+    let result = projector.query(&ask_sensitivity).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], true,
+        "data domain should have pc:sensitivity triple"
+    );
+
+    // Verify pc:description triple (TC-196 requirement)
+    let ask_description = format!(
+        "ASK {{ <{}> <{PICLOUD_NS}description> \"All location and mapping data products across the cluster\" }}",
+        domain_iri.as_str()
+    );
+    let result = projector.query(&ask_description).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], true,
+        "data domain should have pc:description triple"
+    );
+
+    // --- TC-208: Dereferenceable cluster-scoped IRI ---
+    assert!(
+        domain_iri
+            .as_str()
+            .starts_with("https://picloud.local/data-domains/"),
+        "data domain IRI must be dereferenceable under /data-domains/"
+    );
+    assert_eq!(
+        domain_iri.as_str(),
+        "https://picloud.local/data-domains/geospatial",
+        "data domain IRI must match cluster-scoped pattern"
+    );
+    assert!(
+        !domain_iri.as_str().contains("/products/"),
+        "data domain IRI must not be product-scoped"
+    );
+
+    // --- TC-208: Duplicate declaration with the same name is rejected ---
+    // The uniqueness guard returns ResourceAlreadyExists before the duplicate
+    // projection is applied. Names are cluster-unique (ADR-056).
+    assert!(
+        projector.data_domain_exists("geospatial").unwrap(),
+        "geospatial domain should be discoverable after declaration"
+    );
+    let duplicate_check = projector.validate_data_domain_unique("geospatial");
+    assert!(
+        duplicate_check.is_err(),
+        "a second data-domain with the same name must be rejected as a duplicate"
+    );
+    let err = duplicate_check.unwrap_err();
+    let err_msg = format!("{err}");
+    assert!(
+        err_msg.contains("already exists")
+            || err_msg.contains("data-domains/geospatial"),
+        "duplicate rejection error should mention existing resource: {err_msg}"
+    );
+
+    // A brand-new name must still validate as unique.
+    assert!(
+        projector.validate_data_domain_unique("finance").is_ok(),
+        "a different name should pass the uniqueness check"
+    );
+
+    // --- TC-208: Deletion guard — cannot delete while data product assigned ---
+    // Declare a data product that belongs to 'geospatial'.
+    let dp_event = make_data_product_declared(
+        "photo-locations",
+        "photo-app",
+        "geospatial",
+        "1.0.0",
+    );
+    projector.project(&dp_event).await.unwrap();
+
+    // Sanity: the data product exists and is linked to geospatial.
+    let member_count = projector
+        .count_data_domain_members("geospatial")
+        .unwrap();
+    assert_eq!(
+        member_count, 1,
+        "photo-locations should be a member of the geospatial domain"
+    );
+
+    // Attempt to delete the domain — must be rejected with a member count error.
+    let guard_result = projector.validate_data_domain_deletion("geospatial");
+    assert!(
+        guard_result.is_err(),
+        "data-domain deletion must be rejected while a data product is assigned"
+    );
+    let guard_err = format!("{}", guard_result.unwrap_err());
+    assert!(
+        guard_err.contains("1")
+            && (guard_err.contains("data product") || guard_err.contains("assigned")),
+        "deletion guard should report the member count: {guard_err}"
+    );
+}
+
+// ============================================================================
+// TC-205 — data_domain_deletion_guard
+// ============================================================================
+/// Attempt to delete `data-domain 'geospatial'` while
+/// `photo-app/photo-locations` is assigned to it. Assert the delete is
+/// rejected with a member count error (`DataDomainDeletionBlocked`).
+#[tokio::test]
+async fn data_domain_deletion_guard() {
+    let projector = OxigraphProjector::new().unwrap();
+
+    // --- Setup: declare the domain and an assigned data product ---
+    let domain = make_data_domain_declared(
+        "geospatial",
+        "https://picloud.local/platform/identities/alice",
+        "internal",
+    );
+    projector.project(&domain).await.unwrap();
+
+    let dp = make_data_product_declared(
+        "photo-locations",
+        "photo-app",
+        "geospatial",
+        "1.0.0",
+    );
+    projector.project(&dp).await.unwrap();
+
+    // --- Pre-check: domain has exactly one member ---
+    let members = projector.count_data_domain_members("geospatial").unwrap();
+    assert_eq!(
+        members, 1,
+        "geospatial should have photo-locations assigned to it"
+    );
+
+    // --- Attempt deletion — must be rejected with a member count error ---
+    let result = projector.validate_data_domain_deletion("geospatial");
+    assert!(
+        result.is_err(),
+        "delete must be rejected while data products are assigned"
+    );
+
+    // The error should be the typed DataDomainDeletionBlocked variant.
+    match result.unwrap_err() {
+        picloud_domain::error::PiCloudError::DataDomainDeletionBlocked { domain, members } => {
+            assert_eq!(domain, "geospatial", "blocked error names the domain");
+            assert_eq!(members, 1, "blocked error reports the member count");
+        }
+        other => panic!(
+            "expected DataDomainDeletionBlocked, got: {other:?}"
+        ),
+    }
+
+    // --- Remove the data product, then deletion is allowed ---
+    let dp_iri = {
+        let ib = iri_builder();
+        format!(
+            "{}/data-products/photo-locations",
+            ib.product("photo-app").as_str().trim_end_matches('/')
+        )
+    };
+    let dp_delete = make_event(
+        "DataProductDeleted",
+        Some("photo-app"),
+        serde_json::json!({
+            "data_product_iri": dp_iri,
+            "name": "photo-locations",
+            "product": "photo-app",
+        }),
+    );
+    projector.project(&dp_delete).await.unwrap();
+
+    let remaining = projector.count_data_domain_members("geospatial").unwrap();
+    assert_eq!(
+        remaining, 0,
+        "after removing the data product, domain has no members"
+    );
+
+    // Now the domain can be deleted without the guard complaining.
+    projector
+        .validate_data_domain_deletion("geospatial")
+        .expect("deletion guard should pass once the domain has no members");
 }
