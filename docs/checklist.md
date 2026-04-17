@@ -533,7 +533,7 @@
 - [x] TC-267: RDFS/OWL inference derives transitive triples in product graph (scenario) — passing
 - [x] TC-324: Inference exit — RDFS/OWL transitive triples derived (exit-criteria) — passing
 
-### FT-055 — Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources [ ]
+### FT-055 — Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources [x]
 
 - [x] ADR-036: Universal Tagging System (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
