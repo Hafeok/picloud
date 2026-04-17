@@ -2,7 +2,7 @@
 id: FT-056
 title: group resource type — roles assignable to groups, users inherit
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-037

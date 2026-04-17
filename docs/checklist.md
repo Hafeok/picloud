@@ -539,7 +539,7 @@
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
-### FT-056 — group resource type — roles assignable to groups, users inherit [ ]
+### FT-056 — group resource type — roles assignable to groups, users inherit [x]
 
 - [x] ADR-037: Groups as IAM Resource with SPARQL CONSTRUCT Membership Rules (accepted)
 - [x] ADR-009: Standalone IAM — Users and Workload Identities (accepted)
