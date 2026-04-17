@@ -11,8 +11,8 @@ validates:
 phase: 3
 runner: cargo-test
 runner-args: "tc273_freshness_monitor_emits_data_product_stale_when_max_age_exceeded"
-last-run: 2026-04-15T14:41:42.335607333+00:00
-last-run-duration: 0.5s
+last-run: 2026-04-17T09:45:15.220777365+00:00
+last-run-duration: 1.2s
 ---
 
 ## Description

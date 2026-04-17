@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use oxigraph::model::{GraphNameRef, NamedNode, NamedNodeRef, Quad, QuadRef};
+use oxigraph::model::{NamedNode, NamedNodeRef, QuadRef};
 use oxigraph::sparql::QueryResults;
-use oxigraph::store::Store;
+use oxigraph::store::{StorageError, Store};
 use tracing::info;
 
 use picloud_domain::error::{PiCloudError, Result};
@@ -40,23 +40,6 @@ impl OxigraphDataProductProjector {
     /// Convention: `<data_product_iri>/graph`
     fn data_product_graph(data_product_iri: &ResourceIri) -> String {
         format!("{}/graph", data_product_iri.as_str())
-    }
-
-    /// Remove all triples in a named graph.
-    fn clear_graph(&self, graph_iri: &str) -> Result<()> {
-        let g = NamedNode::new(graph_iri)
-            .map_err(|e| PiCloudError::Internal(format!("invalid graph IRI: {e}")))?;
-        let quads: Vec<Quad> = self
-            .store
-            .quads_for_pattern(None, None, None, Some(GraphNameRef::from(&g)))
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| PiCloudError::Internal(e.to_string()))?;
-        for quad in &quads {
-            self.store
-                .remove(quad)
-                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
-        }
-        Ok(())
     }
 
     /// Execute a SPARQL SELECT/ASK and convert results to JSON bindings.
@@ -107,9 +90,11 @@ impl DataProductProjector for OxigraphDataProductProjector {
         let start = Instant::now();
         let dp_graph = Self::data_product_graph(data_product_iri);
 
-        // Execute the CONSTRUCT query against the store.
+        // --- Step 1: Execute the CONSTRUCT into an in-memory triple list ---
         // The CONSTRUCT query itself should reference the source graph
         // (e.g. via GRAPH <source_graph_iri> { ... }) in its body.
+        // Reading is an immutable operation and completes independently of
+        // the atomic swap that follows.
         let results = self
             .store
             .query(construct_query)
@@ -119,8 +104,9 @@ impl DataProductProjector for OxigraphDataProductProjector {
             QueryResults::Graph(graph) => {
                 let mut collected = Vec::new();
                 for triple in graph {
-                    let triple = triple
-                        .map_err(|e| PiCloudError::Internal(format!("CONSTRUCT result error: {e}")))?;
+                    let triple = triple.map_err(|e| {
+                        PiCloudError::Internal(format!("CONSTRUCT result error: {e}"))
+                    })?;
                     collected.push(triple);
                 }
                 collected
@@ -134,10 +120,7 @@ impl DataProductProjector for OxigraphDataProductProjector {
 
         let triple_count = triples.len() as u64;
 
-        // Atomically swap: clear old graph, insert new triples.
-        self.clear_graph(&dp_graph)?;
-
-        // Ensure the named graph exists.
+        // Ensure the named graph exists before the transaction opens.
         self.store
             .insert_named_graph(
                 NamedNodeRef::new(&dp_graph)
@@ -145,26 +128,41 @@ impl DataProductProjector for OxigraphDataProductProjector {
             )
             .map_err(|e| PiCloudError::Internal(e.to_string()))?;
 
-        let g = NamedNode::new(&dp_graph)
+        // --- Step 2: Atomic swap via an Oxigraph transaction ---
+        // Oxigraph transactions provide "repeatable read" isolation: no
+        // concurrent SPARQL query ever observes a partial state (some old
+        // triples mixed with some new triples). During the transaction
+        // in-flight reads complete against the old graph; after commit
+        // new reads see the new graph. (TC-200: atomic swap.)
+        let dp_graph_node = NamedNode::new(&dp_graph)
             .map_err(|e| PiCloudError::Internal(format!("invalid graph IRI: {e}")))?;
+        self.store
+            .transaction::<_, StorageError>(|mut t| {
+                // 1. Clear the live graph inside the transaction — readers
+                //    outside the transaction still see the old triples until
+                //    commit.
+                t.clear_graph(NamedNodeRef::from(&dp_graph_node))?;
 
-        for triple in &triples {
-            self.store
-                .insert(QuadRef::new(
-                    &triple.subject,
-                    &triple.predicate,
-                    &triple.object,
-                    &g,
-                ))
-                .map_err(|e| PiCloudError::Internal(e.to_string()))?;
-        }
+                // 2. Insert the new CONSTRUCT result triples into the live graph.
+                for triple in &triples {
+                    t.insert(QuadRef::new(
+                        &triple.subject,
+                        &triple.predicate,
+                        &triple.object,
+                        &dp_graph_node,
+                    ))?;
+                }
+
+                Ok(())
+            })
+            .map_err(|e| PiCloudError::Internal(format!("atomic swap failed: {e}")))?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
         info!(
             data_product = %data_product_iri.as_str(),
             triple_count,
             duration_ms,
-            "Data product projection refreshed"
+            "Data product projection refreshed (atomic swap)"
         );
 
         Ok(DataProductRefreshResult {

@@ -11,8 +11,8 @@ validates:
 phase: 3
 runner: cargo-test
 runner-args: "tc330_freshness_exit_data_product_stale_emitted_when_max_age_breached"
-last-run: 2026-04-15T14:41:42.335607333+00:00
-last-run-duration: 0.6s
+last-run: 2026-04-17T09:45:15.220777365+00:00
+last-run-duration: 1.0s
 ---
 
 ## Description

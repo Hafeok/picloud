@@ -3532,6 +3532,56 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    /// Project a `DataProductSLOBreached` event into the RDF graph.
+    ///
+    /// Surfaces the breach to SPARQL consumers (TC-207, FT-068) by writing
+    /// `pc:freshnessStatus "breached"` on the data product, replacing any
+    /// prior freshness status triple.
+    fn project_data_product_slo_breached(&self, event: &EventEnvelope) -> Result<()> {
+        let dp_iri = event.payload["data_product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let freshness_pred = format!("{PICLOUD_NS}freshnessStatus");
+        // Replace any prior freshnessStatus value so only the current state remains.
+        self.remove_triple(dp_iri, &freshness_pred)?;
+        self.insert_triple(
+            dp_iri,
+            &freshness_pred,
+            Literal::new_simple_literal("breached").into(),
+        )?;
+        if let Some(max_age) = event.payload["max_age"].as_str() {
+            // Keep maxAge in sync so consumers can observe both the SLO and the breach.
+            let max_age_pred = format!("{PICLOUD_NS}maxAge");
+            self.remove_triple(dp_iri, &max_age_pred)?;
+            self.insert_triple(
+                dp_iri,
+                &max_age_pred,
+                Literal::new_simple_literal(max_age).into(),
+            )?;
+        }
+        debug!(data_product = dp_iri, "projected DataProductSLOBreached");
+        Ok(())
+    }
+
+    /// Project a `DataProductSLORestored` event into the RDF graph.
+    ///
+    /// Replaces the prior `pc:freshnessStatus "breached"` with `"fresh"` so
+    /// consumers can observe the restoration (TC-203, FT-068).
+    fn project_data_product_slo_restored(&self, event: &EventEnvelope) -> Result<()> {
+        let dp_iri = event.payload["data_product_iri"]
+            .as_str()
+            .unwrap_or(event.source.as_str());
+        let freshness_pred = format!("{PICLOUD_NS}freshnessStatus");
+        self.remove_triple(dp_iri, &freshness_pred)?;
+        self.insert_triple(
+            dp_iri,
+            &freshness_pred,
+            Literal::new_simple_literal("fresh").into(),
+        )?;
+        debug!(data_product = dp_iri, "projected DataProductSLORestored");
+        Ok(())
+    }
+
     // ---- RDFS Inference (ADR-039) ----
 
     /// Materialise RDFS subclass inference.
@@ -4223,7 +4273,9 @@ impl StateProjector for OxigraphProjector {
             "DataProductUpdated" => self.project_data_product_updated(event),
             "DataProductRefreshed" => self.project_data_product_refreshed(event),
             "DataProductDeleted" => self.project_data_product_deleted(event),
-            "DataProductReady" | "DataProductSLOBreached" | "DataProductSLORestored" => {
+            "DataProductSLOBreached" => self.project_data_product_slo_breached(event),
+            "DataProductSLORestored" => self.project_data_product_slo_restored(event),
+            "DataProductReady" => {
                 debug!(event_type = %event.event_type, "data product lifecycle event — recorded");
                 Ok(())
             }

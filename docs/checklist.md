@@ -611,20 +611,20 @@
 - [x] TC-199: data_product_named_graph_separation (scenario) — passing
 - [x] TC-204: data_product_deletion_guard (scenario) — passing
 
-### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [ ]
+### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
-- [!] TC-198: data_product_projection_on_trigger (scenario) — failing
-- [!] TC-200: data_product_atomic_swap (scenario) — failing
+- [x] TC-198: data_product_projection_on_trigger (scenario) — passing
+- [x] TC-200: data_product_atomic_swap (scenario) — passing
 
-### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [ ]
+### FT-068 — Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-273: Freshness monitor emits DataProductStale when maxAge exceeded (scenario) — passing
 - [x] TC-330: Freshness exit — DataProductStale emitted when maxAge breached (exit-criteria) — passing
-- [!] TC-203: data_product_slo_breach_and_restore (scenario) — failing
-- [!] TC-207: DataProductSLOBreached (scenario) — failing
+- [x] TC-203: data_product_slo_breach_and_restore (scenario) — passing
+- [x] TC-207: DataProductSLOBreached (scenario) — passing
 
 ### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [ ]
 

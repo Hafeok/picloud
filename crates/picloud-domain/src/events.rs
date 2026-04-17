@@ -213,6 +213,7 @@ pub enum PlatformEvent {
     DataProductSLOBreached(DataProductSLOBreachedPayload),
     DataProductSLORestored(DataProductSLORestoredPayload),
     DataProductDeleted(DataProductDeletedPayload),
+    DataProductProjectionFailed(DataProductProjectionFailedPayload),
 
     // --- Ontology events (ADR-023, FT-053) ---
     OntologyLoaded(OntologyLoadedPayload),
@@ -1449,6 +1450,22 @@ pub struct DataProductDeletedPayload {
     pub data_product_iri: ResourceIri,
     pub name: String,
     pub product: String,
+}
+
+/// Payload for DataProductProjectionFailed event (ADR-056, FT-067).
+/// Emitted by the projection runner when a SPARQL CONSTRUCT fails
+/// (timeout, Oxigraph error, malformed query). The live data product
+/// graph is left unchanged; the freshness monitor (FT-068) will
+/// eventually detect the resulting staleness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataProductProjectionFailedPayload {
+    pub data_product_iri: ResourceIri,
+    /// Event type that triggered the attempted projection.
+    pub trigger_event: String,
+    /// Description of the failure (e.g. SPARQL parser error, timeout).
+    pub reason: String,
+    /// Time at which the failure was observed.
+    pub failed_at: DateTime<Utc>,
 }
 
 // --- Ontology payloads (ADR-023, FT-053) ---

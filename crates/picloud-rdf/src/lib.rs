@@ -14,8 +14,12 @@
 
 pub mod data_product;
 pub mod implementation;
+pub mod projection_runner;
 pub mod rdf_store;
 
 pub use data_product::OxigraphDataProductProjector;
 pub use implementation::OxigraphProjector;
+pub use projection_runner::{
+    DataProductProjectionRunner, DataProductRegistration, ProjectionOutcome,
+};
 pub use rdf_store::OxigraphRdfStoreManager;

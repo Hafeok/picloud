@@ -280,3 +280,173 @@ async fn tc330_freshness_exit_data_product_stale_emitted_when_max_age_breached()
         "after restore, no further actions expected"
     );
 }
+
+// ============================================================================
+// TC-203 / TC-207 — data_product_slo_breach_and_restore
+// ============================================================================
+/// Combined scenario validating the full breach/restore cycle driven through
+/// the freshness monitor *and* projected into the cluster RDF graph.
+///
+/// Covers:
+///   * TC-203 — data_product_slo_breach_and_restore (scenario)
+///   * TC-207 — DataProductSLOBreached (scenario)
+///
+/// Steps:
+///   1. Declare a data product with `maxAge: PT2M`.
+///   2. Simulate missing trigger events — project a stale `DataProductRefreshed`
+///      timestamp that is older than the SLO allows.
+///   3. Run the freshness monitor → expect a `Breach` action with the correct
+///      IRI, declared `max_age`, and non-zero `actual_age_seconds`.
+///   4. Project the resulting `DataProductSLOBreached` event → verify the RDF
+///      graph now shows `pc:freshnessStatus "breached"`.
+///   5. Resume trigger events — project a fresh `DataProductRefreshed`
+///      timestamp within SLO.
+///   6. Run the monitor again → expect a `Restore` action.
+///   7. Project the resulting `DataProductSLORestored` event → verify the RDF
+///      graph now shows `pc:freshnessStatus "fresh"` (no longer breached).
+#[tokio::test]
+async fn data_product_slo_breach_and_restore() {
+    let projector = Arc::new(OxigraphProjector::new().unwrap());
+
+    // Step 1 — Declare data product with a 2-minute maxAge SLO.
+    let declared = make_data_product_declared_with_max_age(
+        "photo-app",
+        "photo-locations",
+        "geospatial",
+        "1.0.0",
+        "PT2M",
+    );
+    projector.project(&declared).await.unwrap();
+
+    let dp_iri = iri_builder()
+        .data_product_graph("photo-app", "photo-locations")
+        .as_str()
+        .trim_end_matches("/graph")
+        .to_string();
+
+    // Step 2 — Simulate trigger events having stopped: last refresh was 150s ago
+    // (well past the 2-minute SLO).
+    let stale_time = (Utc::now() - Duration::seconds(150)).to_rfc3339();
+    let refreshed_stale = make_data_product_refreshed_at(
+        "photo-app",
+        "photo-locations",
+        &stale_time,
+    );
+    projector.project(&refreshed_stale).await.unwrap();
+
+    // Step 3 — Run the freshness monitor; it must emit a Breach action.
+    let monitor = RdfDataProductSLOMonitor::new(projector.clone() as Arc<dyn StateProjector>);
+    let actions = monitor.check_freshness().await.unwrap();
+    assert_eq!(
+        actions.len(),
+        1,
+        "monitor should emit exactly one Breach action once SLO is exceeded"
+    );
+
+    let breach_payload = match &actions[0] {
+        DataProductSLOAction::Breach(payload) => {
+            assert!(
+                payload.data_product_iri.as_str().contains("photo-locations"),
+                "Breach must reference the photo-locations data product, got {}",
+                payload.data_product_iri.as_str()
+            );
+            assert_eq!(
+                payload.max_age, "PT2M",
+                "Breach must carry the declared maxAge"
+            );
+            assert!(
+                payload.actual_age_seconds >= 120,
+                "actual_age_seconds must exceed the 120s SLO, got {}",
+                payload.actual_age_seconds
+            );
+            payload.clone()
+        }
+        DataProductSLOAction::Restore(_) => {
+            panic!("expected Breach, got Restore");
+        }
+    };
+
+    // Step 4 — Project the DataProductSLOBreached event so the cluster RDF
+    // graph reflects the breach (required by TC-207).
+    let breach_event = make_event(
+        "DataProductSLOBreached",
+        ResourceIri::new(&dp_iri).unwrap(),
+        Some("photo-app"),
+        serde_json::json!({
+            "data_product_iri": breach_payload.data_product_iri.as_str(),
+            "max_age": breach_payload.max_age,
+            "actual_age_seconds": breach_payload.actual_age_seconds,
+        }),
+    );
+    projector.project(&breach_event).await.unwrap();
+
+    // Verify the breach is visible in the RDF graph.
+    let ask_breached = format!(
+        "ASK {{ <{dp_iri}> <https://picloud.local/ontology#freshnessStatus> \"breached\" }}"
+    );
+    let result = projector.query(&ask_breached).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], true,
+        "pc:freshnessStatus \"breached\" must be present in the cluster RDF graph after breach"
+    );
+
+    // Step 5 — Resume trigger events: project a fresh DataProductRefreshed
+    // timestamped within the SLO window.
+    let fresh_time = Utc::now().to_rfc3339();
+    let refreshed_now = make_data_product_refreshed_at(
+        "photo-app",
+        "photo-locations",
+        &fresh_time,
+    );
+    projector.project(&refreshed_now).await.unwrap();
+
+    // Step 6 — Monitor check → Restore action.
+    let actions = monitor.check_freshness().await.unwrap();
+    assert_eq!(
+        actions.len(),
+        1,
+        "monitor should emit exactly one Restore action after refresh"
+    );
+    let restore_payload = match &actions[0] {
+        DataProductSLOAction::Restore(payload) => {
+            assert!(
+                payload.data_product_iri.as_str().contains("photo-locations"),
+                "Restore must reference the photo-locations data product, got {}",
+                payload.data_product_iri.as_str()
+            );
+            payload.clone()
+        }
+        DataProductSLOAction::Breach(_) => panic!("expected Restore, got Breach"),
+    };
+
+    // Step 7 — Project the DataProductSLORestored event and verify the RDF
+    // graph now reflects the restored state.
+    let restore_event = make_event(
+        "DataProductSLORestored",
+        ResourceIri::new(&dp_iri).unwrap(),
+        Some("photo-app"),
+        serde_json::json!({
+            "data_product_iri": restore_payload.data_product_iri.as_str(),
+            "refreshed_at": restore_payload.refreshed_at.to_rfc3339(),
+        }),
+    );
+    projector.project(&restore_event).await.unwrap();
+
+    let ask_fresh = format!(
+        "ASK {{ <{dp_iri}> <https://picloud.local/ontology#freshnessStatus> \"fresh\" }}"
+    );
+    let result = projector.query(&ask_fresh).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], true,
+        "pc:freshnessStatus \"fresh\" must be present in the cluster RDF graph after restore"
+    );
+
+    let ask_still_breached = format!(
+        "ASK {{ <{dp_iri}> <https://picloud.local/ontology#freshnessStatus> \"breached\" }}"
+    );
+    let result = projector.query(&ask_still_breached).await.unwrap();
+    assert_eq!(
+        result.bindings[0]["result"], false,
+        "pc:freshnessStatus \"breached\" must be removed after restore"
+    );
+}
