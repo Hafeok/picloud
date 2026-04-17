@@ -2,7 +2,7 @@
 id: FT-093
 title: Event log compaction and snapshotting
 phase: 4
-status: complete
+status: in-progress
 depends-on: []
 adrs:
 - ADR-060
@@ -10,6 +10,7 @@ adrs:
 tests:
 - TC-289
 - TC-346
+- TC-349
 domains: []
 domains-acknowledged: {}
 ---

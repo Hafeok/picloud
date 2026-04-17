@@ -2,7 +2,7 @@
 id: FT-008
 title: Product Event Store
 phase: 2
-status: complete
+status: in-progress
 depends-on:
 - FT-005
 adrs:
@@ -28,6 +28,7 @@ tests:
 - TC-095
 - TC-096
 - TC-211
+- TC-351
 domains:
 - products
 - data-model

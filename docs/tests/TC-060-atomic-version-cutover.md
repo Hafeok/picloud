@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "atomic-version-cutover"
-last-run: 2026-04-13T21:37:33.242635225+00:00
+last-run: 2026-04-17T13:58:22.735189315+00:00
+last-run-duration: 0.0s
 ---
 
 deploy product v1, then apply v2. Monitor the RDF graph and the product's ingress throughout the upgrade. Assert there is no window where both v1 and v2 containers are simultaneously tagged `picloud:Running` under the product IRI.

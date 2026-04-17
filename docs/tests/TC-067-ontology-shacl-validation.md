@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "ontology-shacl-validation"
-last-run: 2026-04-13T21:37:33.242635225+00:00
+last-run: 2026-04-17T13:58:22.735189315+00:00
+last-run-duration: 0.0s
 ---
 
 add a triple that violates the product's SHACL ontology to the product graph. Assert the platform rejects the update with a SHACL validation error.

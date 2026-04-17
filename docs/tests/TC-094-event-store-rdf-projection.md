@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "event-store-rdf-projection"
-last-run: 2026-04-13T21:37:33.242635225+00:00
+last-run: 2026-04-17T13:58:22.735189315+00:00
+last-run-duration: 0.0s
 ---
 
 append aggregate events. Assert the product's SPARQL endpoint reflects the projected aggregate state within the projection latency budget.

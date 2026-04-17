@@ -219,6 +219,16 @@ impl PersistentEventLog {
     ///
     /// If the file already exists, all events are replayed into memory.
     /// The parent directory is created if it does not exist.
+    ///
+    /// **Startup invariant (TC-349):** this function is synchronous and
+    /// must never call `futures::executor::block_on` or otherwise block on
+    /// a tokio runtime. On startup, `open` is invoked from inside the
+    /// tokio runtime context of `picloud-server`, and nesting `block_on`
+    /// inside the runtime can deadlock — particularly for large event
+    /// logs where repeated `block_on` calls accumulate contention. We
+    /// access `inner`'s `RwLock` fields via `get_mut()` instead, which is
+    /// sound because we have exclusive ownership of `inner` at this point
+    /// — it has not yet been shared with any subscriber or projector.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -227,13 +237,20 @@ impl PersistentEventLog {
             std::fs::create_dir_all(parent).map_err(|e| PiCloudError::Internal(format!("failed to create event log directory {}: {e}", parent.display())))?;
         }
 
-        let inner = InMemoryEventLog::new();
+        let mut inner = InMemoryEventLog::new();
 
         // Replay existing events if the file exists.
         if path.exists() {
             let file = std::fs::File::open(&path).map_err(|e| PiCloudError::Internal(format!("failed to open event log file {}: {e}", path.display())))?;
             let reader = std::io::BufReader::new(file);
             let mut replayed = 0u64;
+
+            // Exclusive, lock-free access to the inner fields — we own `inner`
+            // and nobody else holds a reference. `get_mut` on `tokio::RwLock`
+            // returns a `&mut T` without any await/block, which is exactly
+            // what we need during synchronous startup replay.
+            let events_vec = inner.events.get_mut();
+            let seen_keys_set = inner.seen_keys.get_mut();
 
             for (line_no, line) in reader.lines().enumerate() {
                 let line = line.map_err(|e| PiCloudError::Internal(format!("failed to read event log line {}: {e}", line_no + 1)))?;
@@ -247,17 +264,11 @@ impl PersistentEventLog {
                             line_no + 1
                         )))?;
 
-                // Record idempotency key.
+                // Record idempotency key (direct insert — no lock/await needed).
                 if let Some(ref key) = event.idempotency_key {
-                    // We access the inner fields directly during replay to avoid
-                    // broadcasting replayed events (there are no subscribers yet).
-                    futures::executor::block_on(async {
-                        inner.seen_keys.write().await.insert(key.clone());
-                    });
+                    seen_keys_set.insert(key.clone());
                 }
-                futures::executor::block_on(async {
-                    inner.events.write().await.push(event);
-                });
+                events_vec.push(event);
                 replayed += 1;
             }
             if replayed > 0 {

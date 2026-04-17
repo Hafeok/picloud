@@ -218,6 +218,7 @@
 
 - [x] ADR-002: openraft for Cluster Consensus (accepted)
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
+- [x] TC-349: Event log replay does not hang on startup with N existing events (scenario) — passing
 
 ### FT-016 — Oxigraph RDF projection of cluster state [x]
 
@@ -261,7 +262,7 @@
 
 ## Phase 2
 
-### FT-008 — Product Event Store [x]
+### FT-008 — Product Event Store [~]
 
 - [x] ADR-018: Product Event Bus as Only Inter-Product Interface (accepted)
 - [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
@@ -284,6 +285,7 @@
 - [x] TC-095: event_store_replay (scenario) — passing
 - [x] TC-096: event_store_survivor (scenario) — passing
 - [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
+- [!] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — failing
 
 ### FT-009 — Inference, Metrics & Alerts [x]
 
@@ -458,15 +460,17 @@
 - [x] TC-256: OTel event stream delivers traces to in-process subscriber (scenario) — passing
 - [x] TC-313: OTel stream exit — traces delivered to in-process subscriber (exit-criteria) — passing
 
-### FT-044 — Parquet time-series store — traces, metrics, logs with hourly partitioning [x]
+### FT-044 — Parquet time-series store — traces, metrics, logs with hourly partitioning [~]
 
 - [x] TC-257: Parquet time-series store writes hourly partitioned trace files (scenario) — passing
 - [x] TC-314: Parquet store exit — hourly partitioned trace files written (exit-criteria) — passing
+- [!] TC-350: Telemetry SQL query endpoint returns 200 on simple parquet read (scenario) — failing
 
-### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [x]
+### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [~]
 
 - [x] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — passing
 - [x] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — passing
+- [!] TC-350: Telemetry SQL query endpoint returns 200 on simple parquet read (scenario) — failing
 
 ### FT-046 — Metric aggregator — OTel stream to MetricRecorded events every 15s [x]
 
@@ -691,11 +695,12 @@
 - [x] ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources (accepted)
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-078 — event-store resource type — managed event log + aggregate streams per Product [x]
+### FT-078 — event-store resource type — managed event log + aggregate streams per Product [~]
 
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
+- [!] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — failing
 
 ### FT-079 — Product event schema IRIs served from platform HTTP layer [x]
 
@@ -803,12 +808,13 @@
 - [x] TC-288: Node drain migrates workloads to other nodes gracefully (scenario) — passing
 - [x] TC-345: Node drain exit — workloads migrated to other nodes (exit-criteria) — passing
 
-### FT-093 — Event log compaction and snapshotting [x]
+### FT-093 — Event log compaction and snapshotting [~]
 
 - [x] ADR-060: Event Log Compaction with Snapshot-and-Truncate (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] TC-289: Event log compaction reduces log size while preserving snapshots (scenario) — passing
 - [x] TC-346: Log compaction exit — log size reduced, snapshots preserved (exit-criteria) — passing
+- [x] TC-349: Event log replay does not hang on startup with N existing events (scenario) — passing
 
 ### FT-094 — Platform self-monitoring via its own RDF graph [x]
 

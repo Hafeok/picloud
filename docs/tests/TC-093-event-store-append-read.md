@@ -11,7 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "event-store-append-read"
-last-run: 2026-04-13T21:37:33.242635225+00:00
+last-run: 2026-04-17T13:58:22.735189315+00:00
+last-run-duration: 0.0s
 ---
 
 declare an `event-store` resource with a Photo aggregate. Append 10 `PhotoCreated` events. Read the aggregate stream. Assert all 10 events returned in order with correct payloads.

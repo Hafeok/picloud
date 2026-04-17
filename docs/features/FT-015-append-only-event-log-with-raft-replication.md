@@ -8,6 +8,7 @@ adrs:
 - ADR-002
 tests:
 - TC-225
+- TC-349
 domains: []
 domains-acknowledged: {}
 ---
