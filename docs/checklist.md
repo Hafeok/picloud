@@ -704,7 +704,7 @@
 - [x] TC-279: Event schema IRI returns schema document via HTTP GET (scenario) — passing
 - [x] TC-336: Schema IRI exit — event schema served via HTTP GET (exit-criteria) — passing
 
-### FT-080 — Automatic RDF projection of Product aggregate events into Product graph [ ]
+### FT-080 — Automatic RDF projection of Product aggregate events into Product graph [x]
 
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
 - [x] ADR-005: RDF Graph as Event Projection and Read Model (accepted)
