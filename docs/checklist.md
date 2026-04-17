@@ -569,7 +569,7 @@
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
-### FT-061 — capabilities field on product — resolution validated at resource apply time [ ]
+### FT-061 — capabilities field on product — resolution validated at resource apply time [x]
 
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing

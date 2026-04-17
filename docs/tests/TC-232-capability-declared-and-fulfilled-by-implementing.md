@@ -9,8 +9,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "tc232_capability_declared_and_fulfilled"
-last-run: 2026-04-17T07:04:49.641908741+00:00
-last-run-duration: 0.5s
+last-run: 2026-04-17T07:07:48.172621832+00:00
+last-run-duration: 1.1s
 ---
 
 ## Description
