@@ -769,7 +769,7 @@
 - [x] TC-218: SDKs published to package registries (exit-criteria) — passing
 - [x] TC-233: SDKs published to crates.io, npm, and NuGet (exit-criteria) — passing
 
-### FT-089 — .NET Aspire integration package [ ]
+### FT-089 — .NET Aspire integration package [x]
 
 - [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
 - [x] TC-285: .NET Aspire integration package connects to PiCloud cluster (scenario) — passing
