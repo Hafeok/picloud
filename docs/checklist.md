@@ -262,7 +262,7 @@
 
 ## Phase 2
 
-### FT-008 — Product Event Store [~]
+### FT-008 — Product Event Store [x]
 
 - [x] ADR-018: Product Event Bus as Only Inter-Product Interface (accepted)
 - [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
@@ -285,7 +285,7 @@
 - [x] TC-095: event_store_replay (scenario) — passing
 - [x] TC-096: event_store_survivor (scenario) — passing
 - [x] TC-211: Product with container, volume, workload identity deploys end-to-end (exit-criteria) — passing
-- [!] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — failing
+- [x] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — passing
 
 ### FT-009 — Inference, Metrics & Alerts [x]
 
@@ -700,7 +700,7 @@
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
-- [!] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — failing
+- [x] TC-351: Event store append then read returns the appended event within bounded latency (scenario) — passing
 
 ### FT-079 — Product event schema IRIs served from platform HTTP layer [x]
 

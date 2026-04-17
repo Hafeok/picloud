@@ -2,16 +2,15 @@
 id: TC-351
 title: Event store append then read returns the appended event within bounded latency
 type: scenario
-status: failing
+status: passing
 runner: cargo-test
 runner-args: "tc351_event_store_append_then_read_returns_event"
 validates:
   features: [FT-008, FT-078]
   adrs: []
 phase: 4
-last-run: 2026-04-17T13:58:30.437303087+00:00
-last-run-duration: 0.9s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-17T14:18:42.769141632+00:00
+last-run-duration: 0.8s
 ---
 
 ## Description

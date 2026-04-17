@@ -11,7 +11,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "event-store-rdf-projection"
-last-run: 2026-04-17T13:58:22.735189315+00:00
+last-run: 2026-04-17T14:18:42.769141632+00:00
 last-run-duration: 0.0s
 ---
 
