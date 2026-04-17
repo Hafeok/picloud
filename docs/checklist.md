@@ -466,7 +466,7 @@
 - [x] TC-314: Parquet store exit — hourly partitioned trace files written (exit-criteria) — passing
 - [x] TC-350: Telemetry SQL query endpoint returns 200 on simple parquet read (scenario) — passing
 
-### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [~]
+### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [x]
 
 - [x] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — passing
 - [x] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — passing
