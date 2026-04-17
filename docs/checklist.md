@@ -574,7 +574,7 @@
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] TC-232: Capability declared and fulfilled by implementing product (exit-criteria) — passing
 
-### FT-062 — Capability lifecycle events [ ]
+### FT-062 — Capability lifecycle events [x]
 
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] TC-269: Capability lifecycle events emitted on declare, implement, consume (scenario) — passing
