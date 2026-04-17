@@ -558,7 +558,7 @@
 - [x] ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources (accepted)
 - [x] TC-228: Inference rule automatically assigns user to group on tag change (exit-criteria) — passing
 
-### FT-059 — capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types [ ]
+### FT-059 — capability resource type — cluster-scoped interface contract with ontology, SHACL shapes, and declared event types [x]
 
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] ADR-029: IRI-Based Resource Addressing (accepted)
