@@ -2,7 +2,7 @@
 id: FT-064
 title: picloud capability list — all capabilities, implementors, consumers, and fulfilment status
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-055

@@ -588,7 +588,7 @@
 - [x] TC-327: Capability routing exit — events routed to implementing product (exit-criteria) — passing
 - [x] TC-206: capability_triggers_data_product (scenario) — passing
 
-### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [ ]
+### FT-064 — picloud capability list — all capabilities, implementors, consumers, and fulfilment status [x]
 
 - [x] ADR-055: Capability as a First-Class Interface Contract (accepted)
 - [x] TC-271: picloud capability list shows all capabilities with fulfilment status (scenario) — passing
