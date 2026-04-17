@@ -697,7 +697,7 @@
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] TC-230: Product appends to event store and queries RDF projection (exit-criteria) — passing
 
-### FT-079 — Product event schema IRIs served from platform HTTP layer [ ]
+### FT-079 — Product event schema IRIs served from platform HTTP layer [x]
 
 - [x] ADR-031: Event Schema Versioning via Schema IRIs (accepted)
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
