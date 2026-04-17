@@ -2,7 +2,7 @@
 id: FT-073
 title: picloud data-product list and picloud data-domain list
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-056

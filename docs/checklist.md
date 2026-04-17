@@ -650,7 +650,7 @@
 - [x] TC-276: DataProductProjector reflects data products and domains in RDF graph (scenario) — passing
 - [x] TC-333: Data projector exit — RDF graph reflects data products and domains (exit-criteria) — passing
 
-### FT-073 — picloud data-product list and picloud data-domain list [ ]
+### FT-073 — picloud data-product list and picloud data-domain list [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-277: picloud data-product list and data-domain list return expected entries (scenario) — passing
