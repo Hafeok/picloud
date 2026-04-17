@@ -2,7 +2,7 @@
 id: FT-052
 title: IAM-gated SPARQL endpoint per Product
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-019

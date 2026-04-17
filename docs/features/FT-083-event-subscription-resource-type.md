@@ -2,7 +2,7 @@
 id: FT-083
 title: event-subscription resource type
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-022

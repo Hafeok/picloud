@@ -2,7 +2,7 @@
 id: FT-074
 title: Cross-product internal graph access blocked at HTTP layer — 403 for non-owner non-admin
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-056

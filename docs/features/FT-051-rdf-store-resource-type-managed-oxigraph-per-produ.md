@@ -2,7 +2,7 @@
 id: FT-051
 title: rdf-store resource type — managed Oxigraph per Product
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-019

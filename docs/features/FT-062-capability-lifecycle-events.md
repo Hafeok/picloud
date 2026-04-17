@@ -2,7 +2,7 @@
 id: FT-062
 title: Capability lifecycle events
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-055

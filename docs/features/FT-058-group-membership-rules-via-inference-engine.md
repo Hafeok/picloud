@@ -2,7 +2,7 @@
 id: FT-058
 title: Group membership rules via inference engine
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-037

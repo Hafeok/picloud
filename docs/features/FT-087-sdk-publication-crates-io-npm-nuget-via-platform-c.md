@@ -2,7 +2,7 @@
 id: FT-087
 title: SDK publication — crates.io, npm, NuGet via platform CI
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-033

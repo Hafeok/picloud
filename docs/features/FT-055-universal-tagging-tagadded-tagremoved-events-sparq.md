@@ -2,7 +2,7 @@
 id: FT-055
 title: Universal tagging — TagAdded/TagRemoved events, SPARQL-queryable on all resources
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-036

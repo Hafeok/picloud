@@ -2,7 +2,7 @@
 id: FT-065
 title: data-domain resource type — cluster-scoped governance boundary
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-056

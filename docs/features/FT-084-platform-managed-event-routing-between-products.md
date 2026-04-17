@@ -2,7 +2,7 @@
 id: FT-084
 title: Platform-managed event routing between Products
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-018

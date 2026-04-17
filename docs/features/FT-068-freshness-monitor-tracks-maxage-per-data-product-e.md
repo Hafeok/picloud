@@ -2,7 +2,7 @@
 id: FT-068
 title: Freshness monitor — tracks maxAge per data product, emits DataProductStale when breached
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-056

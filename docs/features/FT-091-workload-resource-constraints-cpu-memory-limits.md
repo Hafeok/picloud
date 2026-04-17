@@ -2,7 +2,7 @@
 id: FT-091
 title: Workload resource constraints (CPU/memory limits)
 phase: 4
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-058

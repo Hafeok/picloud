@@ -2,7 +2,7 @@
 id: FT-077
 title: AlertFired / AlertResolved events
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-041

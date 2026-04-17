@@ -2,7 +2,7 @@
 id: FT-075
 title: Platform metrics agent — MetricRecorded events at 15s interval per node
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-040

@@ -2,7 +2,7 @@
 id: FT-066
 title: data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-056

@@ -2,7 +2,7 @@
 id: FT-053
 title: Ontology resource type — .ttl and .shacl files bound to Product version
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-023

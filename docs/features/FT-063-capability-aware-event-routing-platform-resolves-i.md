@@ -2,7 +2,7 @@
 id: FT-063
 title: Capability-aware event routing — platform resolves implementing Product at dispatch time
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-055

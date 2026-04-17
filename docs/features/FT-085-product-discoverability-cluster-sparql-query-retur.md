@@ -2,7 +2,7 @@
 id: FT-085
 title: Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-020

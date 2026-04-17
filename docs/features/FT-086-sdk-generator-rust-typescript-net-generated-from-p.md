@@ -2,7 +2,7 @@
 id: FT-086
 title: SDK generator — Rust, TypeScript, .NET generated from platform ontology
 phase: 3
-status: complete
+status: planned
 depends-on: []
 adrs:
 - ADR-033
