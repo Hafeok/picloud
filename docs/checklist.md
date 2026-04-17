@@ -638,7 +638,7 @@
 - [x] TC-274: Data product lifecycle events emitted on create, update, delete (scenario) — passing
 - [x] TC-331: Data product events exit — create, update, delete events emitted (exit-criteria) — passing
 
-### FT-071 — Data domain lifecycle events [ ]
+### FT-071 — Data domain lifecycle events [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-275: Data domain lifecycle events emitted on create, update, delete (scenario) — passing

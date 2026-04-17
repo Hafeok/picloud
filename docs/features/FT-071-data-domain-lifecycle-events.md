@@ -2,7 +2,7 @@
 id: FT-071
 title: Data domain lifecycle events
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-056
