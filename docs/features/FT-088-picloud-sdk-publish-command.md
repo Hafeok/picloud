@@ -2,7 +2,7 @@
 id: FT-088
 title: picloud sdk publish command
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-033

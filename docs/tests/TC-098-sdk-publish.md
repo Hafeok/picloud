@@ -13,8 +13,8 @@ validates:
 phase: 1
 runner: picloud-test
 runner-args: run --scenario sdk-publish
-last-run: 2026-04-17T10:20:34.879042085+00:00
-last-run-duration: 0.0s
+last-run: 2026-04-17T10:21:08.824446971+00:00
+last-run-duration: 0.1s
 ---
 
 run `picloud sdk publish` against a live cluster configured with a local test registry. Assert packages appear in the test registry within 5 minutes.
