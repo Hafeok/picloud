@@ -512,7 +512,7 @@
 - [x] TC-264: Per-product Oxigraph instance created and serves SPARQL (scenario) — passing
 - [x] TC-321: RDF store exit — per-product Oxigraph created and serves SPARQL (exit-criteria) — passing
 
-### FT-052 — IAM-gated SPARQL endpoint per Product [ ]
+### FT-052 — IAM-gated SPARQL endpoint per Product [x]
 
 - [x] ADR-019: Per-Product SPARQL Endpoint and Ontology Exposure (accepted)
 - [x] ADR-027: mTLS for Workload-to-Platform and Direct Workload-to-SPARQL Communication (accepted)
