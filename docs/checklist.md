@@ -644,7 +644,7 @@
 - [x] TC-275: Data domain lifecycle events emitted on create, update, delete (scenario) — passing
 - [x] TC-332: Data domain events exit — create, update, delete events emitted (exit-criteria) — passing
 
-### FT-072 — DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness [ ]
+### FT-072 — DataProductProjector — cluster RDF graph reflects all data products, domains, producers, consumers, freshness [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-276: DataProductProjector reflects data products and domains in RDF graph (scenario) — passing
