@@ -9,8 +9,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: "tc348_voter_config_exit_raft_voter_change_completes_without_downtime"
-last-run: 2026-04-16T07:48:49.758720469+00:00
-last-run-duration: 0.5s
+last-run: 2026-04-17T10:25:04.349149128+00:00
+last-run-duration: 1.4s
 ---
 
 ## Description

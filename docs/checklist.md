@@ -817,7 +817,7 @@
 - [x] TC-290: Platform self-monitoring graph contains node health and workload state (scenario) — passing
 - [x] TC-347: Self-monitoring exit — platform graph contains health data (exit-criteria) — passing
 
-### FT-095 — Multi-node Raft voter configuration tuning [ ]
+### FT-095 — Multi-node Raft voter configuration tuning [x]
 
 - [x] ADR-062: Raft Voter Cap and Automatic Learner Promotion (accepted)
 - [x] ADR-002: openraft for Cluster Consensus (accepted)

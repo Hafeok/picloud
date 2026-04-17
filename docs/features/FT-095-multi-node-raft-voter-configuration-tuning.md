@@ -2,7 +2,7 @@
 id: FT-095
 title: Multi-node Raft voter configuration tuning
 phase: 4
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-062
