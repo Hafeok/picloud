@@ -803,7 +803,7 @@
 - [x] TC-288: Node drain migrates workloads to other nodes gracefully (scenario) — passing
 - [x] TC-345: Node drain exit — workloads migrated to other nodes (exit-criteria) — passing
 
-### FT-093 — Event log compaction and snapshotting [ ]
+### FT-093 — Event log compaction and snapshotting [x]
 
 - [x] ADR-060: Event Log Compaction with Snapshot-and-Truncate (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
