@@ -738,7 +738,7 @@
 - [x] TC-283: Platform routes events between products via subscription (scenario) — passing
 - [x] TC-340: Event routing exit — platform routes events between products (exit-criteria) — passing
 
-### FT-085 — Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products [ ]
+### FT-085 — Product discoverability — cluster SPARQL query returns all Products, events, ontologies, capabilities, data products [x]
 
 - [x] ADR-020: Cluster Graph as Semantic Service Registry (accepted)
 - [x] ADR-029: IRI-Based Resource Addressing (accepted)
