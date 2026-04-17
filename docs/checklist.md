@@ -669,7 +669,7 @@
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-076 — Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure) [ ]
+### FT-076 — Built-in platform alert rules (CPU temp, memory, disk, node health, workload failure) [x]
 
 - [x] ADR-041: Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events (accepted)
 - [x] ADR-040: Platform Metrics Agent — Hardware Telemetry as Events (accepted)

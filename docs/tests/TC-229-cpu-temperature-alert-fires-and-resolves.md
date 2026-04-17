@@ -13,8 +13,8 @@ validates:
 phase: 3
 runner: cargo-test
 runner-args: tc229_cpu_temperature_alert_fires_and_resolves
-last-run: 2026-04-17T10:09:10.589354980+00:00
-last-run-duration: 2.8s
+last-run: 2026-04-17T10:11:32.419130054+00:00
+last-run-duration: 2.7s
 ---
 
 ## Description
