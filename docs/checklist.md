@@ -782,7 +782,7 @@
 - [x] TC-236: Node drain completes and workloads reschedule within timeout (scenario) — passing
 - [x] TC-292: Operational maturity exit — node drain, log compaction, self-monitoring pass (exit-criteria) — passing
 
-### FT-090 — Additional storage intent tiers (quorum, local, archive, fast) [ ]
+### FT-090 — Additional storage intent tiers (quorum, local, archive, fast) [x]
 
 - [x] ADR-057: Extended Storage Intent Tiers — Quorum, Local, and Performance Classes (accepted)
 - [x] ADR-024: Storage Intent Model (accepted)
