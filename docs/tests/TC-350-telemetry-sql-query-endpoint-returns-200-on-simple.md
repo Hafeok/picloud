@@ -2,16 +2,15 @@
 id: TC-350
 title: Telemetry SQL query endpoint returns 200 on simple parquet read
 type: scenario
-status: failing
+status: passing
 runner: cargo-test
 runner-args: "tc350_telemetry_sql_query_endpoint_returns_200"
 validates:
   features: [FT-044, FT-045]
   adrs: []
 phase: 4
-last-run: 2026-04-17T13:58:27.276199900+00:00
+last-run: 2026-04-17T14:25:04.049466207+00:00
 last-run-duration: 0.8s
-failure-message: "No matching test function found (0 tests ran)"
 ---
 
 ## Description

@@ -2,7 +2,7 @@
 id: FT-044
 title: Parquet time-series store — traces, metrics, logs with hourly partitioning
 phase: 2
-status: in-progress
+status: complete
 depends-on: []
 adrs: []
 tests:
