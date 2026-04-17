@@ -745,7 +745,7 @@
 - [x] TC-284: Cluster SPARQL query returns all products, events, ontologies (scenario) — passing
 - [x] TC-341: Discoverability exit — SPARQL returns all products and ontologies (exit-criteria) — passing
 
-### FT-086 — SDK generator — Rust, TypeScript, .NET generated from platform ontology [ ]
+### FT-086 — SDK generator — Rust, TypeScript, .NET generated from platform ontology [x]
 
 - [x] ADR-033: Generated Multi-Language SDKs Published to Package Registries (accepted)
 - [x] ADR-029: IRI-Based Resource Addressing (accepted)
