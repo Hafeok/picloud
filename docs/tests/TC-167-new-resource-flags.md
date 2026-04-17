@@ -11,7 +11,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "new-resource-flags"
-last-run: 2026-04-17T19:13:27.759507317+00:00
+last-run: 2026-04-17T19:13:38.300193890+00:00
 last-run-duration: 0.0s
 ---
 
