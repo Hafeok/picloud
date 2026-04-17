@@ -685,7 +685,7 @@
 - [x] TC-132: AlertResolved (scenario) — passing
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-077 — AlertFired / AlertResolved events [ ]
+### FT-077 — AlertFired / AlertResolved events [x]
 
 - [x] ADR-041: Alert Rules as SPARQL CONSTRUCT Queries with AlertFired Events (accepted)
 - [x] ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources (accepted)
