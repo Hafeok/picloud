@@ -632,7 +632,7 @@
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
 - [x] TC-202: data_product_consumer_blocked_without_product (scenario) — passing
 
-### FT-070 — Data product lifecycle events [ ]
+### FT-070 — Data product lifecycle events [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-274: Data product lifecycle events emitted on create, update, delete (scenario) — passing

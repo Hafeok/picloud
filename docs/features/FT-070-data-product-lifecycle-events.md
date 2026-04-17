@@ -2,7 +2,7 @@
 id: FT-070
 title: Data product lifecycle events
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-056
