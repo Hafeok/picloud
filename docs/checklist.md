@@ -663,7 +663,7 @@
 - [x] TC-335: Graph isolation exit — cross-product access returns 403 (exit-criteria) — passing
 - [x] TC-201: cross_product_internal_graph_blocked (scenario) — passing
 
-### FT-075 — Platform metrics agent — MetricRecorded events at 15s interval per node [ ]
+### FT-075 — Platform metrics agent — MetricRecorded events at 15s interval per node [x]
 
 - [x] ADR-040: Platform Metrics Agent — Hardware Telemetry as Events (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
