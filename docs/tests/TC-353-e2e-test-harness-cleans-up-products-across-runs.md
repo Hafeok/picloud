@@ -11,8 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc353_e2e_harness_cleans_up_products_across_runs
-last-run: 2026-04-17T19:13:15.469353382+00:00
-last-run-duration: 0.7s
+last-run: 2026-04-17T19:13:27.759507317+00:00
+last-run-duration: 0.6s
 failure-message: "No matching test function found (0 tests ran)"
 ---
 
