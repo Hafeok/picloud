@@ -496,6 +496,59 @@ impl OxigraphProjector {
         Ok(())
     }
 
+    /// Count the number of products that declare a `dataProducts` dependency
+    /// on the given data product IRI (ADR-056 rule 8).
+    ///
+    /// A product consumes a data product when there is a
+    /// `?product pc:consumesDataProduct <dp_iri>` triple in the catalog.
+    pub fn count_data_product_consumers(&self, data_product_iri: &str) -> Result<usize> {
+        let query = format!(
+            "SELECT (COUNT(?p) AS ?count) WHERE {{ \
+             ?p <{PICLOUD_NS}consumesDataProduct> <{data_product_iri}> . \
+             }}"
+        );
+        let result = self.execute_query(&query)?;
+        let count = result
+            .bindings
+            .first()
+            .and_then(|b| b.get("count"))
+            .and_then(|c| c.get("value"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        Ok(count)
+    }
+
+    /// Validate that a data product can be deleted (ADR-056 rule 8).
+    ///
+    /// A data product cannot be deleted while any product declares a
+    /// `dataProducts` dependency on it. Returns `DataProductDeletionBlocked`
+    /// with the consumer count when a dependency still exists.
+    pub fn validate_data_product_deletion(&self, data_product_iri: &str) -> Result<()> {
+        let consumers = self.count_data_product_consumers(data_product_iri)?;
+        if consumers > 0 {
+            return Err(PiCloudError::DataProductDeletionBlocked {
+                data_product: data_product_iri.to_string(),
+                consumers,
+            });
+        }
+        Ok(())
+    }
+
+    /// Return `true` if a data product with the given IRI exists in the catalog.
+    pub fn data_product_exists(&self, data_product_iri: &str) -> Result<bool> {
+        let query = format!(
+            "ASK {{ <{data_product_iri}> <{RDF_TYPE}> <{PICLOUD_NS}DataProduct> }}"
+        );
+        let result = self.execute_query(&query)?;
+        Ok(result
+            .bindings
+            .first()
+            .and_then(|b| b.get("result"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
+    }
+
     // ---- Event projection handlers ----
 
     fn project_node_joined(&self, event: &EventEnvelope) -> Result<()> {
@@ -1539,6 +1592,70 @@ impl OxigraphProjector {
                 .map_err(|e| PiCloudError::Internal(e.to_string()))?
                 .into(),
         )?;
+
+        // ADR-056: Record `dataProducts` dependencies so the data-product
+        // deletion guard (rule 8) can detect active consumers. The payload
+        // may carry either an object array `[{source, min_version}, ...]`
+        // or a simple string array `["product/dp", ...]`.
+        if let Some(deps) = event.payload.get("data_products").and_then(|v| v.as_array()) {
+            for dep in deps {
+                let source_opt = dep
+                    .as_str()
+                    .map(|s| (s.to_string(), None))
+                    .or_else(|| {
+                        let source = dep.get("source")?.as_str()?.to_string();
+                        let min_version = dep
+                            .get("min_version")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| dep.get("minVersion").and_then(|v| v.as_str()))
+                            .map(|s| s.to_string());
+                        Some((source, min_version))
+                    });
+                let Some((source, min_version)) = source_opt else {
+                    continue;
+                };
+                // `source` is "owning-product/data-product-name"
+                let (owning_product, dp_name) = match source.split_once('/') {
+                    Some((p, n)) => (p, n),
+                    None => continue,
+                };
+                let dp_iri = format!(
+                    "{}/data-products/{dp_name}",
+                    self.iri_builder.product(owning_product).as_str().trim_end_matches('/')
+                );
+                if let Ok(dp_node) = NamedNode::new(&dp_iri) {
+                    self.insert_triple(
+                        product_iri_str,
+                        &format!("{PICLOUD_NS}consumesDataProduct"),
+                        dp_node.into(),
+                    )?;
+                }
+                if let Some(mv) = min_version {
+                    // Record the declared minimum version on a dependency resource.
+                    let dep_iri = format!("{}/data-product-deps/{dp_name}", product_iri_str);
+                    self.insert_triple(dep_iri.as_str(), RDF_TYPE, picloud_term("DataProductDependency").into())?;
+                    if let Ok(dp_node) = NamedNode::new(&dp_iri) {
+                        self.insert_triple(
+                            dep_iri.as_str(),
+                            &format!("{PICLOUD_NS}dataProduct"),
+                            dp_node.into(),
+                        )?;
+                    }
+                    self.insert_triple(
+                        dep_iri.as_str(),
+                        &format!("{PICLOUD_NS}minVersion"),
+                        Literal::new_simple_literal(&mv).into(),
+                    )?;
+                    if let Ok(dep_node) = NamedNode::new(&dep_iri) {
+                        self.insert_triple(
+                            product_iri_str,
+                            &format!("{PICLOUD_NS}dataProductDependency"),
+                            dep_node.into(),
+                        )?;
+                    }
+                }
+            }
+        }
 
         debug!(product_iri = product_iri_str, "projected ProductDeployed");
         Ok(())

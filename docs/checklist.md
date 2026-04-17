@@ -603,13 +603,13 @@
 - [x] TC-205: data_domain_deletion_guard (scenario) — passing
 - [x] TC-208: data-domain (scenario) — passing
 
-### FT-066 — data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection [ ]
+### FT-066 — data-product resource type — product-scoped, own named graph, push-triggered SPARQL CONSTRUCT projection [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
-- [!] TC-197: data_product_field_validation (scenario) — failing
-- [!] TC-199: data_product_named_graph_separation (scenario) — failing
-- [!] TC-204: data_product_deletion_guard (scenario) — failing
+- [x] TC-197: data_product_field_validation (scenario) — passing
+- [x] TC-199: data_product_named_graph_separation (scenario) — passing
+- [x] TC-204: data_product_deletion_guard (scenario) — passing
 
 ### FT-067 — Projection runner — subscribes to trigger events, executes CONSTRUCT, shadow-swaps data product named graph [ ]
 

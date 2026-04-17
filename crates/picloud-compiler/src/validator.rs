@@ -148,6 +148,20 @@ pub fn validate_offline(files: &[ParsedFile]) -> Result<ValidationResult> {
         }
     }
 
+    // ADR-056: Data product validation rules
+    //   1. Must declare at least one `triggers` event (inside freshness block)
+    //   2. Must declare `freshness.maxAge`
+    //   3. Must belong to exactly one `data-domain`
+    //   4. Must declare `ontology` or `shapes` (or both)
+    for file in files {
+        for resource in &file.resources {
+            if resource.resource_type != "data-product" {
+                continue;
+            }
+            validate_data_product(resource, &file.path, &mut errors);
+        }
+    }
+
     let mut result = ValidationResult::with_errors(errors);
     result.warnings = warnings;
     Ok(result)
@@ -357,6 +371,102 @@ pub async fn validate_online(
     }
 
     Ok(ValidationResult::with_errors(errors))
+}
+
+/// Validate a `data-product` resource against ADR-056 rules.
+///
+/// Checks required top-level properties (`domain`, `projection`, `freshness`),
+/// required freshness sub-fields (`maxAge`, `triggers`), and enforces that at
+/// least one of `ontology`/`shapes` is declared. Emits a distinct
+/// `ValidationError` for every missing field so the `resource apply` layer can
+/// present the full list to the user in one pass.
+fn validate_data_product(
+    resource: &crate::parser::ResourceDecl,
+    file_path: &str,
+    errors: &mut Vec<ValidationError>,
+) {
+    let push = |errors: &mut Vec<ValidationError>, field: &str, message: String| {
+        errors.push(ValidationError {
+            message,
+            resource_iri: None,
+            property: Some(field.to_string()),
+            location: Some(format!("{}:{}", file_path, resource.line)),
+        });
+    };
+
+    // Rule 3: must declare a data-domain via the `domain` property.
+    if !resource.properties.iter().any(|p| p.key == "domain") {
+        push(
+            errors,
+            "domain",
+            format!(
+                "DataProduct '{}': must belong to exactly one data-domain (missing 'domain')",
+                resource.name
+            ),
+        );
+    }
+
+    // Rule 4: must declare `ontology` or `shapes` (or both).
+    let has_ontology = resource.properties.iter().any(|p| p.key == "ontology");
+    let has_shapes = resource.properties.iter().any(|p| p.key == "shapes");
+    if !has_ontology && !has_shapes {
+        push(
+            errors,
+            "ontology",
+            format!(
+                "DataProduct '{}': must declare at least one of 'ontology' or 'shapes'",
+                resource.name
+            ),
+        );
+    }
+
+    // Rules 1 & 2: inspect the `freshness` block. If the block is missing
+    // entirely, the generic required-fields check will have flagged it; in
+    // that case we still emit the more specific `triggers`/`maxAge` errors
+    // so the user sees exactly which sub-fields need attention.
+    let freshness_block = resource
+        .properties
+        .iter()
+        .find(|p| p.key == "freshness")
+        .and_then(|p| {
+            if let PropertyValue::Block(props) = &p.value {
+                Some(props)
+            } else {
+                None
+            }
+        });
+
+    let (has_max_age, has_triggers) = match freshness_block {
+        Some(props) => (
+            props
+                .iter()
+                .any(|p| p.key == "maxAge" || p.key == "max-age" || p.key == "max_age"),
+            props.iter().any(|p| p.key == "triggers" || p.key == "trigger"),
+        ),
+        None => (false, false),
+    };
+
+    if !has_max_age {
+        push(
+            errors,
+            "maxAge",
+            format!(
+                "DataProduct '{}': 'freshness.maxAge' is required (ADR-056 rule 2)",
+                resource.name
+            ),
+        );
+    }
+
+    if !has_triggers {
+        push(
+            errors,
+            "triggers",
+            format!(
+                "DataProduct '{}': 'freshness.triggers' must declare at least one event (ADR-056 rule 1)",
+                resource.name
+            ),
+        );
+    }
 }
 
 /// Required fields per resource type -- derived from SHACL sh:minCount = 1
