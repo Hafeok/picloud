@@ -2,7 +2,7 @@
 id: FT-057
 title: inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-038

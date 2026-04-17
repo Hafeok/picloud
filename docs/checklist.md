@@ -546,7 +546,7 @@
 - [x] TC-268: Group with assigned role grants inherited permissions to member users (scenario) — passing
 - [x] TC-325: Groups exit — group role assignment grants inherited permissions (exit-criteria) — passing
 
-### FT-057 — inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation [ ]
+### FT-057 — inference-rule resource type — SPARQL CONSTRUCT, event-triggered + 10min reconciliation [x]
 
 - [x] ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources (accepted)
 - [x] ADR-006: Oxigraph as Embedded Triplestore (accepted)
