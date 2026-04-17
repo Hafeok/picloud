@@ -1119,6 +1119,33 @@ async fn handle_command(
     }
 }
 
+/// Compare two dotted version strings and return `true` if `available` is at
+/// least `required` (semantic-version comparison with lexicographic fallback).
+///
+/// Accepts versions of the form "major.minor.patch"; non-numeric components
+/// fall back to ordinary string comparison.
+fn version_at_least(available: &str, required: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> {
+        s.split('.')
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let a = parse(available);
+    let r = parse(required);
+    let len = a.len().max(r.len());
+    for i in 0..len {
+        let av = a.get(i).copied().unwrap_or(0);
+        let rv = r.get(i).copied().unwrap_or(0);
+        if av > rv {
+            return true;
+        }
+        if av < rv {
+            return false;
+        }
+    }
+    true
+}
+
 /// Handle resource apply — parses a ResourceFile, emits events for each resource.
 async fn handle_apply(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -1192,11 +1219,173 @@ async fn handle_apply(
                     );
                 }
 
+                // ADR-056 rule 6 (FT-069): validate `dataProducts` dependencies.
+                // Every referenced data product must already exist in the catalog;
+                // otherwise we reject the apply with `DataProductNotFound` and do
+                // NOT emit the ProductDeployed event — the consumer must not be
+                // deployed in a partial state.
+                if !p.data_products.is_empty() {
+                    for dep in &p.data_products {
+                        let (owning_product, dp_name) = match dep.source.split_once('/') {
+                            Some(pair) => pair,
+                            None => {
+                                return (
+                                    StatusCode::BAD_REQUEST,
+                                    Json(serde_json::json!({
+                                        "error": format!(
+                                            "DataProductNotFound: invalid dataProducts source '{}' (expected 'owning-product/data-product-name')",
+                                            dep.source
+                                        ),
+                                    })),
+                                );
+                            }
+                        };
+
+                        let dp_iri = format!(
+                            "{}/data-products/{}",
+                            iri_builder.product(owning_product).as_str().trim_end_matches('/'),
+                            dp_name
+                        );
+
+                        // First consult the event log directly (avoids projection lag).
+                        let mut dp_exists = false;
+                        let mut latest_version: Option<String> = None;
+                        let mut declared_deleted = false;
+                        {
+                            let events = event_log.events_since(0).await;
+                            for evt in &events {
+                                match evt.event_type.as_str() {
+                                    "DataProductDeclared" => {
+                                        let matches = evt
+                                            .payload
+                                            .get("data_product_iri")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s == dp_iri)
+                                            .unwrap_or(false)
+                                            || (evt
+                                                .payload
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                == Some(dp_name)
+                                                && evt
+                                                    .payload
+                                                    .get("product")
+                                                    .and_then(|v| v.as_str())
+                                                    == Some(owning_product));
+                                        if matches {
+                                            dp_exists = true;
+                                            declared_deleted = false;
+                                            if let Some(v) = evt
+                                                .payload
+                                                .get("version")
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                latest_version = Some(v.to_string());
+                                            }
+                                        }
+                                    }
+                                    "DataProductDeleted" => {
+                                        let matches = evt
+                                            .payload
+                                            .get("data_product_iri")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s == dp_iri)
+                                            .unwrap_or(false);
+                                        if matches {
+                                            declared_deleted = true;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        if declared_deleted {
+                            dp_exists = false;
+                        }
+
+                        // Fallback: consult the RDF catalog in case events were compacted.
+                        if !dp_exists {
+                            if let Some(ref projector) = state.projector {
+                                let ask = format!(
+                                    "ASK {{ <{}> a <https://picloud.local/ontology#DataProduct> }}",
+                                    dp_iri
+                                );
+                                if let Ok(result) = projector.query(&ask).await {
+                                    let hit = result
+                                        .bindings
+                                        .first()
+                                        .and_then(|b| b.get("result"))
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    if hit {
+                                        dp_exists = true;
+                                        // Try to read version too.
+                                        let select = format!(
+                                            "SELECT ?v WHERE {{ <{}> <https://picloud.local/ontology#version> ?v }} LIMIT 1",
+                                            dp_iri
+                                        );
+                                        if let Ok(r) = projector.query(&select).await {
+                                            latest_version = r
+                                                .bindings
+                                                .first()
+                                                .and_then(|b| b.get("v"))
+                                                .and_then(|c| c.get("value"))
+                                                .and_then(|s| s.as_str())
+                                                .map(|s| s.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !dp_exists {
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(serde_json::json!({
+                                    "error": format!(
+                                        "DataProductNotFound: '{}' (required by product '{}' — minVersion '{}')",
+                                        dep.source, p.name, dep.min_version
+                                    ),
+                                })),
+                            );
+                        }
+
+                        // Version check: if we know the published version, ensure it
+                        // is at least the declared minVersion (lexicographic semver).
+                        if let Some(available) = latest_version.as_deref() {
+                            if !version_at_least(available, &dep.min_version) {
+                                return (
+                                    StatusCode::BAD_REQUEST,
+                                    Json(serde_json::json!({
+                                        "error": format!(
+                                            "DataProductNotFound: '{}' at minVersion '{}' — available version is '{}'",
+                                            dep.source, dep.min_version, available
+                                        ),
+                                    })),
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Carry the `data_products` and `capabilities` fields on the
+                // ProductDeployed payload so the RDF projector can record the
+                // consumer link (see ADR-056 rule 8 deletion guard).
+                let data_products_payload: Vec<serde_json::Value> = p
+                    .data_products
+                    .iter()
+                    .map(|d| serde_json::json!({
+                        "source": d.source,
+                        "min_version": d.min_version,
+                    }))
+                    .collect();
+
                 let payload = serde_json::json!({
                     "product_iri": iri.as_str(),
                     "product_name": p.name,
                     "version": p.version,
                     "description": p.description,
+                    "data_products": data_products_payload,
                 });
                 (iri, "ProductDeployed", None, payload)
             }

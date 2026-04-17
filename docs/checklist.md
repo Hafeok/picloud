@@ -626,11 +626,11 @@
 - [x] TC-203: data_product_slo_breach_and_restore (scenario) — passing
 - [x] TC-207: DataProductSLOBreached (scenario) — passing
 
-### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [ ]
+### FT-069 — dataProducts field on product — consumer dependency validated at resource apply time [x]
 
 - [x] ADR-056: Data Products and Data Domains as First-Class Analytical Sharing Primitives (accepted)
 - [x] TC-231: Data product declared, projection rebuilt on trigger event, second product queries it (exit-criteria) — passing
-- [!] TC-202: data_product_consumer_blocked_without_product (scenario) — failing
+- [x] TC-202: data_product_consumer_blocked_without_product (scenario) — passing
 
 ### FT-070 — Data product lifecycle events [ ]
 

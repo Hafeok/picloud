@@ -2,7 +2,7 @@
 id: FT-069
 title: dataProducts field on product — consumer dependency validated at resource apply time
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-056
