@@ -526,7 +526,7 @@
 - [x] TC-266: Ontology .ttl and .shacl files bound to product version and queryable (scenario) — passing
 - [x] TC-323: Ontology exit — .ttl and .shacl bound to version and queryable (exit-criteria) — passing
 
-### FT-054 — RDFS/OWL inference enabled on platform and product graphs [ ]
+### FT-054 — RDFS/OWL inference enabled on platform and product graphs [x]
 
 - [x] ADR-039: Embedded RDFS/OWL Inference via Oxigraph (accepted)
 - [x] ADR-006: Oxigraph as Embedded Triplestore (accepted)

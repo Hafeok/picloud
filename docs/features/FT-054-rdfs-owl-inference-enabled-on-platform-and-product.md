@@ -2,7 +2,7 @@
 id: FT-054
 title: RDFS/OWL inference enabled on platform and product graphs
 phase: 3
-status: planned
+status: complete
 depends-on: []
 adrs:
 - ADR-039
