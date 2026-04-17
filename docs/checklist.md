@@ -724,7 +724,7 @@
 - [x] TC-281: Aggregate-scoped replay replays events for single aggregate (scenario) — passing
 - [x] TC-338: Scoped replay exit — single aggregate replay completes (exit-criteria) — passing
 
-### FT-083 — event-subscription resource type [ ]
+### FT-083 — event-subscription resource type [x]
 
 - [x] ADR-022: Inter-Product Event Subscriptions as First-Class Resources (accepted)
 - [x] ADR-018: Product Event Bus as Only Inter-Product Interface (accepted)
