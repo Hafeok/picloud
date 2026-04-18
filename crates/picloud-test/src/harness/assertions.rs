@@ -292,6 +292,13 @@ pub async fn apply_resources(
 
 /// Apply a product resource and wait for it to appear in the RDF graph.
 /// Returns Ok(()) when the product is projected, Err if it times out.
+///
+/// Idempotency across test runs (TC-353): if a prior run left a product of
+/// this name on the cluster, the first apply returns 409 Conflict. This
+/// helper detects that case, issues a `POST /api/delete`, waits for the
+/// ProductDeleted event to propagate, then retries the apply once. Scenarios
+/// that seed test-scoped products can therefore run cleanly regardless of
+/// whether a prior run aborted before teardown.
 pub async fn apply_product_and_wait(
     ctx: &TestContext,
     name: &str,
@@ -302,9 +309,69 @@ pub async fn apply_product_and_wait(
         "name": name,
         "version": version
     });
-    let resp = apply_resource(ctx, product).await?;
+
+    let resp = apply_resource(ctx, product.clone()).await?;
     let status = resp.status();
-    if !status.is_success() {
+
+    if status == reqwest::StatusCode::CONFLICT {
+        // A lingering product from a prior run is blocking us. Delete it and
+        // retry once. Failure to delete is not fatal — the retry will still
+        // surface whatever error the server returns.
+        tracing::warn!(
+            product = name,
+            "apply returned 409 Conflict — deleting lingering product and retrying"
+        );
+
+        let delete_resp = http_post(
+            ctx,
+            "/api/delete",
+            serde_json::json!({ "product": name }),
+        )
+        .await?;
+        if !delete_resp.status().is_success()
+            && delete_resp.status().as_u16() != 202
+        {
+            let body = delete_resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "apply product returned 409 and delete retry failed: {}",
+                body
+            )
+            .into());
+        }
+
+        // Poll the graph until the product disappears (up to 15s) before
+        // retrying the apply. This lets the ProductDeleted event propagate
+        // through Raft + the RDF projector.
+        let gone_ask = format!(
+            "ASK {{ <https://picloud.local/products/{}> a <https://picloud.local/ontology#Product> }}",
+            name
+        );
+        let gone_deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while std::time::Instant::now() < gone_deadline {
+            match sparql_query(ctx, &gone_ask).await {
+                Ok(body) => {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                        if json.get("boolean").and_then(|v| v.as_bool()) == Some(false) {
+                            break;
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        let retry = apply_resource(ctx, product).await?;
+        let retry_status = retry.status();
+        if !retry_status.is_success() {
+            let body = retry.text().await.unwrap_or_default();
+            return Err(format!(
+                "apply product failed after delete retry ({}): {}",
+                retry_status, body
+            )
+            .into());
+        }
+    } else if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("apply product failed ({}): {}", status, body).into());
     }

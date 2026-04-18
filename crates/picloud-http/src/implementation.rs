@@ -1228,19 +1228,38 @@ async fn handle_apply(
             ResourceDeclaration::Product(p) => {
                 let iri = iri_builder.product(&p.name);
 
-                // Overwrite protection: check event log directly (avoids projection lag)
-                // First check event log for any existing ProductDeployed event
+                // Overwrite protection: check event log directly (avoids projection lag).
+                // Track both ProductDeployed and ProductDeleted to honour the latest
+                // lifecycle state — a product that was deployed and then deleted is
+                // no longer "in existence" and can be re-applied (TC-353).
                 let mut product_exists = false;
                 {
                     let events = event_log.events_since(0).await;
                     for evt in &events {
-                        if evt.event_type == "ProductDeployed" {
-                            if let Some(name) = evt.payload.get("product_name").and_then(|v| v.as_str()) {
-                                if name == p.name {
-                                    product_exists = true;
-                                    break;
+                        match evt.event_type.as_str() {
+                            "ProductDeployed" => {
+                                if let Some(name) = evt
+                                    .payload
+                                    .get("product_name")
+                                    .and_then(|v| v.as_str())
+                                {
+                                    if name == p.name {
+                                        product_exists = true;
+                                    }
                                 }
                             }
+                            "ProductDeleted" => {
+                                if let Some(name) = evt
+                                    .payload
+                                    .get("product_name")
+                                    .and_then(|v| v.as_str())
+                                {
+                                    if name == p.name {
+                                        product_exists = false;
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }

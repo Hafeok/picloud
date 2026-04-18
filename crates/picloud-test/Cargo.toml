@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+name = "picloud_test"
+path = "src/lib.rs"
+
 [[bin]]
 name = "picloud-test"
 path = "src/main.rs"
@@ -28,3 +32,13 @@ opentelemetry = { version = "0.27", features = ["trace"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "trace"] }
 opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "trace"] }
 url = { workspace = true }
+
+# Dev-only: integration tests that exercise the harness helpers against an
+# in-process picloud-server need the server stack (TC-353 regression).
+# These dependencies are NOT part of the runtime crate — the production
+# binary still only depends on picloud-domain per ADR-034.
+[dev-dependencies]
+picloud-events = { workspace = true }
+picloud-http = { workspace = true }
+picloud-rdf = { workspace = true }
+axum = { workspace = true }

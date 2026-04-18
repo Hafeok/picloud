@@ -2,7 +2,7 @@
 id: TC-355
 title: Cluster node listing reflects all mDNS-discovered peers
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-013
@@ -11,9 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc355_cluster_node_listing_reflects_all_mdns_peers
-last-run: 2026-04-17T15:53:25.405693997+00:00
-last-run-duration: 0.9s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T13:18:28.813162246+00:00
+last-run-duration: 0.5s
 ---
 
 ## Description

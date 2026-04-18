@@ -27,3 +27,8 @@ tokio = { workspace = true }
 tempfile = "3"
 sled = { workspace = true }
 serde_json = { workspace = true }
+# TC-355 regression test spins up in-process `picloud-server` instances,
+# which needs the HTTP server to observe `GET /` responses. Keeping this
+# confined to dev-dependencies preserves the slice-independence rule.
+picloud-http = { workspace = true }
+reqwest = { workspace = true }

@@ -1,10 +1,3 @@
-mod config;
-mod harness;
-mod invariants;
-mod probes;
-mod scenarios;
-mod upgrade;
-
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -12,9 +5,10 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use config::ClusterConfig;
-use harness::results::RunSummary;
-use harness::runner::TestContext;
+use picloud_test::config::ClusterConfig;
+use picloud_test::harness::results::RunSummary;
+use picloud_test::harness::runner::TestContext;
+use picloud_test::{harness, scenarios, upgrade};
 
 #[derive(Parser)]
 #[command(name = "picloud-test", about = "PiCloud integration & E2E test runner")]
