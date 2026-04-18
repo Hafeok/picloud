@@ -11,8 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc355_cluster_node_listing_reflects_all_mdns_peers
-last-run: 2026-04-18T18:30:22.849110776+00:00
-last-run-duration: 2.4s
+last-run: 2026-04-18T18:31:11.609826359+00:00
+last-run-duration: 0.7s
 ---
 
 ## Description

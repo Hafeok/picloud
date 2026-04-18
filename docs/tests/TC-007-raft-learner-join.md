@@ -11,7 +11,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "raft-learner-join"
-last-run: 2026-04-18T18:01:56.030164399+00:00
+last-run: 2026-04-18T18:31:11.609826359+00:00
 last-run-duration: 0.0s
 ---
 

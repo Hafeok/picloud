@@ -209,7 +209,7 @@
 - [x] TC-355: Cluster node listing reflects all mDNS-discovered peers (scenario) — passing
 - [x] TC-358: Two picloud-server processes on separate Pi nodes join a single Raft cluster via mDNS (scenario) — passing
 
-### FT-014 — Raft consensus and leader election (openraft) [~]
+### FT-014 — Raft consensus and leader election (openraft) [x]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing

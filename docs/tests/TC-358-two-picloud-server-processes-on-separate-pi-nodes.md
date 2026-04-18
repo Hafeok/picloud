@@ -9,8 +9,8 @@ validates:
   features: [FT-013, FT-014]
   adrs: [ADR-004]
 phase: 1
-last-run: 2026-04-18T18:30:22.849110776+00:00
-last-run-duration: 1.6s
+last-run: 2026-04-18T18:31:11.609826359+00:00
+last-run-duration: 1.4s
 ---
 
 ## Description
