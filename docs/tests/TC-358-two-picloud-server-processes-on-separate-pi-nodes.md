@@ -33,6 +33,29 @@ Existing TC-237 / TC-293 exercise mDNS discovery in unit tests on localhost
 and both pass, so the regression is in the handoff between discovery and
 Raft enrollment when running as real binaries on the LAN.
 
+**Reproduced 2026-04-18 (second run).** Server logs on both nodes show the
+same pattern within ~15 ms of mDNS `Registered`:
+
+```
+Registered mDNS service            → t+0ms
+Cluster node started, browsing     → t+0ms
+No peers discovered — bootstrapping as single-node Raft cluster   → t+16ms
+```
+
+Root cause likely: the bootstrap decision is taken synchronously right after
+mDNS register, before the async browse loop has had time to observe any peer
+TXT records. Even a 7 s stagger between node3 and worker02 does not help —
+by the time worker02 browses, node3's already-bootstrapped cluster is just a
+bare mDNS record, and worker02 still logs "No peers discovered". There is
+no enrollment handshake.
+
+Second, entangled symptom: on restart the sled-backed Raft store refuses
+re-init with `not allowed to initialize due to current raft state`, so the
+server falls back to in-memory state and *generates a fresh node_id*,
+guaranteeing a cluster_id mismatch across restarts. This is downstream of
+the same bug — once a node bootstraps a solo cluster, nothing later can
+merge it into a peer's cluster.
+
 ## Invariant
 
 When two `picloud-server` processes are started on the same LAN with the
