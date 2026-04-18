@@ -2,7 +2,7 @@
 id: TC-185
 title: adr_test_coverage_completeness
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-009
@@ -11,9 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "adr_test_coverage_completeness"
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 0.9s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 1.4s
 ---
 
 parse all ADRs in the repository. Assert every ADR that has a status of `Accepted` contains a `Test coverage` section with at least one scenario test and at least one exit criterion.

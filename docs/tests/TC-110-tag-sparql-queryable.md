@@ -2,7 +2,7 @@
 id: TC-110
 title: tag_sparql_queryable
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-009
@@ -11,9 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "tag_sparql_queryable"
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 1.2s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 0.8s
 ---
 
 run `picloud tag find environment=production`. Assert all tagged resources returned. Run the equivalent SPARQL query directly and assert identical results.

@@ -11,8 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "tag_remove"
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 1.2s
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 0.7s
 ---
 
 remove a tag. Assert `TagRemoved` event in log and tag triple absent from graph within projection latency budget.

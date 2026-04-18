@@ -12,8 +12,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: all_builtin_rules
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 0.9s
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 1.8s
 ---
 
 for each built-in alert rule (CPU temp, memory, disk, node unreachable, workload failed), trigger the threshold condition and assert the correct `AlertFired` event type and severity.

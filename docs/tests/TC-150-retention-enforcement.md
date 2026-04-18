@@ -2,7 +2,7 @@
 id: TC-150
 title: retention_enforcement
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-009
@@ -11,9 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "retention_enforcement"
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 0.8s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 0.7s
 ---
 
 write Parquet partitions with timestamps older than the configured retention window. Run the hourly retention cleanup task. Assert old partition directories are deleted and newer ones remain.

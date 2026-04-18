@@ -2,7 +2,7 @@
 id: TC-141
 title: flag_version_evaluation
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-009
@@ -11,9 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "flag_version_evaluation"
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 1.0s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 0.7s
 ---
 
 deploy flag `new-upload-flow` with `version: = 2`. Deploy workload at version 2. Assert flag evaluates as active. Deploy another workload at version 1. Assert flag evaluates as inactive.

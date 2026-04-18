@@ -2,7 +2,7 @@
 id: TC-108
 title: tag_rdf_projection
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-009
@@ -11,9 +11,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "tag_rdf_projection"
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 1.2s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 0.9s
 ---
 
 add a tag. Query the resource IRI via SPARQL. Assert the `picloud:tag` triple with correct `picloud:tagKey` and `picloud:tagValue` is present within the projection latency budget.

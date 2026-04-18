@@ -12,6 +12,6 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: metrics_upsert
-last-run: 2026-04-17T15:53:31.817687922+00:00
-last-run-duration: 0.9s
+last-run: 2026-04-18T13:52:32.397336516+00:00
+last-run-duration: 0.8s
 ---
