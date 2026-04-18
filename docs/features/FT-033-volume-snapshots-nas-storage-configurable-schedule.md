@@ -2,7 +2,7 @@
 id: FT-033
 title: Volume snapshots — NAS storage, configurable schedule and retention
 phase: 2
-status: in-progress
+status: complete
 depends-on: []
 adrs: []
 tests:

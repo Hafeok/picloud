@@ -305,6 +305,51 @@ impl LocalSnapshotManager {
             .to_string()
     }
 
+    /// Parse a snapshot directory name back to a `DateTime<Utc>`.
+    ///
+    /// Snapshot directories are named with `format_ts()` — the inverse of
+    /// this function. Parsing the name gives a deterministic, filesystem-
+    /// independent `created_at`, avoiding the coarse-granularity drift of
+    /// `Metadata::created()` which can lag `SystemTime::now()` by up to a
+    /// kernel jiffy (~10 ms). That drift is the root cause of TC-246
+    /// flakiness under parallel workspace test execution (TC-354).
+    fn parse_snapshot_name(name: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        // Our naming format is `%Y-%m-%dT%H-%M-%S%.6fZ` — we replace the
+        // time-component dashes with colons to satisfy RFC3339, then parse.
+        // Example: "2025-07-01T02-00-00.123456Z" → "2025-07-01T02:00:00.123456Z"
+        if name.len() < 20 {
+            return None;
+        }
+        let (date, rest) = name.split_at(10); // "YYYY-MM-DD"
+        let rest_bytes = rest.as_bytes();
+        if rest_bytes.first() != Some(&b'T') {
+            return None;
+        }
+        // Replace the two '-' separators in the time component with ':'
+        // positions: rest = "THH-MM-SS[.frac]Z"
+        //             0    1 2 3 4 5 6 7...
+        if rest_bytes.len() < 9 || rest_bytes[3] != b'-' || rest_bytes[6] != b'-' {
+            return None;
+        }
+        let mut fixed = String::with_capacity(date.len() + rest.len());
+        fixed.push_str(date);
+        fixed.push('T');
+        fixed.push_str(&rest[1..3]);
+        fixed.push(':');
+        fixed.push_str(&rest[4..6]);
+        fixed.push(':');
+        fixed.push_str(&rest[7..]);
+        chrono::DateTime::parse_from_rfc3339(&fixed)
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+    }
+
+    /// Format a `DateTime<Utc>` into a filesystem-safe snapshot directory name.
+    /// Inverse of `parse_snapshot_name`.
+    fn format_ts(ts: chrono::DateTime<chrono::Utc>) -> String {
+        ts.format("%Y-%m-%dT%H-%M-%S%.6fZ").to_string()
+    }
+
     /// Calculate directory size in bytes.
     fn dir_size(path: &std::path::Path) -> u64 {
         if !path.exists() {
@@ -349,9 +394,18 @@ impl LocalSnapshotManager {
     }
 }
 
-#[async_trait]
-impl SnapshotManager for LocalSnapshotManager {
-    async fn create_snapshot(&self, volume_iri: &ResourceIri) -> Result<SnapshotInfo> {
+impl LocalSnapshotManager {
+    /// Create a snapshot at a specific logical timestamp.
+    ///
+    /// The directory name encodes `at_time` via `format_ts`, which is later
+    /// parsed back by `list_snapshots`. This keeps `created_at` deterministic
+    /// and independent of filesystem metadata granularity — essential for
+    /// the scheduler in `SnapshotScheduler::run_once` (see TC-354).
+    pub async fn create_snapshot_at(
+        &self,
+        volume_iri: &ResourceIri,
+        at_time: chrono::DateTime<chrono::Utc>,
+    ) -> Result<SnapshotInfo> {
         let volume_name = Self::volume_name(volume_iri);
         let volume_dir = self.base_path.join(&volume_name);
 
@@ -361,11 +415,15 @@ impl SnapshotManager for LocalSnapshotManager {
             });
         }
 
-        let now = chrono::Utc::now();
-        let timestamp = now.format("%Y-%m-%dT%H-%M-%S%.6fZ").to_string();
-        let snapshot_path = self
-            .snapshot_dir(&volume_name)
-            .join(&timestamp);
+        // Protect against two snapshots sharing the same directory name under
+        // tight loops / parallel test execution: if the target path already
+        // exists, bump the timestamp forward by 1 microsecond until unique.
+        let mut ts = at_time;
+        let mut snapshot_path = self.snapshot_dir(&volume_name).join(Self::format_ts(ts));
+        while snapshot_path.exists() {
+            ts = ts + chrono::Duration::microseconds(1);
+            snapshot_path = self.snapshot_dir(&volume_name).join(Self::format_ts(ts));
+        }
 
         Self::copy_dir_all(&volume_dir, &snapshot_path).map_err(|e| {
             PiCloudError::Internal(format!(
@@ -387,8 +445,15 @@ impl SnapshotManager for LocalSnapshotManager {
             volume_iri: volume_iri.clone(),
             snapshot_path: snapshot_path.to_string_lossy().to_string(),
             size_bytes,
-            created_at: now,
+            created_at: ts,
         })
+    }
+}
+
+#[async_trait]
+impl SnapshotManager for LocalSnapshotManager {
+    async fn create_snapshot(&self, volume_iri: &ResourceIri) -> Result<SnapshotInfo> {
+        self.create_snapshot_at(volume_iri, chrono::Utc::now()).await
     }
 
     async fn list_snapshots(&self, volume_iri: &ResourceIri) -> Result<Vec<SnapshotInfo>> {
@@ -408,12 +473,22 @@ impl SnapshotManager for LocalSnapshotManager {
             if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                 let path = entry.path();
                 let size_bytes = Self::dir_size(&path);
-                let created_at = entry
-                    .metadata()
-                    .ok()
-                    .and_then(|m| m.created().ok())
-                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t))
-                    .unwrap_or_else(chrono::Utc::now);
+                // Parse the directory name for a deterministic created_at —
+                // avoids filesystem metadata granularity drift (see TC-354).
+                // Fall back to filesystem metadata only if parsing fails
+                // (legacy / externally-created snapshots).
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let created_at = Self::parse_snapshot_name(&name).unwrap_or_else(|| {
+                    entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.created().ok())
+                        .map(|t| chrono::DateTime::<chrono::Utc>::from(t))
+                        .unwrap_or_else(chrono::Utc::now)
+                });
 
                 snapshots.push(SnapshotInfo {
                     volume_iri: volume_iri.clone(),
@@ -589,13 +664,31 @@ impl SnapshotManager for LocalSnapshotManager {
 ///
 /// In production this runs as a background Tokio task. For testing it
 /// exposes `run_once` which performs a single evaluation cycle.
-pub struct SnapshotScheduler<S: SnapshotManager> {
-    snapshot_manager: Arc<S>,
+///
+/// **Time model (TC-354):** the scheduler tracks the most recent logical
+/// snapshot time per volume in an in-memory map, keyed by IRI. When
+/// `run_once` is invoked with a simulated `now`, snapshots are created
+/// AT that `now` (via `create_snapshot_at`) rather than at wall-clock
+/// `Utc::now()`. This makes the scheduler deterministic under parallel
+/// test execution and does not depend on filesystem creation-time
+/// granularity (which can lag wall-clock by up to one kernel jiffy).
+pub struct SnapshotScheduler {
+    snapshot_manager: Arc<LocalSnapshotManager>,
+    /// Per-volume logical "last snapshot taken at" time — the `now` value
+    /// passed to `run_once` when a snapshot was last created. Kept behind
+    /// an `RwLock` so multiple concurrent schedulers across tests do not
+    /// interfere with each other. The map is scoped to this scheduler
+    /// instance, so each test that constructs its own scheduler has its
+    /// own isolated state.
+    last_run: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
 }
 
-impl<S: SnapshotManager> SnapshotScheduler<S> {
-    pub fn new(snapshot_manager: Arc<S>) -> Self {
-        Self { snapshot_manager }
+impl SnapshotScheduler {
+    pub fn new(snapshot_manager: Arc<LocalSnapshotManager>) -> Self {
+        Self {
+            snapshot_manager,
+            last_run: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     /// Determine whether a snapshot is due given the schedule and the most
@@ -617,8 +710,8 @@ impl<S: SnapshotManager> SnapshotScheduler<S> {
     }
 
     /// Execute a single scheduling cycle for one volume:
-    /// 1. Check if a snapshot is due.
-    /// 2. Create a snapshot if due.
+    /// 1. Check if a snapshot is due (using in-memory last-run tracking).
+    /// 2. Create a snapshot at the logical `now` timestamp if due.
     /// 3. Enforce retention.
     ///
     /// Returns `Some(SnapshotInfo)` when a snapshot was created, `None` if
@@ -633,14 +726,40 @@ impl<S: SnapshotManager> SnapshotScheduler<S> {
             return Ok(None);
         }
 
-        let existing = self.snapshot_manager.list_snapshots(volume_iri).await?;
-        let last = existing.first().map(|s| s.created_at);
+        let key = volume_iri.as_str().to_string();
+
+        // Prefer the in-memory last-run time (logical, deterministic).
+        // Fall back to list_snapshots on cold start (e.g. first run after
+        // process restart) so we do not double-snapshot immediately after.
+        let last = {
+            let guard = self.last_run.read().await;
+            guard.get(&key).copied()
+        };
+        let last = match last {
+            Some(t) => Some(t),
+            None => {
+                let existing = self.snapshot_manager.list_snapshots(volume_iri).await?;
+                existing.first().map(|s| s.created_at)
+            }
+        };
 
         if !Self::is_due(&config.schedule, last, now) {
             return Ok(None);
         }
 
-        let info = self.snapshot_manager.create_snapshot(volume_iri).await?;
+        let info = self
+            .snapshot_manager
+            .create_snapshot_at(volume_iri, now)
+            .await?;
+
+        // Record the logical time we ran at. We use `info.created_at` rather
+        // than `now` because `create_snapshot_at` may have bumped the
+        // timestamp forward by one or more microseconds to avoid a directory
+        // name collision — so `info.created_at` is the authoritative time.
+        {
+            let mut guard = self.last_run.write().await;
+            guard.insert(key, info.created_at);
+        }
 
         // Enforce retention after creating a new snapshot
         self.snapshot_manager
@@ -1114,16 +1233,21 @@ mod tests {
     // TC-246 — Volume snapshot created on schedule and restorable to new volume
     // -----------------------------------------------------------------------
 
-    #[tokio::test]
-    async fn tc246_volume_snapshot_created_on_schedule_and_restorable_to_new_volume() {
+    /// The full TC-246 scenario as a callable helper so that TC-354 can
+    /// invoke it concurrently with sibling tests.
+    ///
+    /// Each invocation uses its own `base` temp directory and its own
+    /// volume-name suffix, so two concurrent invocations cannot interfere
+    /// through the filesystem or through any in-memory scheduler state.
+    async fn tc246_scenario(base: PathBuf, suffix: &str) {
         use picloud_domain::storage::{SnapshotConfig, SnapshotRetention, SnapshotSchedule};
 
-        let base = temp_base_path();
         let backend = make_backend(base.clone(), 100);
         let snap_mgr = Arc::new(LocalSnapshotManager::new(base.clone()));
         let scheduler = super::SnapshotScheduler::new(snap_mgr.clone());
 
-        let volume_iri = make_volume_iri("sched-vol");
+        let vol_name = format!("sched-vol-{}", suffix);
+        let volume_iri = make_volume_iri(&vol_name);
         let intent = StorageIntent::default();
 
         // --- Allocate a volume and write test data ---
@@ -1171,7 +1295,8 @@ mod tests {
         assert!(listed.len() >= 2, "at least 2 snapshots should exist");
 
         // --- Restore the first snapshot to a NEW volume ---
-        let new_volume_iri = make_volume_iri("restored-vol");
+        let restored_name = format!("restored-vol-{}", suffix);
+        let new_volume_iri = make_volume_iri(&restored_name);
         // Extract the timestamp portion from the first snapshot path
         let snap_timestamp = std::path::Path::new(&snap1.snapshot_path)
             .file_name()
@@ -1185,7 +1310,7 @@ mod tests {
             .unwrap();
 
         // --- Verify the restored volume contains the original data ---
-        let restored_data_file = base.join("restored-vol").join("data.txt");
+        let restored_data_file = base.join(&restored_name).join("data.txt");
         assert!(
             restored_data_file.exists(),
             "restored volume should contain data.txt"
@@ -1230,8 +1355,12 @@ mod tests {
             .await
             .unwrap();
         assert!(disabled_result.is_none(), "disabled config should not create snapshot");
+    }
 
-        // Cleanup
+    #[tokio::test]
+    async fn tc246_volume_snapshot_created_on_schedule_and_restorable_to_new_volume() {
+        let base = temp_base_path();
+        tc246_scenario(base.clone(), "single").await;
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1342,5 +1471,145 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -----------------------------------------------------------------------
+    // TC-354 — Volume snapshot scheduler test passes under full workspace run
+    // -----------------------------------------------------------------------
+    //
+    // Regression guard for flakiness observed on node3 (2026-04-17): TC-246
+    // failed under `cargo test --workspace` but passed in isolation. Root
+    // cause was that `list_snapshots` used `Metadata::created()` whose
+    // kernel-jiffy granularity can flip relative to `SystemTime::now()`
+    // under load, making `(T0 + 1h) - last >= 1h` nondeterministic.
+    //
+    // Fixes applied:
+    //   * `LocalSnapshotManager::list_snapshots` now parses the snapshot
+    //     directory name for a deterministic `created_at`, with filesystem
+    //     metadata only as a fallback for legacy snapshots.
+    //   * `SnapshotScheduler` creates snapshots at the logical `now`
+    //     passed to `run_once` (via `create_snapshot_at`) and tracks the
+    //     last run time per volume in an in-memory map. Simulated time
+    //     therefore no longer depends on wall-clock drift.
+    //
+    // This test runs the full TC-246 scenario many times in parallel on a
+    // multi-thread Tokio runtime, alongside concurrent TC-303-like snapshot
+    // workloads, and asserts every invocation reaches its assertions.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn tc354_volume_snapshot_scheduler_deterministic_under_workspace() {
+        // 1. Spawn many concurrent instances of the TC-246 scenario. If any
+        //    shared state leaks (a static clock, a `/tmp` path reused
+        //    across tests, a `OnceLock` scheduler, …) one of these will
+        //    observe inconsistent state and panic. Tokio's JoinHandle
+        //    converts a panicked task into a JoinError — we surface those
+        //    with a message identifying which replica failed.
+        let tc246_fanout = 8usize;
+        let mut tc246_tasks = Vec::with_capacity(tc246_fanout);
+        for i in 0..tc246_fanout {
+            let base = temp_base_path();
+            let suffix = format!("t354-{}", i);
+            tc246_tasks.push((
+                suffix.clone(),
+                base.clone(),
+                tokio::spawn(async move {
+                    tc246_scenario(base, &suffix).await;
+                }),
+            ));
+        }
+
+        // 2. Also spawn sibling snapshot-lifecycle workloads concurrently —
+        //    mimicking tc303 / tc248-style create/list/restore/delete
+        //    patterns. These share the same Tokio runtime and hammer the
+        //    same crate-level code paths.
+        let sibling_fanout = 6usize;
+        let mut sibling_tasks = Vec::with_capacity(sibling_fanout);
+        for i in 0..sibling_fanout {
+            sibling_tasks.push(tokio::spawn(async move {
+                let base = temp_base_path();
+                let backend = make_backend(base.clone(), 100);
+                let snap_mgr = LocalSnapshotManager::new(base.clone());
+                let iri = make_volume_iri(&format!("t354-sibling-{}", i));
+                let intent = StorageIntent::default();
+                let handle = backend
+                    .allocate_volume(&iri, 5, &intent, &VolumeType::Mounted)
+                    .await
+                    .unwrap();
+                let f = std::path::PathBuf::from(&handle.device_path).join("payload.txt");
+                std::fs::write(&f, format!("sibling-{}", i).as_bytes()).unwrap();
+                // create + list + restore + delete a handful of times
+                for _ in 0..3 {
+                    let s = snap_mgr.create_snapshot(&iri).await.unwrap();
+                    let ts = std::path::Path::new(&s.snapshot_path)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+                    let list = snap_mgr.list_snapshots(&iri).await.unwrap();
+                    assert!(!list.is_empty());
+                    // list must be newest-first (deterministic ordering)
+                    for w in list.windows(2) {
+                        assert!(
+                            w[0].created_at >= w[1].created_at,
+                            "list_snapshots must be newest-first"
+                        );
+                    }
+                    snap_mgr.restore_snapshot(&iri, &ts).await.unwrap();
+                    snap_mgr.delete_snapshot(&iri, &s.snapshot_path).await.unwrap();
+                }
+                let _ = std::fs::remove_dir_all(&base);
+            }));
+        }
+
+        // 3. Also hammer the scheduler `is_due` math concurrently — this
+        //    exercises the code path that was previously reading coarse
+        //    filesystem time.
+        let is_due_tasks: Vec<_> = (0..4)
+            .map(|_| {
+                tokio::spawn(async move {
+                    use picloud_domain::storage::SnapshotSchedule;
+                    let now = chrono::Utc::now();
+                    assert!(super::SnapshotScheduler::is_due(
+                        &SnapshotSchedule::Hourly,
+                        None,
+                        now
+                    ));
+                    assert!(!super::SnapshotScheduler::is_due(
+                        &SnapshotSchedule::Hourly,
+                        Some(now),
+                        now + chrono::Duration::minutes(30)
+                    ));
+                    assert!(super::SnapshotScheduler::is_due(
+                        &SnapshotSchedule::Hourly,
+                        Some(now),
+                        now + chrono::Duration::hours(1)
+                    ));
+                })
+            })
+            .collect();
+
+        // 4. Await all tasks; surface any panic with a clear message
+        //    identifying which concurrent TC-246 replica failed.
+        for (suffix, base, task) in tc246_tasks {
+            let outcome = task.await;
+            let _ = std::fs::remove_dir_all(&base);
+            if let Err(join_err) = outcome {
+                if join_err.is_panic() {
+                    // Re-raise with a tagged message so we know which
+                    // replica failed even when running in parallel.
+                    panic!(
+                        "concurrent tc246 replica {} panicked: {}",
+                        suffix, join_err
+                    );
+                } else {
+                    panic!("tc246 replica {} join failed: {}", suffix, join_err);
+                }
+            }
+        }
+        for task in sibling_tasks {
+            task.await.expect("sibling task join failed");
+        }
+        for task in is_due_tasks {
+            task.await.expect("is_due task join failed");
+        }
     }
 }

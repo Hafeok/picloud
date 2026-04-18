@@ -2,7 +2,7 @@
 id: TC-354
 title: Volume snapshot scheduler test passes in full workspace cargo test run
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-033
@@ -11,9 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc354_volume_snapshot_scheduler_deterministic_under_workspace
-last-run: 2026-04-18T11:08:58.593422020+00:00
-last-run-duration: 0.6s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T14:09:30.707212670+00:00
+last-run-duration: 0.5s
 ---
 
 ## Description

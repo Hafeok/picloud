@@ -407,11 +407,11 @@
 
 - [x] TC-226: Product with container, volume, and workload identity deploys end-to-end (exit-criteria) — passing
 
-### FT-033 — Volume snapshots — NAS storage, configurable schedule and retention [~]
+### FT-033 — Volume snapshots — NAS storage, configurable schedule and retention [x]
 
 - [x] TC-246: Volume snapshot created on schedule and restorable to new volume (scenario) — passing
 - [x] TC-303: Volume snapshots exit — snapshot created, listed, and restored (exit-criteria) — passing
-- [!] TC-354: Volume snapshot scheduler test passes in full workspace cargo test run (scenario) — failing
+- [x] TC-354: Volume snapshot scheduler test passes in full workspace cargo test run (scenario) — passing
 
 ### FT-034 — Offsite backup — S3-compatible, client-side encryption, incremental deduplication [x]
 
