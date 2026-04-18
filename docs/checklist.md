@@ -202,13 +202,14 @@
 - [x] TC-101: composition_root_only (scenario) — passing
 - [x] TC-102: cargo deny (scenario) — passing
 
-### FT-013 — mDNS node discovery [x]
+### FT-013 — mDNS node discovery [~]
 
 - [x] TC-237: mDNS peer discovery finds all LAN nodes within 5 seconds (scenario) — passing
 - [x] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — passing
 - [x] TC-355: Cluster node listing reflects all mDNS-discovered peers (scenario) — passing
+- [!] TC-358: Two picloud-server processes on separate Pi nodes join a single Raft cluster via mDNS (scenario) — failing
 
-### FT-014 — Raft consensus and leader election (openraft) [x]
+### FT-014 — Raft consensus and leader election (openraft) [~]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing
@@ -216,6 +217,7 @@
 - [x] TC-006: raft_leader_failover (scenario) — passing
 - [x] TC-007: raft_learner_join (scenario) — passing
 - [x] TC-355: Cluster node listing reflects all mDNS-discovered peers (scenario) — passing
+- [!] TC-358: Two picloud-server processes on separate Pi nodes join a single Raft cluster via mDNS (scenario) — failing
 
 ### FT-015 — Append-only event log with Raft replication [x]
 
