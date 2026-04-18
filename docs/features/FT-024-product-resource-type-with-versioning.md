@@ -2,7 +2,7 @@
 id: FT-024
 title: Product resource type with versioning
 phase: 2
-status: in-progress
+status: complete
 depends-on: []
 adrs: []
 tests:

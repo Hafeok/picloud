@@ -11,8 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc353_e2e_harness_cleans_up_products_across_runs
-last-run: 2026-04-17T19:41:56.446965639+00:00
-last-run-duration: 78.3s
+last-run: 2026-04-18T13:55:04.574299887+00:00
+last-run-duration: 32.9s
 ---
 
 ## Description
