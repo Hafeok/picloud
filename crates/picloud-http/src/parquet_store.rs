@@ -428,20 +428,27 @@ impl ParquetTelemetryStore {
     }
 
     /// Set a uniform retention period in hours (applies to all signal types).
-    pub fn with_retention_hours(self, hours: u64) -> Self {
-        // Block on the mutex to set — this is a builder method called once
+    pub fn with_retention_hours(mut self, hours: u64) -> Self {
         let policy = TelemetryRetentionPolicy {
             traces_hours: hours,
             metrics_hours: hours,
             logs_hours: hours,
         };
-        *self.retention_policy.blocking_lock() = policy;
+        // Use Arc::get_mut + Mutex::get_mut to avoid blocking_lock, which would
+        // panic if called from within a tokio runtime (e.g. main.rs #[tokio::main]).
+        // The builder owns the only Arc reference at this point, so get_mut is safe.
+        if let Some(m) = Arc::get_mut(&mut self.retention_policy) {
+            *m.get_mut() = policy;
+        }
         self
     }
 
     /// Set a per-signal retention policy (FT-049).
-    pub fn with_retention_policy(self, policy: TelemetryRetentionPolicy) -> Self {
-        *self.retention_policy.blocking_lock() = policy;
+    pub fn with_retention_policy(mut self, policy: TelemetryRetentionPolicy) -> Self {
+        // Same rationale as `with_retention_hours` — avoid blocking_lock in async contexts.
+        if let Some(m) = Arc::get_mut(&mut self.retention_policy) {
+            *m.get_mut() = policy;
+        }
         self
     }
 

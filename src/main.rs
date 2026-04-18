@@ -30,7 +30,7 @@ use picloud_rdf::{OxigraphProjector, OxigraphDataProductProjector};
 use picloud_registry::LocalRegistryBackend;
 use picloud_storage::{LocalStorageBackend, StorageReplicator};
 use picloud_workload::ProcessScheduler;
-use picloud_http::{BuiltInAlertEvaluator, CapabilityResolverImpl, InferenceEngine, JsonlTelemetryStore, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner, RdfDataProductSLOMonitor};
+use picloud_http::{build_main_telemetry_store, BuiltInAlertEvaluator, CapabilityResolverImpl, InferenceEngine, MetricsAgent, OtelAggregator, OtelStream, PiCloudHttpServer, Provisioner, RdfDataProductSLOMonitor};
 
 /// CLI arguments — only `--config` is supported; everything else
 /// comes from the TOML file or environment variables.
@@ -1016,10 +1016,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(168); // 7 days
-    let telemetry_store = Arc::new(
-        JsonlTelemetryStore::new(&telemetry_path)
-            .with_retention_hours(telemetry_retention_hours),
-    );
+    // ADR-046: ParquetTelemetryStore is the authoritative backend. It supports
+    // DataFusion SQL queries, which the CLI + E2E scenarios rely on via the
+    // `/api/telemetry/query` endpoint. The previous JSONL backend did not
+    // implement `query_sql` and produced 500 on the Pi 5 cluster (TC-356).
+    let telemetry_store =
+        build_main_telemetry_store(&telemetry_path, telemetry_retention_hours);
     let telemetry_store_trait: Arc<dyn picloud_domain::traits::TelemetryStore> =
         telemetry_store.clone();
 

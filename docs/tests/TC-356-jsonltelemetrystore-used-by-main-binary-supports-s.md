@@ -2,7 +2,7 @@
 id: TC-356
 title: JsonlTelemetryStore used by main binary supports SQL queries
 type: scenario
-status: failing
+status: passing
 runner: cargo-test
 runner-args: "tc356_main_binary_telemetry_backend_supports_sql"
 validates:
@@ -12,9 +12,8 @@ validates:
   adrs:
   - ADR-046
 phase: 3
-last-run: 2026-04-18T14:42:34.394891702+00:00
-last-run-duration: 0.8s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T15:52:21.360416322+00:00
+last-run-duration: 0.7s
 ---
 
 ## Description
