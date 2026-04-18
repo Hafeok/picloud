@@ -2,7 +2,7 @@
 id: TC-351
 title: Event store append then read returns the appended event within bounded latency
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-008
@@ -11,8 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc351_event_store_append_then_read_returns_event
-last-run: 2026-04-18T11:08:57.067964109+00:00
-last-run-duration: 0.7s
+last-run: 2026-04-18T13:20:29.293271188+00:00
+last-run-duration: 0.6s
 ---
 
 ## Description

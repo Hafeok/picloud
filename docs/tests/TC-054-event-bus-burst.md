@@ -11,7 +11,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "event-bus-burst"
-last-run: 2026-04-18T11:08:48.461897691+00:00
+last-run: 2026-04-18T13:20:29.293271188+00:00
 last-run-duration: 0.0s
 ---
 
