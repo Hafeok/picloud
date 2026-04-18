@@ -11,8 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc351_event_store_append_then_read_returns_event
-last-run: 2026-04-18T13:20:29.293271188+00:00
-last-run-duration: 0.6s
+last-run: 2026-04-18T14:11:22.107011310+00:00
+last-run-duration: 2.3s
 ---
 
 ## Description
