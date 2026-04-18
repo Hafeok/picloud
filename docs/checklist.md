@@ -703,7 +703,7 @@
 - [x] ADR-038: SPARQL CONSTRUCT Inference Rules as Platform Resources (accepted)
 - [x] TC-229: CPU temperature alert fires and resolves (exit-criteria) — passing
 
-### FT-078 — event-store resource type — managed event log + aggregate streams per Product [~]
+### FT-078 — event-store resource type — managed event log + aggregate streams per Product [x]
 
 - [x] ADR-032: Product Event Store as First-Class Storage Primitive (accepted)
 - [x] ADR-004: Event Sourcing as Platform State Foundation (accepted)
