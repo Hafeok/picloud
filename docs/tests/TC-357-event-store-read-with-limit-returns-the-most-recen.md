@@ -2,7 +2,7 @@
 id: TC-357
 title: Event store read with limit returns the most recent events per product
 type: scenario
-status: failing
+status: passing
 runner: cargo-test
 runner-args: "tc357_event_store_read_limit_returns_latest"
 validates:
@@ -12,9 +12,8 @@ validates:
   adrs:
   - ADR-032
 phase: 3
-last-run: 2026-04-18T14:42:39.406519470+00:00
+last-run: 2026-04-18T15:41:57.068082457+00:00
 last-run-duration: 0.6s
-failure-message: "No matching test function found (0 tests ran)"
 ---
 
 ## Description

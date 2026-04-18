@@ -2,7 +2,7 @@
 id: FT-008
 title: Product Event Store
 phase: 2
-status: in-progress
+status: complete
 depends-on:
 - FT-005
 adrs:

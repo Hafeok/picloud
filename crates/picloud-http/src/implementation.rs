@@ -3573,13 +3573,30 @@ async fn handle_event_store_api_read(
 
     let limit: usize = params.get("limit").and_then(|l| l.parse().ok()).unwrap_or(100);
 
-    // Read all events from the log and filter by product scope
+    // Read all events from the log and filter by product scope.
+    //
+    // Returns the *most recent* `limit` events for the Product in
+    // most-recent-first order. Taking `limit` from the head of the
+    // chronological iterator would silently hide freshly-appended events
+    // once the store accumulates more than `limit` entries for the
+    // Product (see TC-357).
     let all_events = event_log.events_since(0).await;
-    let product_events: Vec<_> = all_events
+    let mut product_events: Vec<_> = all_events
         .into_iter()
         .filter(|e| e.product.as_deref() == Some(product.as_str()))
-        .take(limit)
         .collect();
+
+    // Keep the newest `limit` events. The event log is chronological
+    // (oldest first), so the tail holds the freshest entries.
+    if product_events.len() > limit {
+        let drop = product_events.len() - limit;
+        product_events.drain(0..drop);
+    }
+
+    // Reverse to most-recent-first — a just-appended event therefore
+    // appears at index 0, matching any sensible event-log consumer's
+    // expectation.
+    product_events.reverse();
 
     let events_json: Vec<serde_json::Value> = product_events
         .iter()
