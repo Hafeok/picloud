@@ -12,7 +12,7 @@ validates:
   adrs:
   - ADR-046
 phase: 3
-last-run: 2026-04-18T15:52:21.360416322+00:00
+last-run: 2026-04-18T15:53:16.499496119+00:00
 last-run-duration: 0.7s
 ---
 

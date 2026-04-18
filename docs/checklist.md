@@ -473,7 +473,7 @@
 - [x] TC-350: Telemetry SQL query endpoint returns 200 on simple parquet read (scenario) — passing
 - [x] TC-356: JsonlTelemetryStore used by main binary supports SQL queries (scenario) — passing
 
-### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [~]
+### FT-045 — DataFusion SQL over Parquet via picloud telemetry query [x]
 
 - [x] TC-258: DataFusion SQL query returns traces from Parquet store (scenario) — passing
 - [x] TC-315: DataFusion exit — SQL query over Parquet returns traces (exit-criteria) — passing
