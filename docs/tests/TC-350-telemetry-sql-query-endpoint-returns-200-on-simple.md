@@ -11,7 +11,7 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc350_telemetry_sql_query_endpoint_returns_200
-last-run: 2026-04-18T14:10:26.725305462+00:00
+last-run: 2026-04-18T14:10:55.275365608+00:00
 last-run-duration: 0.7s
 ---
 
