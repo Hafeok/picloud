@@ -137,10 +137,33 @@ impl ServerConfig {
             .unwrap_or_else(|| "/var/lib/picloud".to_string());
 
         // --- per-instance (env-only, never from TOML) ---
+        //
+        // Precedence: env override > persisted file > freshly generated.
+        // Persisting the node_id to disk (TC-358) keeps the same Raft
+        // node ID across restarts, preventing the "fresh UUID each boot"
+        // behaviour that caused cluster_id mismatches on the Pi 5 cluster.
+        let node_id_path = PathBuf::from(format!("{data_root}/node_id"));
         let node_id = std::env::var("PICLOUD_NODE_ID")
             .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(Uuid::new_v4);
+            .and_then(|s| s.parse::<Uuid>().ok())
+            .or_else(|| {
+                std::fs::read_to_string(&node_id_path)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<Uuid>().ok())
+            })
+            .unwrap_or_else(|| {
+                let id = Uuid::new_v4();
+                if let Some(parent) = node_id_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(e) = std::fs::write(&node_id_path, id.to_string()) {
+                    eprintln!(
+                        "WARN: Failed to persist node_id to {}: {e}",
+                        node_id_path.display()
+                    );
+                }
+                id
+            });
 
         let node_name = std::env::var("PICLOUD_NODE_NAME")
             .unwrap_or_else(|_| hostname().unwrap_or_else(|| format!("pi-{}", &node_id.to_string()[..8])));
@@ -300,21 +323,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let raft_node_id = picloud_cluster::node_id_from_uuid(&config.node_id);
     let raft_addr = format!("{}:{}", config.bind_addr, config.http_port);
 
-    // Check if there are already peers discovered via mDNS.
-    // If no peers exist, this is the first node — bootstrap a single-node Raft cluster.
-    // If peers exist, start without initial members and wait to be added by the leader.
+    // 2b-0. Discovery window (TC-358 / FT-013).
+    //
+    // Background: the previous implementation checked `peers.is_empty()`
+    // synchronously right after `MdnsCluster::start` returned. That happens
+    // within ~16 ms of mDNS registration — long before the async browse
+    // loop has had time to observe any peer TXT records. Two picloud-server
+    // processes started within the same few seconds on the same LAN both
+    // hit this branch, each bootstrapped a single-node Raft cluster, and
+    // were left with mismatched `cluster_id` values that could never merge.
+    //
+    // The fix: after starting mDNS, wait a short window (default 3 s,
+    // tunable via `PICLOUD_DISCOVERY_WINDOW_SECS`) so peers have time to
+    // announce themselves via multicast. Then — only if peers were actually
+    // discovered — use a deterministic lowest-UUID tiebreaker to decide
+    // which node bootstraps. The others start Raft without initial members
+    // and wait to be added as learners by the leader (same code path as
+    // before, just reached via the stable tiebreaker instead of a race).
+    let discovery_window_secs: u64 = std::env::var("PICLOUD_DISCOVERY_WINDOW_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3);
+
+    // Skip the wait when the caller opts out (e.g. an explicit
+    // single-node bootstrap or tests that drive discovery synchronously).
+    if discovery_window_secs > 0 {
+        info!(
+            discovery_window_secs,
+            "Waiting for mDNS discovery window before Raft bootstrap decision"
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(discovery_window_secs)).await;
+    }
+
     let peers = cluster.peers().all();
     let initial_members = if peers.is_empty() {
-        info!("No peers discovered — bootstrapping as single-node Raft cluster");
+        info!(
+            "No peers discovered within {} s window — bootstrapping as single-node Raft cluster",
+            discovery_window_secs
+        );
         let mut members = std::collections::BTreeMap::new();
         members.insert(raft_node_id, openraft::BasicNode::new(&raft_addr));
         Some(members)
     } else {
-        info!(
-            peer_count = peers.len(),
-            "Peers already discovered — starting Raft without bootstrap (will be added by leader)"
-        );
-        None
+        // Peers exist. Use lowest UUID as deterministic tiebreaker so
+        // exactly one of the racing nodes bootstraps — the others start
+        // Raft without initial members and will be added as learners by
+        // whichever node ends up bootstrapping.
+        let min_peer_id = peers.iter().map(|p| p.node_id).min().unwrap();
+        if config.node_id < min_peer_id {
+            info!(
+                peer_count = peers.len(),
+                "Peers discovered but this node has the lowest UUID — bootstrapping"
+            );
+            let mut members = std::collections::BTreeMap::new();
+            members.insert(raft_node_id, openraft::BasicNode::new(&raft_addr));
+            Some(members)
+        } else {
+            info!(
+                peer_count = peers.len(),
+                lowest_peer = %min_peer_id,
+                "Peers discovered with a lower UUID — starting Raft without bootstrap (will be added by leader)"
+            );
+            None
+        }
     };
 
     // 2b-i. Optionally configure mTLS for Raft inter-node RPCs.

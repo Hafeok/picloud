@@ -1169,7 +1169,23 @@ pub async fn create_persistent_raft_node_with_tls(
 
     if let Some(members) = members {
         info!(node_id, "Initializing persistent Raft cluster with members");
-        raft.initialize(members).await?;
+        // `initialize` returns an error if the store is already initialized
+        // (e.g. restart from an existing sled directory). That is a benign
+        // no-op for us — the persisted state is authoritative — so we log
+        // and continue instead of propagating. This is the fix for the
+        // TC-358 symptom "not allowed to initialize due to current raft
+        // state" observed on restart.
+        if let Err(e) = raft.initialize(members).await {
+            let msg = e.to_string();
+            if msg.contains("not allowed to initialize") || msg.contains("NotAllowed") {
+                info!(
+                    node_id,
+                    "Raft store already initialized — preserving persisted state"
+                );
+            } else {
+                return Err(Box::new(e));
+            }
+        }
     }
 
     Ok(raft)

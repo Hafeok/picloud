@@ -2,16 +2,15 @@
 id: TC-358
 title: Two picloud-server processes on separate Pi nodes join a single Raft cluster via mDNS
 type: scenario
-status: failing
+status: passing
 runner: cargo-test
 runner-args: "tc358_two_picloud_server_processes_join_single_cluster_via_mdns"
 validates:
   features: [FT-013, FT-014]
   adrs: [ADR-004]
 phase: 1
-last-run: 2026-04-18T18:01:56.030164399+00:00
-last-run-duration: 0.7s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-18T18:30:22.849110776+00:00
+last-run-duration: 1.6s
 ---
 
 ## Description

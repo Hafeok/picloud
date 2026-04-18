@@ -685,9 +685,15 @@ async fn handle_cluster_root(
         vec![]
     };
 
-    // Include cluster_id if cluster identity store is available
+    // Include cluster_id. Once Raft has formed a cluster, this is the
+    // canonical leader's node ID — shared across every node in the cluster
+    // (TC-358 invariant). Before Raft stabilises, fall back to the local
+    // node ID so a single-node bootstrap still reports something useful.
     let cluster_id = if let Some(ref cluster) = state.cluster {
-        cluster.local_node_id().await.to_string()
+        match cluster.leader_id().await {
+            Ok(leader) => leader.to_string(),
+            Err(_) => cluster.local_node_id().await.to_string(),
+        }
     } else {
         String::new()
     };
