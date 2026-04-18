@@ -11,7 +11,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "failed-upgrade-rollback"
-last-run: 2026-04-18T13:20:29.293271188+00:00
+last-run: 2026-04-18T14:42:27.228653472+00:00
 last-run-duration: 0.0s
 ---
 

@@ -2,7 +2,7 @@
 id: FT-078
 title: event-store resource type — managed event log + aggregate streams per Product
 phase: 3
-status: complete
+status: in-progress
 depends-on: []
 adrs:
 - ADR-032
@@ -10,6 +10,7 @@ adrs:
 tests:
 - TC-230
 - TC-351
+- TC-357
 domains: []
 domains-acknowledged: {}
 ---
