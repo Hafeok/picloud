@@ -11,8 +11,8 @@ validates:
 phase: 2
 runner: cargo-test
 runner-args: tc246_volume_snapshot_created_on_schedule_and_restorable_to_new_volume
-last-run: 2026-04-17T15:53:18.898927832+00:00
-last-run-duration: 0.9s
+last-run: 2026-04-18T11:08:58.593422020+00:00
+last-run-duration: 1.1s
 ---
 
 ## Description

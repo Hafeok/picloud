@@ -2,7 +2,7 @@
 id: FT-045
 title: DataFusion SQL over Parquet via picloud telemetry query
 phase: 2
-status: complete
+status: in-progress
 depends-on: []
 adrs: []
 tests:

@@ -16,7 +16,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "iac-cli-exit-criteria"
-last-run: 2026-04-17T19:13:38.300193890+00:00
+last-run: 2026-04-17T19:41:56.446965639+00:00
 last-run-duration: 0.0s
 ---
 

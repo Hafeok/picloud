@@ -11,7 +11,7 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "sparql-iam-enforcement"
-last-run: 2026-04-17T15:53:27.871008242+00:00
+last-run: 2026-04-18T11:08:48.461897691+00:00
 last-run-duration: 0.0s
 ---
 

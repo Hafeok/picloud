@@ -2,7 +2,7 @@
 id: TC-353
 title: E2E test harness cleans up products across runs
 type: scenario
-status: failing
+status: passing
 validates:
   features:
   - FT-007
@@ -11,9 +11,8 @@ validates:
 phase: 4
 runner: cargo-test
 runner-args: tc353_e2e_harness_cleans_up_products_across_runs
-last-run: 2026-04-17T19:13:38.300193890+00:00
-last-run-duration: 0.6s
-failure-message: "No matching test function found (0 tests ran)"
+last-run: 2026-04-17T19:41:56.446965639+00:00
+last-run-duration: 78.3s
 ---
 
 ## Description

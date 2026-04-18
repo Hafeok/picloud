@@ -11,8 +11,8 @@ validates:
 phase: 1
 runner: scripts/run-tc.sh
 runner-args: "inter-product-event-delivery"
-last-run: 2026-04-17T15:53:27.871008242+00:00
-last-run-duration: 0.0s
+last-run: 2026-04-18T11:08:48.461897691+00:00
+last-run-duration: 0.1s
 ---
 
 product A emits an event to the platform bus. Product B has a declared `event-subscription` resource for that event type. Assert product B's workload receives the event within 5 seconds. Assert event appears in the RDF graph.
