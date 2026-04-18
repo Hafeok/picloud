@@ -208,7 +208,7 @@
 - [x] TC-293: mDNS discovery exit — all nodes discovered and joined within timeout (exit-criteria) — passing
 - [x] TC-355: Cluster node listing reflects all mDNS-discovered peers (scenario) — passing
 
-### FT-014 — Raft consensus and leader election (openraft) [~]
+### FT-014 — Raft consensus and leader election (openraft) [x]
 
 - [x] TC-224: Two-node cluster runs a containerized workload with a replicated volume (exit-criteria) — passing
 - [x] TC-225: Cluster survives one node restart without data loss (exit-criteria) — passing

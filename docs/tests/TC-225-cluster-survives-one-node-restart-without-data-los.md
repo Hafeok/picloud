@@ -12,8 +12,8 @@ validates:
 phase: 1
 runner: cargo-test
 runner-args: "tc225_cluster_survives_one_node_restart_without_data_loss"
-last-run: 2026-04-17T15:53:25.405693997+00:00
-last-run-duration: 1.2s
+last-run: 2026-04-18T13:18:56.552889588+00:00
+last-run-duration: 0.6s
 ---
 
 ## Description
